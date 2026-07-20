@@ -1,0 +1,78 @@
+# Intuizi CLI
+
+The official command-line interface for the [Intuizi](https://intuizi.com) data
+signal platform. A single-binary client for the Intuizi API v2: manage
+audiences, activations, cohorts, and POI data from your terminal, scripts, or
+CI.
+
+> **Status: pre-alpha.** This repository was just created and the CLI is under
+> active development. Nothing is released yet - the interface below describes
+> the planned v0.1.0 surface and may change.
+
+## Why a CLI
+
+Intuizi already has three surfaces: the web Console for browser users, the
+REST API v2 for integrations, and an MCP server for AI agents. The CLI
+completes the set for humans working in terminals and for automation in
+scripts and CI pipelines.
+
+## Planned installation
+
+```bash
+# Homebrew (macOS / Linux)
+brew install intuizi/tap/intuizi
+
+# npm (any platform with Node)
+npm install -g @intuizi/cli
+
+# Or download a binary from GitHub Releases
+```
+
+No runtime dependencies - the CLI ships as a single static Go binary for
+macOS, Linux, and Windows (amd64 and arm64).
+
+## Planned usage
+
+```bash
+# Authenticate once; stores a bearer token in ~/.config/intuizi/
+intuizi auth login
+
+# Look up reference data for building audiences
+intuizi reference providers
+intuizi reference countries
+
+# Create an audience from a payload file and activate it
+intuizi audiences create --file audience.json
+intuizi activations create --file activation.json --wait
+
+# Everything supports --json for scripting
+intuizi audiences list --json
+```
+
+In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
+
+## Design
+
+- **Pure API v2 client.** Every command maps to a documented endpoint of the
+  Intuizi API v2 (`https://console.intuizi.com/api/v2`). No server-side
+  logic lives here.
+- **Full v2 parity.** Auth, audiences (including refine and crosspurchase),
+  activations, cohorts, POI, and reference reads.
+- **Human first, script friendly.** Readable tables by default, `--json` for
+  raw responses, non-zero exit codes on API errors.
+
+## Development
+
+Requires Go 1.22+.
+
+```bash
+make build   # build ./bin/intuizi
+make test    # go test ./...
+make lint    # golangci-lint
+```
+
+## Related
+
+- Intuizi API v2 reference - the source of truth for every endpoint this CLI
+  wraps (see the developer docs published from the `intuizi-console` repo).
+- Intuizi MCP server - the AI-agent surface built on the same API.
