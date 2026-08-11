@@ -130,7 +130,7 @@ func storedTokenUsable(ctx context.Context, base string) bool {
 	}
 
 	// Not expired is not enough - it may have been revoked in the console.
-	err = api.New(base, tok).Get(ctx, verifyPath, nil)
+	err = api.New(base, tok).Get(ctx, verifyPath, nil, nil)
 	if err == nil {
 		return true
 	}
@@ -223,7 +223,7 @@ var authStatusCmd = &cobra.Command{
 
 		if statusVerify {
 			c := api.New(base, token)
-			if err := c.Get(cmd.Context(), verifyPath, nil); err != nil {
+			if err := c.Get(cmd.Context(), verifyPath, nil, nil); err != nil {
 				// Only a 401 means the token is the problem. A 500, a timeout or
 				// a bad URL would otherwise send people off to re-authenticate.
 				if errors.Is(err, api.ErrUnauthorized) {
