@@ -13,13 +13,19 @@ import (
 // version is injected at build time via -ldflags "-X ...version=<tag>".
 var version = "dev"
 
-var baseURLFlag string
+var baseURLFlag, idempotencyKeyFlag string
 
 var rootCmd = &cobra.Command{
 	Use:           "intuizi",
 	Short:         "Intuizi CLI",
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	// Runs after flag parsing, before any subcommand. Note cobra runs only the
+	// closest PersistentPreRun in the tree: a subcommand that defines its own
+	// must repeat this assignment or --idempotency-key is silently ignored.
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		api.IdempotencyKey = idempotencyKeyFlag
+	},
 }
 
 func Execute() {
@@ -42,6 +48,10 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&baseURLFlag, "base-url", "",
 		"Console base URL (default "+config.DefaultBaseURL+")")
+
+	rootCmd.PersistentFlags().StringVar(&idempotencyKeyFlag, "idempotency-key", "",
+		"Reuse this Idempotency-Key on create commands, to retry a create whose "+
+			"outcome is unknown (default: a fresh key per create)")
 
 	rootCmd.AddCommand(versionCmd)
 }
