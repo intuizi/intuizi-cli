@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +19,14 @@ const apiPrefix = "/api/v2"
 
 // UserAgent is overridden from cmd at startup to include the build version.
 var UserAgent = "intuizi-cli"
+
+// Retry policy for 429s. The write bucket allows 30 requests/min and reads 120,
+// so a rate-limited CLI is nearly always with waiting out rather than failing.
+const (
+	maxRetries      = 2
+	fallbackRetryIn = 5 * time.Second
+	maxRetryIn      = 60 * time.Second
+)
 
 type Client struct {
 	BaseURL string
@@ -42,61 +52,145 @@ type envelope struct {
 	Errors  map[string]any  `json:"errors"`
 }
 
-// Get issues an authenticated GET and unmarshals data into out.
-// Pass nil for out to discard the body.
-func (c *Client) Get(ctx context.Context, path string, out any) error {
-	return c.do(ctx, http.MethodGet, path, nil, out)
+// Get issues an authenticated GET and unmarshals the envelope's data into out.
+// Pass a nil query for no parameters, and nil out to discard the body.
+func (c *Client) Get(ctx context.Context, path string, query url.Values, out any) error {
+	raw, err := c.do(ctx, http.MethodGet, path, query, nil)
+	if err != nil {
+		return err
+	}
+	return unmarshalData(raw, path, out)
 }
 
 // Post issues an authenticated POST with a JSON body.
 func (c *Client) Post(ctx context.Context, path string, body, out any) error {
-	return c.do(ctx, http.MethodPost, path, body, out)
+	raw, err := c.do(ctx, http.MethodPost, path, nil, body)
+	if err != nil {
+		return err
+	}
+	return unmarshalData(raw, path, out)
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
-	var reader io.Reader
+// do sends one request and returns the envelope's raw data field, so callers can
+// decode it as an object, a bare array or a paginated wrapper.
+func (c *Client) do(ctx context.Context, method, path string, query url.Values, body any) (json.RawMessage, error) {
+	var payload []byte
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("encoding request body: %w", err)
+			return nil, fmt.Errorf("encoding request body: %w", err)
 		}
-		reader = bytes.NewReader(encoded)
+		payload = encoded
 	}
 
-	url := c.BaseURL + apiPrefix + path
+	// One key per logical create, chosen before the retry loop so every attempt
+	// carries the same logical key. That is what makes the 429 retry safe on creates:
+	// only 2xx responses are stored server-side, so the retry either replays the
+	// original success or re-executes a create that never ran.
+	var key string
+	if isIdempotent(path) {
+		key = nextIdempotencyKey()
+	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, reader)
+	target := c.BaseURL + apiPrefix + path
+	if len(query) > 0 {
+		target += "?" + query.Encode()
+	}
+
+	for attempt := 0; ; attempt++ {
+		// Rebuilt every attempt: a request body reader is consumed by the first
+		// send, so retrying the same *http.Request would post an empty body.
+		req, err := c.newRequest(ctx, method, target, key, payload)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("calling %s: %w", target, err)
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
+			wait := retryAfter(resp.Header.Get("Retry-After"))
+			// Drain a little before closing so the connection can be reused.
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
+			resp.Body.Close()
+			if err := sleep(ctx, wait); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
+		data, err := readEnvelope(resp, target)
+		resp.Body.Close()
+		return data, err
+	}
+}
+
+// retryAfter reads the Retry-After header, which the API sends as seconds. An
+// absent or unparseable value falls back to a fixed wait rather than retrying
+// immediately, and an absurd one is capped so the CLI cannot hang for minutes.
+func retryAfter(header string) time.Duration {
+	sec, err := strconv.Atoi(strings.TrimSpace(header))
+	if err != nil || sec <= 0 {
+		return fallbackRetryIn
+	}
+	if wait := time.Duration(sec) * time.Second; wait < maxRetryIn {
+		return wait
+	}
+	return maxRetryIn
+}
+
+// sleep waits for d unless the context is cancelled first - time.Sleep would
+// swallow a Ctrl-C for up to a minute.
+func sleep(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// newRequest builds one attempt. Kept separate from do because a request body
+// reader is consumed by the first send, so a retry needs a freshly built request
+// over the same bytes.
+func (c *Client) newRequest(ctx context.Context, method, target, key string, payload []byte) (*http.Request, error) {
+	var reader io.Reader
+	if payload != nil {
+		reader = bytes.NewReader(payload)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, target, reader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Accept is mandatory: the v2 group is json-only and answers 406 without it.
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", UserAgent)
-	if body != nil {
+	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
-
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return fmt.Errorf("calling %s: %w", url, err)
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
 	}
-	defer resp.Body.Close()
-
-	return decode(resp, url, out)
+	return req, nil
 }
 
-// decode turns a response into either an *Error or the unmarshalled data field.
-func decode(resp *http.Response, url string, out any) error {
+// readEnvelope maps a response to either an *Error or the raw data field.
+func readEnvelope(resp *http.Response, target string) (json.RawMessage, error) {
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("reading response: %w", err)
+		return nil, fmt.Errorf("reading response: %w", err)
 	}
 
-	// Parse leniently: a proxy can return HTML, and the status code still matters.
+	// parse leniently: a proxy can return HTML, and the status code still matters.
 	var env envelope
 	parsed := json.Unmarshal(raw, &env) == nil
 
@@ -106,8 +200,8 @@ func decode(resp *http.Response, url string, out any) error {
 			apiErr.Message = env.Message
 			apiErr.Errors = env.Errors
 
-			// Validation failures nest errors under data instead of at the top
-			// level. Data may also be an array or absent, so ignore failures.
+			// Validation failures nest under data instead of at the top level.
+			// Data may also be array or absent so ignore failures.
 			if apiErr.Errors == nil && len(env.Data) > 0 {
 				var nested struct {
 					Errors map[string]any `json:"errors"`
@@ -117,19 +211,28 @@ func decode(resp *http.Response, url string, out any) error {
 				}
 			}
 		}
-		return apiErr
+		return nil, apiErr
 	}
 
+	// A 2xx with no body is a success with nothing to decode, not a malformed response.
+	// Nothing in v2 returns 204: this is defensive.
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, nil
+	}
+	if !parsed {
+		return nil, fmt.Errorf("malformed JSON response from %s", target)
+	}
+	return env.Data, nil
+}
+
+func unmarshalData(raw json.RawMessage, path string, out any) error {
 	if out == nil {
 		return nil
 	}
-	if !parsed {
-		return fmt.Errorf("malformed JSON response from %s", url)
+	if len(raw) == 0 {
+		return fmt.Errorf("response from %s contained no data field", path)
 	}
-	if len(env.Data) == 0 {
-		return fmt.Errorf("response from %s contained no data field", url)
-	}
-	if err := json.Unmarshal(env.Data, out); err != nil {
+	if err := json.Unmarshal(raw, out); err != nil {
 		return fmt.Errorf("decoding response data: %w", err)
 	}
 	return nil
