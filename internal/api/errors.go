@@ -35,6 +35,17 @@ func (e *Error) Error() string {
 		// The v2 routes carry json-only middleware. If this fires, something
 		// stripped our Accept header rather than the user doing anything wrong.
 		return fmt.Sprintf("server rejected the request as non-JSON (406): %s", msg)
+	case http.StatusForbidden:
+		// The token is valid but the account lacks a permission - unlike a 401,
+		// logging in again will not help.
+		msg = "permission denied: " + msg
+	case http.StatusNotFound:
+		msg = "not found: " + msg
+	case http.StatusConflict:
+		// Only the create routes return 409: an Idempotency-Key is a promise
+		// tthat the request is the same one, and it was broken
+		msg += " (an Idempotency-Key was reused with a different body, or the " +
+			"original create is still in flight - use a fresh key for a new create)"
 	}
 
 	if len(e.Errors) == 0 {
