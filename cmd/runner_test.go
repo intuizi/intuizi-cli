@@ -45,12 +45,22 @@ func stub(t *testing.T, body string) (*httptest.Server, *capture) {
 }
 
 // run executes one command against the stub, returning stdout and stderr.
+// jsonOutput is forced off so a leaked --json from another test cannot change
+// what this one sees; runJSON is the opt-in for testing the --json path.
 func run(t *testing.T, cmd *cobra.Command, srv *httptest.Server, args ...string) (string, string, error) {
+	return exec(t, false, cmd, srv, args...)
+}
+
+func runJSON(t *testing.T, cmd *cobra.Command, srv *httptest.Server, args ...string) (string, string, error) {
+	return exec(t, true, cmd, srv, args...)
+}
+
+func exec(t *testing.T, asJSON bool, cmd *cobra.Command, srv *httptest.Server, args ...string) (string, string, error) {
 	t.Helper()
 	t.Setenv("INTUIZI_API_TOKEN", "tok")
 
 	prevBase, prevJSON := baseURLFlag, jsonOutput
-	baseURLFlag, jsonOutput = srv.URL, false
+	baseURLFlag, jsonOutput = srv.URL, asJSON
 	t.Cleanup(func() { baseURLFlag, jsonOutput = prevBase, prevJSON })
 
 	var out, errb bytes.Buffer
@@ -434,5 +444,40 @@ func TestUsageRendersBreakdown(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("usage output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// --json must print the envelope the server sent, on writes as well as reads.
+// A create that printed a bare data array while list printed a full envelope
+// would force a script to parse the two differently.
+func TestCreateJSONPrintsTheEnvelopeNotJustData(t *testing.T) {
+	srv, _ := stub(t, created)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.json")
+	if err := os.WriteFile(path, []byte(`{"name":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, _, err := runJSON(t, audiencesCreateCommand(), srv, "--file", path)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for _, want := range []string{`"status"`, `"code"`, `"data"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("create --json output is missing %s:\n%s", want, out)
+		}
+	}
+}
+
+func TestDeleteJSONPrintsTheEnvelopeNotJustData(t *testing.T) {
+	srv, _ := stub(t, `{"status":"success","code":200,"message":"ok","data":[]}`)
+
+	out, _, err := runJSON(t, deleteCommand("audience", audiencesPrefix), srv, "88", "--yes")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(out, `"status"`) || !strings.Contains(out, `"code"`) {
+		t.Errorf("delete --json output is not an envelope:\n%s", out)
 	}
 }
