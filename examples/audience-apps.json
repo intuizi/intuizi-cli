@@ -1,0 +1,13 @@
+{
+  "name": "Apps action gamers - US",
+  "datasets": [
+    {
+      "type": "Apps",
+      "start_date": "2026-08-13",
+      "end_date": "2026-08-15",
+      "signal_providers": ["ef3d56f1305f0f8f28bdf35eb524d729"],
+      "categories": [1],
+      "location": { "countries": ["USA"] }
+    }
+  ]
+}
