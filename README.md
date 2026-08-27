@@ -39,7 +39,7 @@ intuizi auth login
 
 # Look up reference data for building audiences
 intuizi reference common dataset-types
-intuizi reference common states --countries US
+intuizi reference common states --countries USA
 intuizi reference apps categories --search fitness
 
 # Create an audience from a payload file and activate it
