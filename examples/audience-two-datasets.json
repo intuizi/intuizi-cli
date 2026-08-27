@@ -1,21 +1,21 @@
 {
-  "name": "Coffee visitors who also use fitness apps",
-  "operator": "AND",
+  "name": "Apps OR Web - US - 1 week",
+  "operator": "OR",
   "datasets": [
     {
-      "type": "POI",
-      "start_date": "2025-01-01",
-      "end_date": "2025-03-31",
-      "signal_providers": ["BID001"],
-      "categories": [101],
+      "type": "Apps",
+      "start_date": "2026-08-09",
+      "end_date": "2026-08-15",
+      "signal_providers": ["ef3d56f1305f0f8f28bdf35eb524d729"],
+      "categories": [1],
       "location": { "countries": ["USA"] }
     },
     {
-      "type": "Apps",
-      "start_date": "2025-01-01",
-      "end_date": "2025-03-31",
-      "signal_providers": ["BID001"],
-      "categories": [42],
+      "type": "WebDomain",
+      "start_date": "2026-08-09",
+      "end_date": "2026-08-15",
+      "signal_providers": ["80791f138dc009b67aabd14f3add93b3"],
+      "iab_category_codes": [1],
       "location": { "countries": ["USA"] }
     }
   ]
