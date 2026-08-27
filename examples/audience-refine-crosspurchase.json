@@ -1,0 +1,24 @@
+{
+  "name": "Top coffee visitors vs dining purchases",
+  "datasets": [
+    {
+      "type": "POI",
+      "start_date": "2025-01-01",
+      "end_date": "2025-03-31",
+      "signal_providers": ["BID001"],
+      "categories": [101],
+      "location": { "countries": ["USA"] },
+      "refine": {
+        "type": "percentile",
+        "metric": "visit_count",
+        "value": 10,
+        "fraud_cutoff_percentile": 99
+      }
+    }
+  ],
+  "crosspurchase": {
+    "start_date": "2025-01-01",
+    "end_date": "2025-02-28",
+    "target_categories": [1]
+  }
+}
