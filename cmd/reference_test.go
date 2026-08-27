@@ -27,11 +27,15 @@ func referenceEndpoints(t *testing.T) map[string]endpoint {
 	return all
 }
 
-// wantPaths is the 36 reads the CLI exposes. A row added or dropped without
-// updating this list fails the coverage test below.
+// wantPaths is every documented reference endpoint. A row added or dropped
+// without updating this list fails the coverage test below.
 var wantPaths = []string{
+	"/analyses/reference/affinity-transactions/ages",
 	"/analyses/reference/affinity-transactions/brands",
 	"/analyses/reference/affinity-transactions/categories",
+	"/analyses/reference/affinity-transactions/ethnicities",
+	"/analyses/reference/affinity-transactions/genders",
+	"/analyses/reference/affinity-transactions/incomes",
 	"/analyses/reference/affinity-transactions/subcategories",
 	"/analyses/reference/apps/bundle-ids",
 	"/analyses/reference/apps/categories",
@@ -42,8 +46,17 @@ var wantPaths = []string{
 	"/analyses/reference/common/cities",
 	"/analyses/reference/common/countries",
 	"/analyses/reference/common/dataset-types",
+	"/analyses/reference/common/datastreams",
 	"/analyses/reference/common/dmas",
+	"/analyses/reference/common/endpoint-connections",
+	"/analyses/reference/common/endpoint-partners",
+	"/analyses/reference/common/languages",
 	"/analyses/reference/common/operators",
+	"/analyses/reference/common/pricing-models",
+	"/analyses/reference/common/schedule-endings",
+	"/analyses/reference/common/schedule-frequencies",
+	"/analyses/reference/common/schedule-windows",
+	"/analyses/reference/common/signal-providers",
 	"/analyses/reference/common/states",
 	"/analyses/reference/common/zipcodes",
 	"/analyses/reference/ctv/channel-names",
@@ -56,19 +69,30 @@ var wantPaths = []string{
 	"/analyses/reference/ctv/isps",
 	"/analyses/reference/ctv/series",
 	"/analyses/reference/ctv/vendors",
+	"/analyses/reference/deidentified/fields",
+	"/analyses/reference/demographics/ages",
+	"/analyses/reference/demographics/genders",
+	"/analyses/reference/demographics/incomes",
+	"/analyses/reference/demographics/marital-statuses",
 	"/analyses/reference/poi/brands",
 	"/analyses/reference/poi/categories",
 	"/analyses/reference/poi/locations",
 	"/analyses/reference/poi/segments",
+	"/analyses/reference/profile-attributes/categories",
+	"/analyses/reference/profile-attributes/keys",
+	"/analyses/reference/profile-attributes/recency-limits",
+	"/analyses/reference/profile-attributes/values",
 	"/analyses/reference/web/browsers",
 	"/analyses/reference/web/device-makes",
 	"/analyses/reference/web/device-oses",
 	"/analyses/reference/web/device-types",
 	"/analyses/reference/web/domains",
+	"/analyses/reference/web/iab-categories",
+	"/analyses/reference/web/iab-subcategories",
 	"/analyses/reference/web/ref-domains",
 }
 
-func TestReferenceCoversEveryScopedPath(t *testing.T) {
+func TestReferenceCoversEveryDocumentedPath(t *testing.T) {
 	built := make(map[string]bool)
 	for _, g := range referenceGroups {
 		for _, e := range g.endpoints {
@@ -89,8 +113,8 @@ func TestReferenceCoversEveryScopedPath(t *testing.T) {
 	for extra := range built {
 		t.Errorf("command builds %s, which is not in wantPaths", extra)
 	}
-	if len(wantPaths) != 36 {
-		t.Errorf("wantPaths has %d entries, want 36", len(wantPaths))
+	if len(wantPaths) != 60 {
+		t.Errorf("wantPaths has %d entries, want 60", len(wantPaths))
 	}
 }
 
@@ -134,13 +158,16 @@ func TestReferenceTableIsWellFormed(t *testing.T) {
 	}
 }
 
-// TestReferenceRequiredParams pins the four reads with required parameters.
+// TestReferenceRequiredParams pins the seven reads with required parameters.
 func TestReferenceRequiredParams(t *testing.T) {
 	want := map[string][]string{
-		"common/states":   {"countries"},
-		"common/cities":   {"states"},
-		"common/dmas":     {"countries"},
-		"common/zipcodes": {"cities"},
+		"common/states":           {"countries"},
+		"common/cities":           {"states"},
+		"common/dmas":             {"countries"},
+		"common/zipcodes":         {"cities"},
+		"common/signal-providers": {"dataType"},
+		"common/pricing-models":   {"partner_id"},
+		"common/datastreams":      {"partner_id"},
 	}
 
 	for key, e := range referenceEndpoints(t) {
@@ -356,14 +383,11 @@ func findEndpoint(t *testing.T, group, item string) endpoint {
 	return endpoint{}
 }
 
-// No current row uses an int scalar or noSearch, but the builder supports both
-// so a new row stays one line. Tested against synthetic endpoints.
+// An int scalar is not bracketed: only slice params repeat under name[].
 func TestBuilderHandlesIntScalarParams(t *testing.T) {
 	srv, queries := serve(t, flatBody)
 
-	e := endpoint{item: "pricing-models", short: "synthetic", params: []param{
-		{name: "partner_id", kind: num, help: "Endpoint partner id"},
-	}}
+	e := findEndpoint(t, "common", "pricing-models")
 	runCmd(t, "common", e, srv.URL, "--partner-id", "3")
 
 	// Scalars are not bracketed: only slice params repeat under name[].
@@ -373,7 +397,7 @@ func TestBuilderHandlesIntScalarParams(t *testing.T) {
 }
 
 func TestBuilderOmitsSearchWhenNoSearch(t *testing.T) {
-	e := endpoint{item: "recency-limits", short: "synthetic", noSearch: true}
+	e := findEndpoint(t, "profile-attributes", "recency-limits")
 	cmd := e.command("profile-attributes")
 
 	if cmd.Flags().Lookup("search") != nil {
@@ -399,9 +423,9 @@ const (
 	pagedEnvelope = `{"status":"success","code":200,"message":"Resources fetched successfully.","data":{"items":[{"value":"US","text":"United States (US)"}],"pagination":{"current_page":1,"per_page":500,"total":1,"last_page":1}}}`
 )
 
-// TestEveryScopedEndpointWorksWithJSON is the ticket's done-when: every endpoint
+// TestEveryEndpointWorksWithJSON is the ticket's done-when: every endpoint
 // reachable, each printing a usable envelope under --json.
-func TestEveryScopedEndpointWorksWithJSON(t *testing.T) {
+func TestEveryEndpointWorksWithJSON(t *testing.T) {
 	for _, g := range referenceGroups {
 		for _, e := range g.endpoints {
 			t.Run(g.name+"/"+e.item, func(t *testing.T) {
