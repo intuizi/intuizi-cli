@@ -1,0 +1,9 @@
+{
+  "audience_id": 88,
+  "endpoint_connection_id": 12,
+  "pricing_model_id": 3,
+  "description": "Q1 retail export",
+  "datastreams": [
+    { "id": 7, "status": true, "compression": "gzip" }
+  ]
+}
