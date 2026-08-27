@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -15,6 +16,9 @@ var version = "dev"
 
 var baseURLFlag, idempotencyKeyFlag string
 
+// jsonOutput is the global --json: print the server's envelope, not a table.
+var jsonOutput bool
+
 var rootCmd = &cobra.Command{
 	Use:           "intuizi",
 	Short:         "Intuizi CLI",
@@ -26,6 +30,16 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		api.IdempotencyKey = idempotencyKeyFlag
 	},
+}
+
+// client builds an authenticated client, or explains that there is no token.
+func client() (*api.Client, error) {
+	token := config.Token()
+	if token == "" {
+		return nil, errors.New("not logged in - run 'intuizi auth login', or set " +
+			config.EnvToken + " for CI")
+	}
+	return api.New(config.BaseURL(baseURLFlag), token), nil
 }
 
 func Execute() {
@@ -48,6 +62,9 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&baseURLFlag, "base-url", "",
 		"Console base URL (default "+config.DefaultBaseURL+")")
+
+	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false,
+		"Print the raw JSON response envelope instead of a table")
 
 	rootCmd.PersistentFlags().StringVar(&idempotencyKeyFlag, "idempotency-key", "",
 		"Reuse this Idempotency-Key on create commands, to retry a create whose "+

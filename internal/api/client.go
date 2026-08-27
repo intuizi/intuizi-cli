@@ -62,6 +62,17 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values, out any
 	return unmarshalData(raw, path, out)
 }
 
+// GetRaw returns the whole response body rather than the decoded data field.
+// --json must print the envelope the server actually sent; re-marshalling the
+// decoded value would reorder keys and reformat numbers.
+func (c *Client) GetRaw(ctx context.Context, path string, query url.Values) ([]byte, error) {
+	raw, _, err := c.doRaw(ctx, http.MethodGet, path, query, nil)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 // Post issues an authenticated POST with a JSON body.
 func (c *Client) Post(ctx context.Context, path string, body, out any) error {
 	raw, err := c.do(ctx, http.MethodPost, path, nil, body)
@@ -71,14 +82,21 @@ func (c *Client) Post(ctx context.Context, path string, body, out any) error {
 	return unmarshalData(raw, path, out)
 }
 
-// do sends one request and returns the envelope's raw data field, so callers can
-// decode it as an object, a bare array or a paginated wrapper.
+// do returns just the envelope's data field, which is all most callers want.
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body any) (json.RawMessage, error) {
+	_, data, err := c.doRaw(ctx, method, path, query, body)
+	return data, err
+}
+
+// doRaw sends one request and returns both the untouched response body and the
+// envelope's data field, so callers can decode data as an object, a bare array
+// or a paginated wrapper - or hand the body straight to --json.
+func (c *Client) doRaw(ctx context.Context, method, path string, query url.Values, body any) ([]byte, json.RawMessage, error) {
 	var payload []byte
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return nil, fmt.Errorf("encoding request body: %w", err)
+			return nil, nil, fmt.Errorf("encoding request body: %w", err)
 		}
 		payload = encoded
 	}
@@ -102,12 +120,12 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		// send, so retrying the same *http.Request would post an empty body.
 		req, err := c.newRequest(ctx, method, target, key, payload)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		resp, err := c.HTTP.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("calling %s: %w", target, err)
+			return nil, nil, fmt.Errorf("calling %s: %w", target, err)
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
@@ -116,14 +134,14 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
 			resp.Body.Close()
 			if err := sleep(ctx, wait); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			continue
 		}
 
-		data, err := readEnvelope(resp, target)
+		raw, data, err := readEnvelope(resp, target)
 		resp.Body.Close()
-		return data, err
+		return raw, data, err
 	}
 }
 
@@ -183,11 +201,13 @@ func (c *Client) newRequest(ctx context.Context, method, target, key string, pay
 	return req, nil
 }
 
-// readEnvelope maps a response to either an *Error or the raw data field.
-func readEnvelope(resp *http.Response, target string) (json.RawMessage, error) {
+// readEnvelope maps a response to either an *Error or the raw data field, and
+// returns the whole body alongside it for GetRaw. The body comes back on the
+// error paths too, so the four exits stay uniform; callers check err first.
+func readEnvelope(resp *http.Response, target string) ([]byte, json.RawMessage, error) {
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
+		return nil, nil, fmt.Errorf("reading response: %w", err)
 	}
 
 	// parse leniently: a proxy can return HTML, and the status code still matters.
@@ -211,18 +231,18 @@ func readEnvelope(resp *http.Response, target string) (json.RawMessage, error) {
 				}
 			}
 		}
-		return nil, apiErr
+		return raw, nil, apiErr
 	}
 
 	// A 2xx with no body is a success with nothing to decode, not a malformed response.
 	// Nothing in v2 returns 204: this is defensive.
 	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil, nil
+		return raw, nil, nil
 	}
 	if !parsed {
-		return nil, fmt.Errorf("malformed JSON response from %s", target)
+		return raw, nil, fmt.Errorf("malformed JSON response from %s", target)
 	}
-	return env.Data, nil
+	return raw, env.Data, nil
 }
 
 func unmarshalData(raw json.RawMessage, path string, out any) error {

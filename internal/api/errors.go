@@ -78,8 +78,8 @@ func (e *Error) fieldErrors() string {
 	return strings.Join(parts, "; ")
 }
 
-// flatten renders a value that may be a string or a []string, since Laravel
-// validation returns arrays while ad-hoc errors return plain strings.
+// flatten renders a value that may be a string or a []string: validation errors
+// come back as arrays while ad-hoc errors are plain strings.
 func flatten(v any) string {
 	list, ok := v.([]any)
 	if !ok {

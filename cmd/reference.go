@@ -2,9 +2,189 @@ package cmd
 
 import "github.com/spf13/cobra"
 
+// The 36 reference reads, as a table rather than one function per endpoint:
+// endpoint.command in reference_run.go turns each row into a cobra command.
+//
+// Adding a row needs a data-classification check first, and an update to
+// wantPaths in reference_test.go. Contracts: docs-src/content/api/v2 in
+// intuizi-console.
+
+// kind decides a param's flag type and how it is written into the query. Array
+// params repeat under a "[]"-suffixed key; a comma-joined value would arrive as
+// one string.
+type kind int
+
+const (
+	str kind = iota
+	num
+	strs
+	nums
+)
+
+// param is one endpoint-specific query parameter, named exactly as the API wants
+// it; flagName derives the flag. search, page and per_page are never listed -
+// they come from the noSearch and paged fields.
+type param struct {
+	name     string
+	kind     kind
+	required bool
+	help     string
+}
+
+// endpoint is one reference read. path is set only where the URL segment differs
+// from the command name. paged adds --page and --per-page; noSearch drops
+// --search, for a read that takes no parameters at all.
+type endpoint struct {
+	item     string
+	path     string
+	short    string
+	paged    bool
+	noSearch bool
+	params   []param
+}
+
+// referenceGroup is one URL segment below /analyses/reference: reference <group> <item>.
+type referenceGroup struct {
+	name      string
+	aliases   []string
+	short     string
+	endpoints []endpoint
+}
+
+var referenceGroups = []referenceGroup{
+	{
+		name:  "common",
+		short: "Catalogs shared across every dataset type",
+		endpoints: []endpoint{
+			{item: "dataset-types", short: "Dataset types an audience can be built from"},
+			{item: "countries", short: "Countries", params: []param{
+				{name: "datasetType", kind: str, help: "Limit to one dataset type (e.g. WebDomain)"},
+			}},
+			{item: "states", short: "States, for the given countries", params: []param{
+				{name: "countries", kind: strs, required: true, help: "Country codes, ISO-3 (e.g. USA)"},
+			}},
+			{item: "cities", short: "Cities, for the given states", params: []param{
+				{name: "states", kind: strs, required: true, help: "State codes (e.g. NY)"},
+				{name: "dmas", kind: strs, help: "Narrow by DMA label"},
+			}},
+			{item: "dmas", short: "DMAs, for the given countries", params: []param{
+				{name: "countries", kind: strs, required: true, help: "Country codes, ISO-3 (e.g. USA)"},
+				{name: "states", kind: strs, help: "Narrow by state code"},
+				{name: "cities", kind: strs, help: "Narrow by city name"},
+			}},
+			{item: "zipcodes", short: "Zip codes, for the given cities", paged: true, params: []param{
+				{name: "cities", kind: strs, required: true, help: "City names (e.g. Los Angeles)"},
+				{name: "states", kind: strs, help: "Narrow by state code"},
+				{name: "dmas", kind: strs, help: "Narrow by DMA label"},
+				{name: "countries", kind: strs, help: "Narrow by country code, ISO-3 (e.g. USA)"},
+			}},
+			{item: "operators", short: "Boolean operators for combining datasets"},
+		},
+	},
+	{
+		name:  "poi",
+		short: "POI segments, categories, brands and locations",
+		endpoints: []endpoint{
+			{item: "segments", short: "POI segments"},
+			{item: "categories", short: "POI categories", params: []param{
+				{name: "segments", kind: nums, help: "Segment ids to cascade from"},
+			}},
+			{item: "brands", short: "POI brands", params: []param{
+				{name: "categories", kind: nums, help: "Category ids to cascade from"},
+			}},
+			{item: "locations", short: "POI locations", paged: true, params: []param{
+				{name: "brands", kind: nums, help: "Brand ids to cascade from"},
+			}},
+		},
+	},
+	{
+		name:  "apps",
+		short: "App categories, tags, OSes, bundle ids and taxonomies",
+		endpoints: []endpoint{
+			{item: "categories", short: "App categories", paged: true},
+			{item: "tags", short: "App tags", paged: true},
+			{item: "os", short: "App operating systems"},
+			{item: "bundle-ids", short: "App bundle ids", paged: true, params: []param{
+				{name: "categories", kind: nums, help: "Category ids to filter by"},
+				{name: "taxonomies", kind: nums, help: "Taxonomy ids to filter by (takes precedence over categories)"},
+			}},
+			{item: "taxonomies", short: "App taxonomies", paged: true, params: []param{
+				{name: "categories", kind: nums, help: "Category ids to filter by"},
+			}},
+		},
+	},
+	{
+		name:    "ctv",
+		aliases: []string{"connected-tv"},
+		short:   "Connected TV vendors, content, channels and devices",
+		endpoints: []endpoint{
+			{item: "vendors", short: "CTV vendors"},
+			{item: "content-types", short: "CTV content types"},
+			{item: "content-genres", short: "CTV content genres"},
+			{item: "channel-names", short: "CTV channel names"},
+			{item: "device-types", short: "CTV device types", paged: true},
+			{item: "device-makes", short: "CTV device makes", paged: true},
+			{item: "device-oses", short: "CTV device operating systems", paged: true},
+			{item: "connection-types", short: "CTV connection types", paged: true},
+			{item: "isps", short: "CTV ISPs and carriers", paged: true},
+			{item: "series", short: "CTV series", paged: true},
+		},
+	},
+	{
+		name:  "web",
+		short: "Web domains, referrers, browsers and devices",
+		endpoints: []endpoint{
+			{item: "domains", short: "Web domains", paged: true, params: []param{
+				{name: "category_codes", kind: strs, help: "IAB category codes (e.g. IAB2)"},
+				{name: "subcategory_codes", kind: strs, help: "IAB subcategory codes (e.g. IAB2-1); takes precedence over category codes"},
+			}},
+			{item: "ref-domains", short: "Referrer domains", paged: true},
+			{item: "browsers", short: "Browsers", paged: true},
+			{item: "device-types", short: "Web device types", paged: true},
+			{item: "device-makes", short: "Web device makes", paged: true},
+			{item: "device-oses", short: "Web device operating systems", paged: true},
+		},
+	},
+	{
+		name:    "affinity-transactions",
+		aliases: []string{"transactions"},
+		short:   "Affinity purchase categories, subcategories and brands",
+		endpoints: []endpoint{
+			{item: "categories", short: "Affinity categories"},
+			{item: "subcategories", short: "Affinity subcategories", paged: true, params: []param{
+				{name: "categories", kind: nums, help: "Affinity category ids to cascade from"},
+			}},
+			{item: "brands", short: "Affinity brands", paged: true, params: []param{
+				{name: "categories", kind: nums, help: "Affinity category ids to cascade from"},
+				{name: "subcategories", kind: strs, help: "Subcategories to cascade from"},
+			}},
+		},
+	},
+	{
+		name:  "cohorts",
+		short: "Your company's completed cohorts",
+		endpoints: []endpoint{
+			// The URL segment really is get-cohorts.
+			{item: "list", path: "get-cohorts", short: "Completed cohorts"},
+		},
+	},
+}
+
 var referenceCmd = &cobra.Command{
 	Use:   "reference",
 	Short: "Access reference data",
+	Long: `Read the catalogs an audience payload is built from.
+
+Every reference read is a GET with no side effects, so these are safe to explore.
+Ids and values collected here are what 'intuizi audiences create' expects.
+
+    intuizi reference common dataset-types
+    intuizi reference common states --countries USA
+    intuizi reference apps categories --search fitness
+    intuizi reference web domains --category-codes IAB2 --json
+
+Each read accepts --search, a case-insensitive contains match on the item label.
+Paginated reads add --page and --per-page, and return one page per call.`,
 }
 
 func init() {

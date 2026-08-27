@@ -39,7 +39,7 @@ func (c *Client) PostMultipart(ctx context.Context, path string, fields map[stri
 			continue
 		}
 
-		data, err := readEnvelope(resp, target)
+		_, data, err := readEnvelope(resp, target)
 		resp.Body.Close()
 		if err != nil {
 			return err
