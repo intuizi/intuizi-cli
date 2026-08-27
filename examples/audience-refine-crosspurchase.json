@@ -1,12 +1,12 @@
 {
-  "name": "Top coffee visitors vs dining purchases",
+  "name": "Top McDonalds visitors vs apparel purchases - 1 week",
   "datasets": [
     {
       "type": "POI",
-      "start_date": "2025-01-01",
-      "end_date": "2025-03-31",
-      "signal_providers": ["BID001"],
-      "categories": [101],
+      "start_date": "2026-07-06",
+      "end_date": "2026-07-13",
+      "signal_providers": ["ef3d56f1305f0f8f28bdf35eb524d729", "c342914ea6c9214e27ed5772557ea115", "f13befc8485804e590cfe246cd20296e"],
+      "analysisdata": [187],
       "location": { "countries": ["USA"] },
       "refine": {
         "type": "percentile",
@@ -17,8 +17,8 @@
     }
   ],
   "crosspurchase": {
-    "start_date": "2025-01-01",
-    "end_date": "2025-02-28",
+    "start_date": "2026-06-01",
+    "end_date": "2026-07-31",
     "target_categories": [1]
   }
 }
