@@ -151,8 +151,8 @@ func postID(cmd *cobra.Command, path string, id int, done string) error {
 	}
 
 	if jsonOutput {
-		var raw json.RawMessage
-		if err := c.Post(cmd.Context(), path, map[string]int{"id": id}, &raw); err != nil {
+		raw, err := c.PostRaw(cmd.Context(), path, map[string]int{"id": id})
+		if err != nil {
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
@@ -185,8 +185,8 @@ func createBody(cmd *cobra.Command, path string, payload any, lead []string, nex
 	}
 
 	if jsonOutput {
-		var raw json.RawMessage
-		if err := c.Post(cmd.Context(), path, payload, &raw); err != nil {
+		raw, err := c.PostRaw(cmd.Context(), path, payload)
+		if err != nil {
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
