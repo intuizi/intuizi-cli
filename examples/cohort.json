@@ -1,0 +1,8 @@
+{
+  "name": "Loyalty program members",
+  "file_uri": "s3://my-bucket/exports/loyalty.csv.gz",
+  "file_format": "gzip",
+  "identifier_type": "hem_sha256",
+  "identifier_column": "email_sha256",
+  "metadata_columns": ["tier", "signup_year"]
+}
