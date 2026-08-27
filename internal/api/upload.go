@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // PostMultipart issues an multipart/form-data Post to create-by-file, streaming
@@ -104,4 +105,50 @@ func (c *Client) newMultipartRequest(ctx context.Context, target string, fields 
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	return req, nil
+}
+
+// PutPresigned sends a file to a presigned upload URL.
+//
+// Deliberately not a Client method: the signature embedded in the URL is the
+// only credential, and attaching the bearer token to a third-party storage host
+// would leak it. It is also not retried - a presigned URL is single-use and
+// expires, so a fresh reservation is the correct recovery, not a replay.
+func PutPresigned(ctx context.Context, url, contentType, filePath string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", filePath, err)
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("sizing %s: %w", filePath, err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, f)
+	if err != nil {
+		return err
+	}
+	if contentType == "" {
+		contentType = "text/csv"
+	}
+	req.Header.Set("Content-Type", contentType)
+	// Storage rejects a chunked PUT, so the length must be known up front.
+	req.ContentLength = info.Size()
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("uploading %s: %w", filepath.Base(filePath), err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = resp.Status
+		}
+		return fmt.Errorf("upload rejected with %d: %s", resp.StatusCode, msg)
+	}
+	return nil
 }
