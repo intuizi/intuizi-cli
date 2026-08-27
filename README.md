@@ -38,8 +38,9 @@ macOS, Linux, and Windows (amd64 and arm64).
 intuizi auth login
 
 # Look up reference data for building audiences
-intuizi reference providers
-intuizi reference countries
+intuizi reference common dataset-types
+intuizi reference common states --countries US
+intuizi reference apps categories --search fitness
 
 # Create an audience from a payload file and activate it
 intuizi audiences create --file audience.json
