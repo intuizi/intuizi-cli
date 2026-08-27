@@ -55,14 +55,21 @@ func JSON(w io.Writer, raw []byte) error {
 // stable across runs - Go map iteration is randomised.
 var preferredColumns = []string{"value", "text", "id", "name"}
 
-// Table writes an aligned table. An empty list writes nothing: the caller says
-// "no results" on stderr, keeping a pipe clean.
+// Table writes an aligned table over the union of the records' keys. An empty
+// list writes nothing: the caller says "no results" on stderr, keeping a pipe
+// clean.
 func Table(w io.Writer, items []Record) error {
-	if len(items) == 0 {
+	return TableWith(w, items, columns(items))
+}
+
+// TableWith writes the same table with an explicit column order, for reads whose
+// useful fields are a small subset of what the endpoint returns. A column absent
+// from a record renders as an empty cell.
+func TableWith(w io.Writer, items []Record, cols []string) error {
+	if len(items) == 0 || len(cols) == 0 {
 		return nil
 	}
 
-	cols := columns(items)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 
 	if _, err := fmt.Fprintln(tw, strings.Join(cols, "\t")); err != nil {
@@ -74,6 +81,42 @@ func Table(w io.Writer, items []Record) error {
 			cells[i] = cell(item[col])
 		}
 		if _, err := fmt.Fprintln(tw, strings.Join(cells, "\t")); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
+// Detail writes one record as aligned key/value lines, for a read that returns a
+// single resource. A wide record is unreadable as a one-row table; down the page
+// it stays legible. lead names the fields worth seeing first, and the rest
+// follow alphabetically so the order is stable across runs.
+func Detail(w io.Writer, r Record, lead []string) error {
+	if len(r) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool, len(r))
+	order := make([]string, 0, len(r))
+	for _, k := range lead {
+		if _, ok := r[k]; ok && !seen[k] {
+			order = append(order, k)
+			seen[k] = true
+		}
+	}
+
+	rest := make([]string, 0, len(r))
+	for k := range r {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	order = append(order, rest...)
+
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, k := range order {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\n", k, cell(r[k])); err != nil {
 			return err
 		}
 	}
