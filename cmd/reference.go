@@ -2,12 +2,12 @@ package cmd
 
 import "github.com/spf13/cobra"
 
-// The 36 reference reads, as a table rather than one function per endpoint:
-// endpoint.command in reference_run.go turns each row into a cobra command.
+// Every documented reference read, as a table rather than one function per
+// endpoint: endpoint.command in reference_run.go turns each row into a cobra
+// command.
 //
-// Adding a row needs a data-classification check first, and an update to
-// wantPaths in reference_test.go. Contracts: docs-src/content/api/v2 in
-// intuizi-console.
+// Adding a row also needs an update to wantPaths in reference_test.go.
+// Contracts: docs-src/content/api/v2 in intuizi-console.
 
 // kind decides a param's flag type and how it is written into the query. Array
 // params repeat under a "[]"-suffixed key; a comma-joined value would arrive as
@@ -79,6 +79,21 @@ var referenceGroups = []referenceGroup{
 				{name: "countries", kind: strs, help: "Narrow by country code, ISO-3 (e.g. USA)"},
 			}},
 			{item: "operators", short: "Boolean operators for combining datasets"},
+			{item: "languages", short: "Languages", paged: true},
+			{item: "signal-providers", short: "Signal providers for a dataset type", params: []param{
+				{name: "dataType", kind: str, required: true, help: "Dataset type (e.g. WebDomain)"},
+			}},
+			{item: "endpoint-partners", short: "Activation endpoint partners"},
+			{item: "endpoint-connections", short: "Your company's endpoint connections"},
+			{item: "pricing-models", short: "Pricing models for an endpoint partner", params: []param{
+				{name: "partner_id", kind: num, required: true, help: "Endpoint partner id"},
+			}},
+			{item: "datastreams", short: "Datastreams for an endpoint partner", params: []param{
+				{name: "partner_id", kind: num, required: true, help: "Endpoint partner id"},
+			}},
+			{item: "schedule-frequencies", short: "Schedule frequencies"},
+			{item: "schedule-windows", short: "Schedule date windows"},
+			{item: "schedule-endings", short: "Schedule ending rules"},
 		},
 	},
 	{
@@ -132,8 +147,12 @@ var referenceGroups = []referenceGroup{
 	},
 	{
 		name:  "web",
-		short: "Web domains, referrers, browsers and devices",
+		short: "IAB categories, web domains, browsers and devices",
 		endpoints: []endpoint{
+			{item: "iab-categories", short: "IAB categories"},
+			{item: "iab-subcategories", short: "IAB subcategories", params: []param{
+				{name: "category_ids", kind: strs, help: "Parent IAB category ids or codes"},
+			}},
 			{item: "domains", short: "Web domains", paged: true, params: []param{
 				{name: "category_codes", kind: strs, help: "IAB category codes (e.g. IAB2)"},
 				{name: "subcategory_codes", kind: strs, help: "IAB subcategory codes (e.g. IAB2-1); takes precedence over category codes"},
@@ -148,7 +167,7 @@ var referenceGroups = []referenceGroup{
 	{
 		name:    "affinity-transactions",
 		aliases: []string{"transactions"},
-		short:   "Affinity purchase categories, subcategories and brands",
+		short:   "Affinity purchase categories, brands and demographics",
 		endpoints: []endpoint{
 			{item: "categories", short: "Affinity categories"},
 			{item: "subcategories", short: "Affinity subcategories", paged: true, params: []param{
@@ -157,6 +176,45 @@ var referenceGroups = []referenceGroup{
 			{item: "brands", short: "Affinity brands", paged: true, params: []param{
 				{name: "categories", kind: nums, help: "Affinity category ids to cascade from"},
 				{name: "subcategories", kind: strs, help: "Subcategories to cascade from"},
+			}},
+			{item: "incomes", short: "Affinity income bands", paged: true},
+			{item: "ages", short: "Affinity age bands", paged: true},
+			{item: "genders", short: "Affinity genders", paged: true},
+			{item: "ethnicities", short: "Affinity ethnicities", paged: true},
+		},
+	},
+	{
+		name:  "demographics",
+		short: "Gender, age, marital status and income dictionaries",
+		endpoints: []endpoint{
+			{item: "genders", short: "Demographic genders", paged: true},
+			{item: "ages", short: "Demographic age ranges", paged: true},
+			{item: "marital-statuses", short: "Demographic marital statuses", paged: true},
+			{item: "incomes", short: "Demographic income ranges", paged: true},
+		},
+	},
+	{
+		name:  "profile-attributes",
+		short: "Profile attribute categories, keys, values and date bounds",
+		endpoints: []endpoint{
+			{item: "categories", short: "Profile attribute categories", paged: true},
+			{item: "keys", short: "Profile attribute keys", paged: true, params: []param{
+				{name: "category_ids", kind: nums, help: "Category ids to cascade from"},
+			}},
+			{item: "values", short: "Profile attribute values", paged: true, params: []param{
+				{name: "category_ids", kind: nums, help: "Category ids to cascade from"},
+				{name: "key", kind: str, help: "The key to cascade from"},
+			}},
+			// The only read with no query parameters at all, search included.
+			{item: "recency-limits", short: "The delivered quarter window dates must fall inside", noSearch: true},
+		},
+	},
+	{
+		name:  "deidentified",
+		short: "Signal fields a deidentified delivery can carry",
+		endpoints: []endpoint{
+			{item: "fields", short: "Deidentified signal fields", params: []param{
+				{name: "group", kind: str, help: "Narrow to one group, using a group value from this same read"},
 			}},
 		},
 	},
