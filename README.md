@@ -42,13 +42,39 @@ intuizi reference common dataset-types
 intuizi reference common states --countries USA
 intuizi reference apps categories --search fitness
 
-# Create an audience from a payload file and activate it
-intuizi audiences create --file audience.json
-intuizi activations create --file activation.json --wait
+# Create an audience from a payload file, then watch it build
+intuizi audiences create --file examples/audience-poi.json
+intuizi audiences show 88
+
+# Export it to a destination
+intuizi activations create --audience-id 88 \
+  --endpoint-connection-id 12 --pricing-model-id 3
+
+# Import your own identifiers as a cohort
+ref=$(intuizi uploads put customers.csv --purpose cohort)
+intuizi cohorts create --file cohort.json
 
 # Everything supports --json for scripting
 intuizi audiences list --json
 ```
+
+Ready-made payloads for every `--file` command live in [`examples/`](examples).
+
+## Commands
+
+| Command | What it covers |
+| --- | --- |
+| `auth` | `login`, `status`, `logout` |
+| `audiences` | `list`, `show`, `create`, `delete`, `lookalike create\|cancel` |
+| `activations` | `list`, `show`, `create`, `delete` |
+| `cohorts` | `list`, `show`, `create`, `preview`, `delete` |
+| `schedules` | `list`, `show`, `create`, `activate`, `deactivate`, `delete` |
+| `projects` | `list`, `show`, `create`, `delete` |
+| `poi` | `segments`, `categories`, `brands`, `locations`, `submissions` |
+| `uploads` | `reserve`, `put` |
+| `reference` | 60 read-only catalogs across 10 groups |
+| `usage` | monthly data-scan usage |
+| `webhooks` | `list` |
 
 In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 
