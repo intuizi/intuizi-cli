@@ -1,0 +1,11 @@
+{
+  "name": "Weekly Coffee Refresh",
+  "audience_id": 88,
+  "recurrence": {
+    "start": "2026-09-01 06:00:00",
+    "timezone": "America/New_York",
+    "frequency": "Weekly",
+    "window_type": 2,
+    "ending": { "type": 1 }
+  }
+}
