@@ -73,6 +73,18 @@ func (c *Client) GetRaw(ctx context.Context, path string, query url.Values) ([]b
 	return raw, nil
 }
 
+// PostRaw returns the whole response body rather than the decoded data field,
+// so a create can print the same envelope --json prints for a read. Without it
+// a create would print a bare data array and a read a full envelope, and a
+// script could not parse both the same way.
+func (c *Client) PostRaw(ctx context.Context, path string, body any) ([]byte, error) {
+	raw, _, err := c.doRaw(ctx, http.MethodPost, path, nil, body)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
 // Post issues an authenticated POST with a JSON body.
 func (c *Client) Post(ctx context.Context, path string, body, out any) error {
 	raw, err := c.do(ctx, http.MethodPost, path, nil, body)
