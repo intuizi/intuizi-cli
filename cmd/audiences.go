@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/spf13/cobra"
 )
@@ -24,8 +25,8 @@ visited, apps used, CTV viewing, web activity. Delivering one somewhere is a
 separate step: see 'intuizi activations'.
 
 Building is asynchronous. 'audiences create' returns as soon as the audience is
-queued, in an Initiating state; run 'audiences show <id>' until it reads
-Completed. An audience that is still building is not a failure.
+queued, in an Initiating state; add --wait to 'create' or 'show' to block until
+it reads Completed. An audience that is still building is not a failure.
 
 The ids and codes a payload is built from come from 'intuizi reference'.`,
 }
@@ -52,18 +53,77 @@ still reaches the API. See examples/ for a minimal POI audience and one using
 refine and crosspurchase.
 
 Creation is asynchronous: the new audience comes back Initiating with a
-results_count of 0. That is expected. A retry of this command reuses its
-Idempotency-Key, so it cannot create a duplicate.`,
+results_count of 0. That is expected. Add --wait to block until the build
+reaches Completed, with --timeout to bound it (default 60m); the final record
+is printed and an audience that fails to build exits non-zero:
+
+    intuizi audiences create --file audience.json --wait
+
+A retry of this command reuses its Idempotency-Key, so it cannot create a
+duplicate.`,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+	}
+	waitOpts := waitFlags(cmd)
+
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		wait, timeout, err := waitOpts()
+		if err != nil {
+			return err
+		}
+		if !wait {
 			return createFromFile(cmd, audiencesPrefix+"/create", file, audienceColumns,
-				"still building - run 'intuizi audiences show <id>' for its status")
-		},
+				"still building - run 'intuizi audiences show <id> --wait' to follow it")
+		}
+		payload, err := readPayload(cmd, file)
+		if err != nil {
+			return err
+		}
+		return createAndWait(cmd, audiencesPrefix, "audience", payload, audienceColumns, timeout)
 	}
 
 	cmd.Flags().StringVar(&file, "file", "",
 		`Path to the audience payload, or "-" to read it from stdin`)
 	_ = cmd.MarkFlagRequired("file")
+	return cmd
+}
+
+// --------------------------------------------------------------------------------- show
+
+// audiencesShowCommand is the generic showCommand plus --wait, so a build can be
+// followed to Completed before it is activated. 108 Modeling is waited through.
+func audiencesShowCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "show <id>",
+		Short: "Show one audience",
+		Long: `Show one audience.
+
+With --wait, keep polling until the build reaches Completed or fails, printing
+each status change to stderr. A lookalike in 108 Modeling is still training and
+is waited through:
+
+    intuizi audiences show 1377 --wait`,
+		Args: cobra.ExactArgs(1),
+	}
+	waitOpts := waitFlags(cmd)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0], "audience")
+		if err != nil {
+			return err
+		}
+		wait, timeout, err := waitOpts()
+		if err != nil {
+			return err
+		}
+		if !wait {
+			return renderOne(cmd, audiencesPrefix+"/"+strconv.Itoa(id), audienceColumns)
+		}
+		c, err := client()
+		if err != nil {
+			return err
+		}
+		return waitAndPrint(cmd, c, audiencesPrefix, "audience", id, audienceColumns, timeout)
+	}
 	return cmd
 }
 
@@ -143,7 +203,7 @@ func audiencesListCommand() *cobra.Command {
 func init() {
 	audiencesCmd.AddCommand(
 		audiencesListCommand(),
-		showCommand("audience", audiencesPrefix, audienceColumns),
+		audiencesShowCommand(),
 		deleteCommand("audience", audiencesPrefix),
 		audiencesCreateCommand(), audiencesLookalikeCommand(),
 	)
