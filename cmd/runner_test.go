@@ -63,6 +63,11 @@ func exec(t *testing.T, asJSON bool, cmd *cobra.Command, srv *httptest.Server, a
 	baseURLFlag, jsonOutput = srv.URL, asJSON
 	t.Cleanup(func() { baseURLFlag, jsonOutput = prevBase, prevJSON })
 
+	// rootCmd silences usage on error for the whole tree; a command built from
+	// its constructor has no root, so mirror that here or every error-path test
+	// sees the usage text on stdout.
+	cmd.SilenceUsage = true
+
 	var out, errb bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errb)
