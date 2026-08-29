@@ -42,13 +42,12 @@ intuizi reference common dataset-types
 intuizi reference common states --countries USA
 intuizi reference apps categories --search fitness
 
-# Create an audience from a payload file, then watch it build
-intuizi audiences create --file examples/audience-poi.json
-intuizi audiences show 88
+# Create an audience from a payload file and block until it has built
+intuizi audiences create --file examples/audience-poi.json --wait
 
-# Export it to a destination
+# Export it to a destination and follow it to Completed (--timeout defaults to 60m)
 intuizi activations create --audience-id 88 \
-  --endpoint-connection-id 12 --pricing-model-id 3
+  --endpoint-connection-id 12 --pricing-model-id 3 --wait
 
 # Import your own identifiers as a cohort
 ref=$(intuizi uploads put customers.csv --purpose cohort)
