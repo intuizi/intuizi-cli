@@ -314,3 +314,24 @@ func name(v any) any {
 	}
 	return v
 }
+
+// createRecord posts a body and returns the created record without printing
+// it, for a caller that needs the new id before deciding what to show - a
+// --wait create prints the final state, not the Initiating one.
+func createRecord(cmd *cobra.Command, c *api.Client, path string, payload any) (output.Record, error) {
+	return api.Create[output.Record](cmd.Context(), c, path, payload)
+}
+
+// idOf reads the integer id off a record. Numbers are json.Number (UseNumber),
+// so a float64 assertion would silently yield 0.
+func idOf(rec output.Record) (int, error) {
+	n, ok := rec["id"].(json.Number)
+	if !ok {
+		return 0, errors.New("response carried no id")
+	}
+	id, err := strconv.Atoi(n.String())
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("response carried an invalid id %q", n.String())
+	}
+	return id, nil
+}
