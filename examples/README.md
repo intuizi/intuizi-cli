@@ -21,7 +21,7 @@ sending anything.
 | `audience-poi.json` | `audiences create` | The minimum: one POI dataset. |
 | `audience-two-datasets.json` | `audiences create` | Two datasets, so `operator` is required. |
 | `audience-refine-crosspurchase.json` | `audiences create` | `refine` sits **inside** the dataset; `crosspurchase` sits at the **top level**. Both are permission-gated. |
-| `activation.json` | `activations create --file` | A minimal export is three ids and needs no file at all. |
+| `activation.json` | `activations create --file` | A minimal export is three ids and needs no file at all. Add `--wait` to follow it to Completed; `--timeout` defaults to 60m. |
 | `cohort.json` | `cohorts create` | Swap `file_uri` for `upload_reference` to use `intuizi uploads put`. |
 | `schedule.json` | `schedules create` | `recurrence.start` must be in the future. |
 
