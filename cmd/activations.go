@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/spf13/cobra"
 )
@@ -22,6 +23,11 @@ endpoint connections. The audience says who; the activation says where.
 Delivery is asynchronous and has an extra step: status 105 DataStreaming comes
 before 104 Completed, so results are still moving at 105. Once Completed, the
 delivered files are listed under datastreams[].results.uri, which --json shows.
+
+Pass --wait to 'create' or 'show' to follow an activation to its end: each
+status change is printed to stderr, the final state to stdout, and the exit
+code is non-zero if it fails, if any datastream fails to deliver, or --timeout
+(default 60m) runs out.
 
 An audience must hold at least 500 devices before it can be activated.`,
 }
@@ -53,48 +59,67 @@ credentials - is too nested for flags, so pass the whole body instead:
 
     intuizi activations create --file activation.json
 
+Add --wait to follow the export to its end, with --timeout to bound it:
+
+    intuizi activations create --file activation.json --wait --timeout 90m
+
 Collect the ids first: 'intuizi reference common endpoint-connections' and
 'intuizi reference common pricing-models --partner-id <id>'.
 
 A retry of this command reuses its Idempotency-Key, so it cannot create a
 duplicate export.`,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			flags := cmd.Flags()
+	}
+	waitOpts := waitFlags(cmd)
 
-			if file != "" {
-				// Mixing the two would beg the question of which wins.
-				for _, f := range []string{"audience-id", "endpoint-connection-id",
-					"pricing-model-id", "description", "project-id"} {
-					if flags.Changed(f) {
-						return errors.New("--file carries the whole body; drop --" + f)
-					}
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		flags := cmd.Flags()
+
+		wait, timeout, err := waitOpts()
+		if err != nil {
+			return err
+		}
+
+		var body any
+		if file != "" {
+			// Mixing the two would beg the question of which wins.
+			for _, f := range []string{"audience-id", "endpoint-connection-id",
+				"pricing-model-id", "description", "project-id"} {
+				if flags.Changed(f) {
+					return errors.New("--file carries the whole body; drop --" + f)
 				}
-				return createFromFile(cmd, activationsPrefix+"/create", file, activationColumns,
-					"delivering - run 'intuizi activations show <id>' for its status")
 			}
-
+			payload, err := readPayload(cmd, file)
+			if err != nil {
+				return err
+			}
+			body = payload
+		} else {
 			if !flags.Changed("audience-id") || !flags.Changed("endpoint-connection-id") ||
 				!flags.Changed("pricing-model-id") {
 				return errors.New("pass --file, or all of --audience-id, " +
 					"--endpoint-connection-id and --pricing-model-id")
 			}
-
-			body := map[string]any{
+			m := map[string]any{
 				"audience_id":            audienceID,
 				"endpoint_connection_id": connectionID,
 				"pricing_model_id":       pricingModel,
 			}
 			if flags.Changed("description") {
-				body["description"] = description
+				m["description"] = description
 			}
 			if flags.Changed("project-id") {
-				body["project_id"] = projectID
+				m["project_id"] = projectID
 			}
+			body = m
+		}
 
+		if !wait {
 			return createBody(cmd, activationsPrefix+"/create", body, activationColumns,
-				"delivering - run 'intuizi activations show <id>' for its status")
-		},
+				"delivering - run 'intuizi activations show <id> --wait' to follow it")
+		}
+
+		return createAndWait(cmd, activationsPrefix, "activation", body, activationColumns, timeout)
 	}
 
 	flags := cmd.Flags()
@@ -108,6 +133,49 @@ duplicate export.`,
 
 	return cmd
 }
+
+// --------------------------------------------------------------------------------- show
+
+// activationsShowCommand is the generic showCommand plus --wait. It is its own
+// command rather than a flag on the shared helper because the terminal-state
+// table is per resource: cohorts finish at 4, audiences pass through 108.
+func activationsShowCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "show <id>",
+		Short: "Show one activation",
+		Long: `Show one activation.
+
+With --wait, keep polling until it reaches Completed or fails, printing each
+status change to stderr. Use it to resume following an export whose create
+timed out, or as a gate in CI - a Completed activation returns at once:
+
+    intuizi activations show 501 --wait --timeout 90m`,
+		Args: cobra.ExactArgs(1),
+	}
+	waitOpts := waitFlags(cmd)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0], "activation")
+		if err != nil {
+			return err
+		}
+		wait, timeout, err := waitOpts()
+		if err != nil {
+			return err
+		}
+		if !wait {
+			return renderOne(cmd, activationsPrefix+"/"+strconv.Itoa(id), activationColumns)
+		}
+		c, err := client()
+		if err != nil {
+			return err
+		}
+		return waitAndPrint(cmd, c, activationsPrefix, "activation", id, activationColumns, timeout)
+	}
+	return cmd
+}
+
+// --------------------------------------------------------------------------------- list
 
 func activationsListCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -126,7 +194,7 @@ func activationsListCommand() *cobra.Command {
 func init() {
 	activationsCmd.AddCommand(
 		activationsListCommand(),
-		showCommand("activation", activationsPrefix, activationColumns),
+		activationsShowCommand(),
 		deleteCommand("activation", activationsPrefix),
 		activationsCreateCommand(),
 	)
