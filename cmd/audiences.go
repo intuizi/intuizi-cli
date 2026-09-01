@@ -15,9 +15,8 @@ const audiencesPrefix = "/analyses/audiences"
 var audienceColumns = []string{"id", "name", "status", "results_count", "created_at"}
 
 var audiencesCmd = &cobra.Command{
-	Use:     "audiences",
-	Aliases: []string{"audience"},
-	Short:   "Manage audiences",
+	Use:   "audiences",
+	Short: "Manage audiences",
 	Long: `Manage audiences.
 
 An audience defines a group of devices drawn from one or two datasets - places
@@ -131,9 +130,8 @@ is waited through:
 
 func audiencesLookalikeCommand() *cobra.Command {
 	lookalike := &cobra.Command{
-		Use:     "lookalike",
-		Aliases: []string{"lookalikes"},
-		Short:   "Build and cancel Lookalike Model audiences",
+		Use:   "lookalike",
+		Short: "Build and cancel Lookalike Model audiences",
 		Long: `Build and cancel Lookalike Model audiences.
 
 A Lookalike Model trains on a completed seed audience and produces a new
