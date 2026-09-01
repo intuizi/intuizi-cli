@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -12,22 +13,23 @@ import (
 	"strings"
 )
 
-// PostMultipart issues an multipart/form-data Post to create-by-file, streaming
-// the file rather than buffering it (POI files run to 50 MB)
+// postMultipart issues an multipart/form-data Post to create-by-file, streaming
+// the file rather than buffering it (POI files run to 50 MB), and returns the
+// envelope's data field for the caller to decode.
 //
 // Boolean form fields must be "1" or "0" - API rejects the string "true"
-func (c *Client) PostMultipart(ctx context.Context, path string, fields map[string]string, fileField, filePath string, out any) error {
+func (c *Client) postMultipart(ctx context.Context, path string, fields map[string]string, fileField, filePath string) (json.RawMessage, error) {
 	target := c.BaseURL + apiPrefix + path
 
 	for attempt := 0; ; attempt++ {
 		req, err := c.newMultipartRequest(ctx, target, fields, fileField, filePath)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		resp, err := c.HTTP.Do(req)
 		if err != nil {
-			return fmt.Errorf("calling %s: %w", target, err)
+			return nil, fmt.Errorf("calling %s: %w", target, err)
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
@@ -35,7 +37,7 @@ func (c *Client) PostMultipart(ctx context.Context, path string, fields map[stri
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
 			resp.Body.Close()
 			if err := sleep(ctx, wait); err != nil {
-				return err
+				return nil, err
 			}
 			continue
 		}
@@ -43,9 +45,9 @@ func (c *Client) PostMultipart(ctx context.Context, path string, fields map[stri
 		_, data, err := readEnvelope(resp, target)
 		resp.Body.Close()
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return unmarshalData(data, path, out)
+		return data, nil
 	}
 }
 
