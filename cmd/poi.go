@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/intuizi/intuizi-cli/internal/api"
 	"github.com/intuizi/intuizi-cli/internal/output"
 )
 
@@ -38,7 +39,9 @@ with 'intuizi reference poi'.`,
 
 // --------------------------------------------------------------------------------- taxonomy reads
 
-// searchList builds the three flat, search-only index reads.
+// searchList builds the three flat, search-only index reads. They answer in the
+// catalog idiom - {value, text} - not the {id, name} the locations and
+// submissions reads use, so the value is the id to pass back as a parent.
 func searchList(use, short, path, empty string, cols []string) *cobra.Command {
 	var search string
 
@@ -412,11 +415,11 @@ func mergeSubmissionFields(payload []byte, name string, brandID int, setName, se
 func init() {
 	poiCmd.AddCommand(
 		searchList("segments", "List your own POI segments",
-			poiPrefix+"/segments/index", "no segments", []string{"id", "name"}),
+			poiPrefix+"/segments/index", "no segments", []string{"value", "text"}),
 
 		poiGroup("categories", "Your own POI categories",
 			searchList("list", "List your own POI categories",
-				poiPrefix+"/categories/index", "no categories", []string{"id", "name"}),
+				poiPrefix+"/categories/index", "no categories", []string{"value", "text"}),
 			poiCreateCommand("create", "Create a POI category",
 				poiPrefix+"/categories/create", "segment-id",
 				"The parent segment id", `Create a POI category under one of your segments.
@@ -425,7 +428,7 @@ Read the parent ids first with 'intuizi poi segments'.`, []string{"id", "name"})
 
 		poiGroup("brands", "Your own POI brands",
 			searchList("list", "List your own POI brands",
-				poiPrefix+"/brands/index", "no brands", []string{"id", "name"}),
+				poiPrefix+"/brands/index", "no brands", []string{"value", "text"}),
 			poiCreateCommand("create", "Create a POI brand",
 				poiPrefix+"/brands/create", "category-id",
 				"The parent category id", `Create a POI brand under one of your categories.
@@ -489,9 +492,9 @@ func createSubmissionByFile(cmd *cobra.Command, name string, brandID int, file s
 		fields["key"] = key
 	}
 
-	var created output.Record
-	if err := c.PostMultipart(cmd.Context(), poiPrefix+"/submissions/create-by-file",
-		fields, "locations_file", file, &created); err != nil {
+	created, err := api.CreateMultipart[output.Record](cmd.Context(), c,
+		poiPrefix+"/submissions/create-by-file", fields, "locations_file", file)
+	if err != nil {
 		return err
 	}
 
