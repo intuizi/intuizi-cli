@@ -9,9 +9,8 @@ const projectsPrefix = "/analyses/projects"
 var projectColumns = []string{"id", "name"}
 
 var projectsCmd = &cobra.Command{
-	Use:     "projects",
-	Aliases: []string{"project"},
-	Short:   "Manage projects",
+	Use:   "projects",
+	Short: "Manage projects",
 	Long: `Manage projects.
 
 A project is a folder. Audiences, activations, cohorts and schedules can each
