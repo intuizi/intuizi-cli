@@ -12,9 +12,8 @@ const activationsPrefix = "/analyses/activations"
 var activationColumns = []string{"id", "description", "status", "audience", "created_at"}
 
 var activationsCmd = &cobra.Command{
-	Use:     "activations",
-	Aliases: []string{"activation"},
-	Short:   "Manage activations",
+	Use:   "activations",
+	Short: "Manage activations",
 	Long: `Manage activations.
 
 An activation exports a completed audience to a destination - one of your
