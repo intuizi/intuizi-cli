@@ -12,9 +12,8 @@ const schedulesPrefix = "/analyses/schedules"
 var scheduleColumns = []string{"id", "name", "status"}
 
 var schedulesCmd = &cobra.Command{
-	Use:     "schedules",
-	Aliases: []string{"schedule"},
-	Short:   "Manage schedules",
+	Use:   "schedules",
+	Short: "Manage schedules",
 	Long: `Manage schedules.
 
 A schedule rebuilds a completed audience on a recurring data window, and can
