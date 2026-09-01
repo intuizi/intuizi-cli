@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -11,15 +12,39 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
+
+// http.Client.Timeout caps transfer speed, not the wait. Uploads use a context
+// deadline instead - a backstop against a hung connection, sized from the
+// documented caps at a ~2 Mbit/s floor.
+const (
+	multipartTimeout = 10 * time.Minute // 50 MB cap; ~3.5 min at the floor
+	presignedTimeout = 90 * time.Minute // 1 GB cap; ~72 min at the floor
+)
+
+// No timeout - the deadline is per call. Shares DefaultTransport with the JSON
+// client, which keeps its 30s.
+var uploadHTTP = &http.Client{}
+
+// "context deadline exceeded" alone reads like a server fault.
+func timeoutErr(filePath string, d time.Duration) error {
+	return fmt.Errorf("uploading %s: gave up after %s - the transfer had not finished, so check connection speed or file size",
+		filepath.Base(filePath), d)
+}
 
 // postMultipart issues an multipart/form-data Post to create-by-file, streaming
 // the file rather than buffering it (POI files run to 50 MB), and returns the
-// envelope's data field for the caller to decode.
+// envelope's data field for the caller to decode. Bounded by multipartTimeout,
+// retries included.
 //
 // Boolean form fields must be "1" or "0" - API rejects the string "true"
 func (c *Client) postMultipart(ctx context.Context, path string, fields map[string]string, fileField, filePath string) (json.RawMessage, error) {
 	target := c.BaseURL + apiPrefix + path
+
+	// Outside the loop: a per-attempt deadline is not a ceiling.
+	ctx, cancel := context.WithTimeout(ctx, multipartTimeout)
+	defer cancel()
 
 	for attempt := 0; ; attempt++ {
 		req, err := c.newMultipartRequest(ctx, target, fields, fileField, filePath)
@@ -27,8 +52,11 @@ func (c *Client) postMultipart(ctx context.Context, path string, fields map[stri
 			return nil, err
 		}
 
-		resp, err := c.HTTP.Do(req)
+		resp, err := uploadHTTP.Do(req)
 		if err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return nil, timeoutErr(filePath, multipartTimeout)
+			}
 			return nil, fmt.Errorf("calling %s: %w", target, err)
 		}
 
@@ -37,6 +65,9 @@ func (c *Client) postMultipart(ctx context.Context, path string, fields map[stri
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
 			resp.Body.Close()
 			if err := sleep(ctx, wait); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) {
+					return nil, timeoutErr(filePath, multipartTimeout)
+				}
 				return nil, err
 			}
 			continue
@@ -109,13 +140,17 @@ func (c *Client) newMultipartRequest(ctx context.Context, target string, fields 
 	return req, nil
 }
 
-// PutPresigned sends a file to a presigned upload URL.
+// PutPresigned sends a file to a presigned upload URL, bounded by presignedTimeout.
 //
 // Deliberately not a Client method: the signature embedded in the URL is the
 // only credential, and attaching the bearer token to a third-party storage host
 // would leak it. It is also not retried - a presigned URL is single-use and
-// expires, so a fresh reservation is the correct recovery, not a replay.
+// expires after 15 minutes, so a fresh reservation is the correct recovery,
+// not a replay.
 func PutPresigned(ctx context.Context, url, contentType, filePath string) error {
+	ctx, cancel := context.WithTimeout(ctx, presignedTimeout)
+	defer cancel()
+
 	f, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", filePath, err)
@@ -138,8 +173,11 @@ func PutPresigned(ctx context.Context, url, contentType, filePath string) error 
 	// Storage rejects a chunked PUT, so the length must be known up front.
 	req.ContentLength = info.Size()
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := uploadHTTP.Do(req)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return timeoutErr(filePath, presignedTimeout)
+		}
 		return fmt.Errorf("uploading %s: %w", filepath.Base(filePath), err)
 	}
 	defer resp.Body.Close()
