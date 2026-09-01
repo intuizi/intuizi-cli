@@ -49,9 +49,18 @@ intuizi audiences create --file examples/audience-poi.json --wait
 intuizi activations create --audience-id 88 \
   --endpoint-connection-id 12 --pricing-model-id 3 --wait
 
-# Import your own identifiers as a cohort
+# Import your own identifiers as a cohort from a cloud file
+intuizi cohorts create --name "Loyalty members" \
+  --file-uri s3://my-bucket/exports/loyalty.csv.gz --file-format gzip \
+  --identifier-type hem_sha256 --identifier-column email_sha256
+
+# Or upload the file first and reference it from the payload
 ref=$(intuizi uploads put customers.csv --purpose cohort)
-intuizi cohorts create --file cohort.json
+jq --arg r "$ref" '.upload_reference = $r | del(.file_uri)' examples/cohort.json \
+  | intuizi cohorts create --file -
+
+# Or turn a completed audience into a cohort
+intuizi cohorts create --file examples/cohort-from-audience.json
 
 # Everything supports --json for scripting
 intuizi audiences list --json
