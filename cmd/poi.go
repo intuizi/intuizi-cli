@@ -21,9 +21,8 @@ import (
 const poiPrefix = "/my-data/pois"
 
 var poiCmd = &cobra.Command{
-	Use:     "poi",
-	Aliases: []string{"pois"},
-	Short:   "Manage your own POI data",
+	Use:   "poi",
+	Short: "Manage your own POI data",
 	Long: `Manage your company's own points of interest.
 
 The taxonomy nests: segments hold categories, categories hold brands, and
@@ -94,9 +93,8 @@ func poiCreateCommand(use, short, path, parentFlag, parentHelp, long string, col
 
 func poiLocationsCommand() *cobra.Command {
 	locations := &cobra.Command{
-		Use:     "locations",
-		Aliases: []string{"location"},
-		Short:   "Read your own POI locations",
+		Use:   "locations",
+		Short: "Read your own POI locations",
 	}
 
 	var (
@@ -178,9 +176,8 @@ var submissionColumns = []string{"id", "name", "status", "created_at"}
 
 func poiSubmissionsCommand() *cobra.Command {
 	subs := &cobra.Command{
-		Use:     "submissions",
-		Aliases: []string{"submission"},
-		Short:   "Submit and track batches of POI locations",
+		Use:   "submissions",
+		Short: "Submit and track batches of POI locations",
 		Long: `Submit and track batches of POI locations.
 
 Three ways to send the same thing, differing only in where the locations come
