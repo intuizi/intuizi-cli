@@ -37,6 +37,21 @@ func Create[T any](ctx context.Context, c *Client, path string, body any) (T, er
 	return first[T](raw, path)
 }
 
+// CreateMultipart posts a multipart form and decodes the created resource out
+// of data, the same way Create does for a JSON body: a create wraps its one new
+// resource in an array, so it needs the same unwrapping.
+func CreateMultipart[T any](ctx context.Context, c *Client, path string,
+	fields map[string]string, fileField, filePath string) (T, error) {
+
+	var zero T
+
+	raw, err := c.postMultipart(ctx, path, fields, fileField, filePath)
+	if err != nil {
+		return zero, err
+	}
+	return first[T](raw, path)
+}
+
 // ReadList fetches a collection. The returned Pagination is nil on a flat read.
 func ReadList[T any](ctx context.Context, c *Client, path string, query url.Values) ([]T, *Pagination, error) {
 	raw, err := c.do(ctx, http.MethodGet, path, query, nil)
