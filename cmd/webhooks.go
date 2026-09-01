@@ -9,9 +9,8 @@ import (
 // subscription exists and which events it covers.
 
 var webhooksCmd = &cobra.Command{
-	Use:     "webhooks",
-	Aliases: []string{"webhook"},
-	Short:   "Inspect webhook endpoints",
+	Use:   "webhooks",
+	Short: "Inspect webhook endpoints",
 	Long: `Inspect the webhook endpoints registered for your company.
 
 Webhooks are the push alternative to polling: audience.completed and
