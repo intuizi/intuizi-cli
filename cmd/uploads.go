@@ -22,9 +22,8 @@ const uploadsCreatePath = "/uploads/create"
 var uploadColumns = []string{"upload_reference", "expires_at", "max_content_length", "upload_url"}
 
 var uploadsCmd = &cobra.Command{
-	Use:     "uploads",
-	Aliases: []string{"upload"},
-	Short:   "Upload files for cohorts and POI submissions",
+	Use:   "uploads",
+	Short: "Upload files for cohorts and POI submissions",
 	Long: `Upload a file to Intuizi without owning any cloud storage.
 
 Uploading is three steps: reserve a slot, PUT the bytes to the presigned URL
