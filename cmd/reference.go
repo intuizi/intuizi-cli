@@ -44,9 +44,11 @@ type endpoint struct {
 }
 
 // referenceGroup is one URL segment below /analyses/reference: reference <group> <item>.
+// path overrides name as that URL segment, so a group can be typed the way the
+// console names it even where the API spells it differently.
 type referenceGroup struct {
 	name      string
-	aliases   []string
+	path      string
 	short     string
 	endpoints []endpoint
 }
@@ -129,9 +131,8 @@ var referenceGroups = []referenceGroup{
 		},
 	},
 	{
-		name:    "ctv",
-		aliases: []string{"connected-tv"},
-		short:   "Connected TV vendors, content, channels and devices",
+		name:  "ctv",
+		short: "Connected TV vendors, content, channels and devices",
 		endpoints: []endpoint{
 			{item: "vendors", short: "CTV vendors"},
 			{item: "content-types", short: "CTV content types"},
@@ -165,9 +166,9 @@ var referenceGroups = []referenceGroup{
 		},
 	},
 	{
-		name:    "affinity-transactions",
-		aliases: []string{"transactions"},
-		short:   "Affinity purchase categories, brands and demographics",
+		name:  "transactions",
+		path:  "affinity-transactions",
+		short: "Affinity purchase categories, brands and demographics",
 		endpoints: []endpoint{
 			{item: "categories", short: "Affinity categories"},
 			{item: "subcategories", short: "Affinity subcategories", paged: true, params: []param{
