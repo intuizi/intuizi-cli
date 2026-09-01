@@ -1,0 +1,6 @@
+{
+  "name": "Airport visitors cohort",
+  "source": "audience",
+  "audience_id": 88,
+  "device_limit": 1000
+}
