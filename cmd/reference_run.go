@@ -18,12 +18,15 @@ const referencePrefix = "/analyses/reference/"
 func init() {
 	for _, g := range referenceGroups {
 		groupCmd := &cobra.Command{
-			Use:     g.name,
-			Aliases: g.aliases,
-			Short:   g.short,
+			Use:   g.name,
+			Short: g.short,
+		}
+		segment := g.path
+		if segment == "" {
+			segment = g.name
 		}
 		for _, e := range g.endpoints {
-			groupCmd.AddCommand(e.command(g.name))
+			groupCmd.AddCommand(e.command(segment))
 		}
 		referenceCmd.AddCommand(groupCmd)
 	}
