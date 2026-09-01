@@ -95,12 +95,16 @@ var wantPaths = []string{
 func TestReferenceCoversEveryDocumentedPath(t *testing.T) {
 	built := make(map[string]bool)
 	for _, g := range referenceGroups {
+		group := g.path
+		if group == "" {
+			group = g.name
+		}
 		for _, e := range g.endpoints {
 			segment := e.path
 			if segment == "" {
 				segment = e.item
 			}
-			built[referencePrefix+g.name+"/"+segment] = true
+			built[referencePrefix+group+"/"+segment] = true
 		}
 	}
 
