@@ -358,7 +358,7 @@ func TestErrorWording(t *testing.T) {
 	}
 }
 
-func TestPostMultipart(t *testing.T) {
+func TestCreateMultipart(t *testing.T) {
 	fp := filepath.Join(t.TempDir(), "locations.csv")
 	if err := os.WriteFile(fp, []byte("latitude,longitude\n1,2\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -405,18 +405,18 @@ func TestPostMultipart(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	var out []map[string]any
-	err := New(srv.URL, "t").PostMultipart(context.Background(),
+	out, err := CreateMultipart[map[string]any](context.Background(), New(srv.URL, "t"),
 		"/my-data/pois/submissions/create-by-file",
 		map[string]string{"name": "Store list", "brand_id": "7", "update": "1"},
-		"locations_file", fp, &out)
+		"locations_file", fp)
 	if err != nil {
 		t.Fatalf("multipart: %v", err)
 	}
 	if hits != 2 {
 		t.Fatalf("hits = %d, want 2 (429 then success)", hits)
 	}
-	if len(out) != 1 || out[0]["id"] != float64(9) {
+	// The envelope wraps the new record in an array; the caller gets the record.
+	if out["id"] != float64(9) {
 		t.Fatalf("out: %+v", out)
 	}
 }
