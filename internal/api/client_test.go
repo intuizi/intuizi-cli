@@ -420,3 +420,29 @@ func TestCreateMultipart(t *testing.T) {
 		t.Fatalf("out: %+v", out)
 	}
 }
+
+// A 30s client timeout would be a ceiling on transfer time: a 50 MB POI file at
+// 15 Mbit/s is already ~27s.
+func TestMultipartIgnoresTheJSONClientTimeout(t *testing.T) {
+	fp := filepath.Join(t.TempDir(), "locations.csv")
+	if err := os.WriteFile(fp, []byte("latitude,longitude\n1,2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Stands in for a large file on a slow link.
+		time.Sleep(80 * time.Millisecond)
+		w.Write([]byte(`{"status":"success","code":200,"data":[{"id":9}]}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "t")
+	c.HTTP.Timeout = 10 * time.Millisecond
+
+	if _, err := CreateMultipart[map[string]any](context.Background(), c,
+		"/my-data/pois/submissions/create-by-file",
+		map[string]string{"name": "Store list", "brand_id": "7"},
+		"locations_file", fp); err != nil {
+		t.Fatalf("multipart failed under a short JSON timeout: %v", err)
+	}
+}
