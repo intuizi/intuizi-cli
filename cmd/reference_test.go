@@ -491,7 +491,7 @@ func TestEveryEndpointWorksWithJSON(t *testing.T) {
 // A paginated read fetches one page and says so on stderr.
 func TestPagedReadFetchesExactlyOnePage(t *testing.T) {
 	var requests int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, pagedEnvelopeMultiPage)
