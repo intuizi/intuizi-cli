@@ -45,8 +45,11 @@ func csvFile(t *testing.T) string {
 	return path
 }
 
+// A create returns {value,text}; only a read returns {id,name,status,...}.
+// Captured from staging.
 const submissionEnvelope = `{"status":"success","code":201,` +
-	`"data":[{"id":31,"name":"cli-task-7-test","status":"waiting","created_at":"2026-08-31T10:00:00Z"}]}`
+	`"message":"Resource created successfully.",` +
+	`"data":[{"value":31,"text":"cli-task-7-test"}]}`
 
 // --------------------------------------------------------------------------------- submissions: source choice
 
@@ -461,5 +464,32 @@ func TestPoiSegmentsListOmitsAnUnsetSearch(t *testing.T) {
 	}
 	if got.queries[0] != "" {
 		t.Errorf("an unset --search leaked: %q", got.queries[0])
+	}
+}
+
+// --file bypasses createBody, so --json needs its own case: a script reading
+// data[0].value must get the envelope, not a table.
+func TestPoiSubmissionsCreateByFileHonoursJSON(t *testing.T) {
+	srv, _ := stub(t, submissionEnvelope)
+
+	out, _, err := runJSON(t, poiSubmissionCreateCommand(), srv,
+		"--name", "cli-task-8-test",
+		"--brand-id", "9",
+		"--file", csvFile(t))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var env struct {
+		Status string `json:"status"`
+		Data   []struct {
+			Value json.Number `json:"value"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("--json did not print a parseable envelope: %v\n%s", err, out)
+	}
+	if env.Status != "success" || len(env.Data) == 0 || env.Data[0].Value == "" {
+		t.Fatalf("envelope missing data[0].value: %s", out)
 	}
 }
