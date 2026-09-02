@@ -96,9 +96,22 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 - **Human first, script friendly.** Readable tables by default, `--json` for
   raw responses, non-zero exit codes on API errors.
 
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | API error, or a `--wait` that ended in a failed or timed-out state |
+| `2` | Usage error - unknown flag or bad arguments |
+| `130` | Interrupted with Ctrl-C (SIGINT) |
+| `143` | Terminated (SIGTERM) |
+
+The signal codes follow the shell's `128 + signal` convention, so a script can
+tell a cancelled run from a failed one.
+
 ## Development
 
-Requires Go 1.22+.
+Requires Go 1.25+.
 
 ```bash
 make build   # build ./bin/intuizi
