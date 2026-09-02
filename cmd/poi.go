@@ -492,6 +492,15 @@ func createSubmissionByFile(cmd *cobra.Command, name string, brandID int, file s
 		fields["key"] = key
 	}
 
+	if jsonOutput {
+		raw, err := api.CreateMultipartRaw(cmd.Context(), c,
+			poiPrefix+"/submissions/create-by-file", fields, "locations_file", file)
+		if err != nil {
+			return err
+		}
+		return output.JSON(cmd.OutOrStdout(), raw)
+	}
+
 	created, err := api.CreateMultipart[output.Record](cmd.Context(), c,
 		poiPrefix+"/submissions/create-by-file", fields, "locations_file", file)
 	if err != nil {
