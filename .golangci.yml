@@ -1,2 +1,27 @@
-run:
-  timeout: 5m
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+    - unused
+  exclusions:
+    rules:
+      # Test servers write fixture bodies; a failed write fails the test anyway.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # Doc comments on exported API: deferred, not declined. Re-enable before
+      # the repo goes public.
+      - linters:
+          - revive
+        text: "^(exported|package-comments):"
+
+issues:
+  # Defaults cap repeats at 3 per message, which hides the true size of a first
+  # lint pass and makes progress look like new findings appearing.
+  max-issues-per-linter: 0
+  max-same-issues: 0
