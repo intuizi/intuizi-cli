@@ -106,7 +106,7 @@ func renderUsage(cmd *cobra.Command, rec output.Record) error {
 		})
 	}
 
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 	return output.TableWith(out, rows, []string{"operation", "label", "scanned"})
 }
 
