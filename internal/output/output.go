@@ -179,14 +179,14 @@ func Footer(w io.Writer, pg *api.Pagination) {
 		return
 	}
 	if pg.LastPage <= 1 {
-		fmt.Fprintf(w, "%d total\n", pg.Total)
+		_, _ = fmt.Fprintf(w, "%d total\n", pg.Total)
 		return
 	}
 	// Only point at --page while there is a further page to fetch.
 	if pg.CurrentPage >= pg.LastPage {
-		fmt.Fprintf(w, "page %d of %d, %d total\n", pg.CurrentPage, pg.LastPage, pg.Total)
+		_, _ = fmt.Fprintf(w, "page %d of %d, %d total\n", pg.CurrentPage, pg.LastPage, pg.Total)
 		return
 	}
-	fmt.Fprintf(w, "page %d of %d, %d total - use --page to fetch the rest\n",
+	_, _ = fmt.Fprintf(w, "page %d of %d, %d total - use --page to fetch the rest\n",
 		pg.CurrentPage, pg.LastPage, pg.Total)
 }
