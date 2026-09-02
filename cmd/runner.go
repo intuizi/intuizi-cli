@@ -99,7 +99,7 @@ func renderList(cmd *cobra.Command, path string, query url.Values, cols []string
 		return err
 	}
 	if len(items) == 0 {
-		fmt.Fprintln(cmd.ErrOrStderr(), empty)
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), empty)
 		return nil
 	}
 
@@ -161,7 +161,7 @@ func postID(cmd *cobra.Command, path string, id int, done string) error {
 	if err := c.Post(cmd.Context(), path, map[string]int{"id": id}, nil); err != nil {
 		return err
 	}
-	fmt.Fprintln(cmd.ErrOrStderr(), done)
+	_, _ = fmt.Fprintln(cmd.ErrOrStderr(), done)
 	return nil
 }
 
@@ -200,7 +200,7 @@ func createBody(cmd *cobra.Command, path string, payload any, lead []string, nex
 		return err
 	}
 	if next != "" {
-		fmt.Fprintln(cmd.ErrOrStderr(), next)
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), next)
 	}
 	return nil
 }
@@ -259,7 +259,7 @@ func confirm(cmd *cobra.Command, question string) error {
 		return errors.New("not a terminal - pass --yes to confirm")
 	}
 
-	fmt.Fprintf(cmd.ErrOrStderr(), "%s [y/N] ", question)
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s [y/N] ", question)
 	line, err := bufio.NewReader(in).ReadString('\n')
 	if err != nil && line == "" {
 		return errors.New("aborted")
