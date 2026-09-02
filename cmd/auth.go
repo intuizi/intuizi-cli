@@ -60,7 +60,7 @@ genuinely need a fresh one.
 The token is written to the config file with owner-only permissions. It is not
 affected by logging in elsewhere, and 'auth logout' does not revoke it on the
 server - it only forgets it locally.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		base := config.BaseURL(baseURLFlag)
 
 		// Accounts cap at 10 active tokens and logout doesn't revoke, so don't
@@ -199,7 +199,7 @@ var statusVerify bool
 var authStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show whether you are logged in",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		base := config.BaseURL(baseURLFlag)
 		path, _ := config.Path()
 
@@ -242,7 +242,7 @@ var authStatusCmd = &cobra.Command{
 var authLogoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Forget the stored token",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		cfg, err := config.Load()
 		if err != nil {
 			return err
