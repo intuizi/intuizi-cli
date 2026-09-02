@@ -33,13 +33,19 @@ func timeoutErr(filePath string, d time.Duration) error {
 		filepath.Base(filePath), d)
 }
 
-// postMultipart issues an multipart/form-data Post to create-by-file, streaming
-// the file rather than buffering it (POI files run to 50 MB), and returns the
-// envelope's data field for the caller to decode. Bounded by multipartTimeout,
+// postMultipart returns just the data field, which is all most callers want.
+func (c *Client) postMultipart(ctx context.Context, path string, fields map[string]string, fileField, filePath string) (json.RawMessage, error) {
+	_, data, err := c.postMultipartRaw(ctx, path, fields, fileField, filePath)
+	return data, err
+}
+
+// postMultipartRaw posts create-by-file as multipart/form-data, streaming the
+// file rather than buffering it (POI files run to 50 MB). Like doRaw it returns
+// the untouched body alongside the data field. Bounded by multipartTimeout,
 // retries included.
 //
 // Boolean form fields must be "1" or "0" - API rejects the string "true"
-func (c *Client) postMultipart(ctx context.Context, path string, fields map[string]string, fileField, filePath string) (json.RawMessage, error) {
+func (c *Client) postMultipartRaw(ctx context.Context, path string, fields map[string]string, fileField, filePath string) ([]byte, json.RawMessage, error) {
 	target := c.BaseURL + apiPrefix + path
 
 	// Outside the loop: a per-attempt deadline is not a ceiling.
@@ -49,15 +55,15 @@ func (c *Client) postMultipart(ctx context.Context, path string, fields map[stri
 	for attempt := 0; ; attempt++ {
 		req, err := c.newMultipartRequest(ctx, target, fields, fileField, filePath)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		resp, err := uploadHTTP.Do(req)
 		if err != nil {
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return nil, timeoutErr(filePath, multipartTimeout)
+				return nil, nil, timeoutErr(filePath, multipartTimeout)
 			}
-			return nil, fmt.Errorf("calling %s: %w", target, err)
+			return nil, nil, fmt.Errorf("calling %s: %w", target, err)
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
@@ -66,19 +72,19 @@ func (c *Client) postMultipart(ctx context.Context, path string, fields map[stri
 			resp.Body.Close()
 			if err := sleep(ctx, wait); err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
-					return nil, timeoutErr(filePath, multipartTimeout)
+					return nil, nil, timeoutErr(filePath, multipartTimeout)
 				}
-				return nil, err
+				return nil, nil, err
 			}
 			continue
 		}
 
-		_, data, err := readEnvelope(resp, target)
+		raw, data, err := readEnvelope(resp, target)
 		resp.Body.Close()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return data, nil
+		return raw, data, nil
 	}
 }
 
