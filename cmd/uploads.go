@@ -143,13 +143,13 @@ authorises it.`,
 				}
 			}
 
-			fmt.Fprintf(cmd.ErrOrStderr(), "uploading %s (%d bytes)...\n", info.Name(), info.Size())
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "uploading %s (%d bytes)...\n", info.Name(), info.Size())
 			if err := api.PutPresigned(cmd.Context(), url, ct, path); err != nil {
 				return err
 			}
 
 			// The reference alone on stdout, so $(...) captures it cleanly.
-			fmt.Fprintln(cmd.OutOrStdout(), ref)
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), ref)
 			return nil
 		},
 	}
