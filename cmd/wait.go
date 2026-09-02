@@ -108,7 +108,7 @@ func createAndWait(cmd *cobra.Command, prefix, singular string, body any, cols [
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "created %s %d\n", singular, id)
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "created %s %d\n", singular, id)
 	return waitAndPrint(cmd, c, prefix, singular, id, cols, timeout)
 }
 
@@ -133,7 +133,7 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 			rec = next
 			sid, name := statusOf(rec)
 			if sid != last {
-				fmt.Fprintf(cmd.ErrOrStderr(), "%s %d: %s\n", singular, id, statusLabel(sid, name))
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s %d: %s\n", singular, id, statusLabel(sid, name))
 				last, lastName = sid, name
 			}
 			if sid == statusCompleted {
@@ -163,7 +163,7 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 			if failures >= maxPollFailures {
 				return rec, fmt.Errorf("giving up after %d consecutive failed reads: %w", failures, err)
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "poll failed (%d/%d), retrying: %v\n", failures, maxPollFailures, err)
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "poll failed (%d/%d), retrying: %v\n", failures, maxPollFailures, err)
 		}
 
 		if err := sleepCtx(ctx, pollInterval); err != nil {
