@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -332,6 +333,20 @@ Exactly one source:
 			if (update || remove) && key == "" {
 				return errors.New("--update and --remove need --key to match on")
 			}
+			// Not MarkFlagRequired: cobra applies that to every branch before
+			// RunE, and --list legitimately takes both from the file.
+			if !flags.Changed("list") {
+				var missing []string
+				if name == "" {
+					missing = append(missing, "--name")
+				}
+				if brandID <= 0 {
+					missing = append(missing, "--brand-id")
+				}
+				if len(missing) > 0 {
+					return fmt.Errorf("pass %s", strings.Join(missing, " and "))
+				}
+			}
 
 			switch {
 			case flags.Changed("list"):
@@ -510,6 +525,6 @@ func createSubmissionByFile(cmd *cobra.Command, name string, brandID int, file s
 	if err := output.Detail(cmd.OutOrStdout(), flatten(created), submissionColumns); err != nil {
 		return err
 	}
-	fmt.Fprintln(cmd.ErrOrStderr(), "processing - run 'intuizi poi submissions show <id>'")
+	_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "processing - run 'intuizi poi submissions show <id>'")
 	return nil
 }
