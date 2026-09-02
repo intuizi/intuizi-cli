@@ -42,7 +42,7 @@ func TestPutPresignedSendsNoToken(t *testing.T) {
 		gotLen    int64
 		gotBody   []byte
 	)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		gotHeader = r.Header.Clone()
 		gotMethod = r.Method
 		gotLen = r.ContentLength
@@ -76,7 +76,7 @@ func TestPutPresignedSendsNoToken(t *testing.T) {
 func TestPutPresignedHonoursContentType(t *testing.T) {
 	fp := tempFile(t, "x")
 	var got string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got = r.Header.Get("Content-Type")
 	}))
 	defer srv.Close()
@@ -92,7 +92,7 @@ func TestPutPresignedHonoursContentType(t *testing.T) {
 // A rejected PUT reports the status and the storage host's own message.
 func TestPutPresignedReportsRejection(t *testing.T) {
 	fp := tempFile(t, "x")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		w.Write([]byte("<Error><Code>AccessDenied</Code></Error>"))
 	}))
@@ -114,7 +114,7 @@ func TestPutPresignedReportsRejection(t *testing.T) {
 // deadline stands in for the shipped ceiling: WithTimeout takes the earlier of
 // the two, so the same branch runs.
 func TestUploadTimeoutNamesTheFile(t *testing.T) {
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		time.Sleep(300 * time.Millisecond)
 	}))
 	defer slow.Close()
