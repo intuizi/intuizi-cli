@@ -52,6 +52,15 @@ func CreateMultipart[T any](ctx context.Context, c *Client, path string,
 	return first[T](raw, path)
 }
 
+// CreateMultipartRaw returns the whole envelope so --json prints what the
+// server sent. The multipart twin of PostRaw.
+func CreateMultipartRaw(ctx context.Context, c *Client, path string,
+	fields map[string]string, fileField, filePath string) ([]byte, error) {
+
+	raw, _, err := c.postMultipartRaw(ctx, path, fields, fileField, filePath)
+	return raw, err
+}
+
 // ReadList fetches a collection. The returned Pagination is nil on a flat read.
 func ReadList[T any](ctx context.Context, c *Client, path string, query url.Values) ([]T, *Pagination, error) {
 	raw, err := c.do(ctx, http.MethodGet, path, query, nil)
