@@ -144,7 +144,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, query url.Value
 			wait := retryAfter(resp.Header.Get("Retry-After"))
 			// Drain a little before closing so the connection can be reused.
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if err := sleep(ctx, wait); err != nil {
 				return nil, nil, err
 			}
@@ -152,7 +152,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, query url.Value
 		}
 
 		raw, data, err := readEnvelope(resp, target)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return raw, data, err
 	}
 }
@@ -283,10 +283,12 @@ type TokenResult struct {
 func MintAPIToken(ctx context.Context, baseURL, email, password string) (TokenResult, error) {
 	c := New(baseURL, "")
 
-	var out TokenResult
 	body := map[string]string{"email": email, "password": password}
 
-	if err := c.Post(ctx, "/auth/api-token", body, &out); err != nil {
+	// Create decodes through first[T], which takes either envelope shape. Auth
+	// returns an object today; this survives it being normalised to an array.
+	out, err := Create[TokenResult](ctx, c, "/auth/api-token", body)
+	if err != nil {
 		var apiErr *Error
 		if errors.As(err, &apiErr) {
 			switch apiErr.StatusCode {
