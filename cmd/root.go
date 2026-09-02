@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"sync/atomic"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -19,16 +23,26 @@ var baseURLFlag, idempotencyKeyFlag string
 // jsonOutput is the global --json: print the server's envelope, not a table.
 var jsonOutput bool
 
+// flagsParsed goes true in PersistentPreRun, which cobra reaches only once
+// flags parse. An error before that is a bad invocation (exit 2); after it, a
+// real failure (exit 1).
+var flagsParsed bool
+
 var rootCmd = &cobra.Command{
-	Use:           "intuizi",
-	Short:         "Intuizi CLI",
-	SilenceUsage:  true,
+	Use:   "intuizi",
+	Short: "Intuizi CLI",
+	// SilenceUsage stays false so a bad flag still prints usage - the one case
+	// where usage is the answer. PersistentPreRun turns it on once flags parse,
+	// so a failed API call is not followed by the whole usage block.
 	SilenceErrors: true,
 	// Runs after flag parsing, before any subcommand. Note cobra runs only the
 	// closest PersistentPreRun in the tree: a subcommand that defines its own
-	// must repeat this assignment or --idempotency-key is silently ignored.
+	// must repeat all three, or --idempotency-key is silently ignored and a
+	// failed call exits 2 as though the flags were wrong.
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		api.IdempotencyKey = idempotencyKeyFlag
+		flagsParsed = true
+		cmd.Root().SilenceUsage = true
 	},
 }
 
@@ -42,11 +56,59 @@ func client() (*api.Client, error) {
 	return api.New(config.BaseURL(baseURLFlag), token), nil
 }
 
+// Exit codes are a contract scripts depend on: 0 success, 1 API or wait
+// failure, 2 bad invocation. A signal reports 128+N, as the shell would have
+// before this process started catching signals.
+const (
+	exitError = 1
+	exitUsage = 2
+)
+
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	// Own the handler rather than signal.NotifyContext, which does not hand the
+	// signal back - and the exit code has to say which one arrived.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var caught atomic.Pointer[os.Signal]
+	go func() {
+		s := <-sigCh
+		caught.Store(&s)
+		signal.Stop(sigCh) // a second press kills outright, as it normally would
+		cancel()
+	}()
+
+	err := rootCmd.ExecuteContext(ctx)
+	if err == nil {
+		return
 	}
+
+	var sig os.Signal
+	if s := caught.Load(); s != nil {
+		sig = *s // interrupting is the user's own doing, so it is not reported
+	} else {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	}
+	os.Exit(exitCode(sig, flagsParsed))
+}
+
+// exitCode maps how the run ended onto the documented codes. Split out from
+// Execute so it can be tested without a subprocess.
+func exitCode(caught os.Signal, parsed bool) int {
+	if caught != nil {
+		if sig, ok := caught.(syscall.Signal); ok {
+			return 128 + int(sig)
+		}
+		return exitError
+	}
+	if !parsed {
+		return exitUsage
+	}
+	return exitError
 }
 
 var versionCmd = &cobra.Command{
