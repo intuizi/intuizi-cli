@@ -60,7 +60,7 @@ func TestVerifyAll(t *testing.T) {
 	}
 
 	// --- 422 cap: must NOT echo the server's revoke-endpoint advice ---
-	cap422 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	cap422 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(422)
 		w.Write([]byte(`{"status":"error","code":422,"message":"API token limit reached (10 active tokens). Revoke existing tokens via POST /api/v2/auth/api-token/revoke and retry.","data":[]}`))
 	}))
@@ -78,7 +78,7 @@ func TestVerifyAll(t *testing.T) {
 
 	// --- 422 validation: errors nest under data, and must NOT be mislabelled
 	// as the token cap. Body is the real staging response. ---
-	val422 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	val422 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(422)
 		w.Write([]byte(`{"status":"error","code":422,"message":"Validation error.","data":{"errors":{"email":["The email field is required."],"password":["The password field is required."]}}}`))
 	}))
@@ -98,7 +98,7 @@ func TestVerifyAll(t *testing.T) {
 	}
 
 	// --- top-level errors (the middleware shape) still work ---
-	top403 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	top403 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(403)
 		w.Write([]byte(`{"status":"error","code":403,"message":"Missing required request header.","data":[],"errors":{"headers":"X-Requested-With is required."}}`))
 	}))
@@ -109,7 +109,7 @@ func TestVerifyAll(t *testing.T) {
 	}
 
 	// --- 401 on mint = bad credentials, not the stale-token wording ---
-	un := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	un := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(401)
 		w.Write([]byte(`{"status":"error","code":401,"message":"Unauthenticated.","data":[]}`))
 	}))
@@ -133,7 +133,7 @@ func TestVerifyAll(t *testing.T) {
 	}
 
 	// --- HTML 502 from a proxy: status wins, no JSON parse error ---
-	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(502)
 		w.Write([]byte("<html><head><title>502 Bad Gateway</title></head></html>"))
 	}))
@@ -169,7 +169,7 @@ func TestReadShapes(t *testing.T) {
 	}
 
 	// --- an empty array is "no such record", not a blank resource ---
-	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"status":"success","code":200,"data":[]}`))
 	}))
 	defer empty.Close()
@@ -201,7 +201,7 @@ func TestReadShapes(t *testing.T) {
 	}
 
 	// --- flat list: a bare array, no pagination block ---
-	flat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	flat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"status":"success","code":200,"data":[{"id":1,"name":"X"},{"id":2,"name":"Y"}]}`))
 	}))
 	defer flat.Close()
@@ -222,7 +222,7 @@ func TestReadShapes(t *testing.T) {
 		t.Fatal("Read on a paginated route should error, not return a zero record")
 	}
 
-	obj := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	obj := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"status":"success","code":200,"data":{"id":7,"name":"Z"}}`))
 	}))
 	defer obj.Close()
@@ -429,7 +429,7 @@ func TestMultipartIgnoresTheJSONClientTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Stands in for a large file on a slow link.
 		time.Sleep(80 * time.Millisecond)
 		w.Write([]byte(`{"status":"success","code":200,"data":[{"id":9}]}`))
@@ -444,5 +444,32 @@ func TestMultipartIgnoresTheJSONClientTimeout(t *testing.T) {
 		map[string]string{"name": "Store list", "brand_id": "7"},
 		"locations_file", fp); err != nil {
 		t.Fatalf("multipart failed under a short JSON timeout: %v", err)
+	}
+}
+
+// Auth returns an object today; the array case is what first[T] buys.
+func TestMintAPITokenTakesEitherEnvelopeShape(t *testing.T) {
+	cases := []struct{ name, data string }{
+		{"object, as auth returns today", `{"token":"abc123","expires_at":"2027-07-29T00:00:00+00:00"}`},
+		{"one-element array, as every other route returns", `[{"token":"abc123","expires_at":"2027-07-29T00:00:00+00:00"}]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Write([]byte(`{"status":"success","code":200,"data":` + tc.data + `}`))
+			}))
+			defer srv.Close()
+
+			got, err := MintAPIToken(context.Background(), srv.URL, "a@example.com", "pw")
+			if err != nil {
+				t.Fatalf("mint: %v", err)
+			}
+			if got.Token != "abc123" {
+				t.Errorf("token = %q, want abc123", got.Token)
+			}
+			if got.ExpiresAt == "" {
+				t.Error("expires_at was dropped")
+			}
+		})
 	}
 }
