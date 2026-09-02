@@ -493,3 +493,52 @@ func TestPoiSubmissionsCreateByFileHonoursJSON(t *testing.T) {
 		t.Fatalf("envelope missing data[0].value: %s", out)
 	}
 }
+
+// Only --list can take these from the file; the other two must fail offline
+// rather than spend a round trip earning a 422.
+func TestPoiSubmissionsCreateNeedsNameAndBrand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"file, no name", []string{"--brand-id", "9", "--file", "a.csv"}, "--name"},
+		{"file, no brand", []string{"--name", "x", "--file", "a.csv"}, "--brand-id"},
+		{"file, neither", []string{"--file", "a.csv"}, "--name and --brand-id"},
+		{"upload, neither", []string{"--upload-reference", "upl_1"}, "--name and --brand-id"},
+		{"empty name is still missing", []string{"--name", "", "--brand-id", "9", "--file", "a.csv"}, "--name"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, `{}`)
+
+			_, _, err := run(t, poiSubmissionCreateCommand(), srv, tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to mention %q", err, tc.want)
+			}
+			if len(got.paths) != 0 {
+				t.Errorf("a missing required field should cost no round trip, got %v", got.paths)
+			}
+		})
+	}
+}
+
+// The exception MarkFlagRequired would have broken: --list may omit both.
+func TestPoiSubmissionsCreateByListNeedsNoFlags(t *testing.T) {
+	srv, got := stub(t, submissionEnvelope)
+
+	path := filepath.Join(t.TempDir(), "locations.json")
+	if err := os.WriteFile(path,
+		[]byte(`{"name":"from file","brand_id":9,`+
+			`"locations":[{"country":"US","longitude":-89.6501,"latitude":39.7817}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := run(t, poiSubmissionCreateCommand(), srv, "--list", path); err != nil {
+		t.Fatalf("--list without --name/--brand-id should work: %v", err)
+	}
+	if len(got.paths) != 1 {
+		t.Fatalf("paths = %v", got.paths)
+	}
+}
