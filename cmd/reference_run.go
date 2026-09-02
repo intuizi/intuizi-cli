@@ -184,7 +184,7 @@ func runReference(cmd *cobra.Command, path string, query url.Values) error {
 	}
 
 	if len(items) == 0 {
-		fmt.Fprintln(cmd.ErrOrStderr(), "no results")
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "no results")
 		return nil
 	}
 	if err := output.Table(cmd.OutOrStdout(), items); err != nil {
