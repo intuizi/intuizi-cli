@@ -69,7 +69,7 @@ func (c *Client) postMultipartRaw(ctx context.Context, path string, fields map[s
 		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
 			wait := retryAfter(resp.Header.Get("Retry-After"))
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if err := sleep(ctx, wait); err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
 					return nil, nil, timeoutErr(filePath, multipartTimeout)
@@ -80,7 +80,7 @@ func (c *Client) postMultipartRaw(ctx context.Context, path string, fields map[s
 		}
 
 		raw, data, err := readEnvelope(resp, target)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, nil, err
 		}
@@ -101,7 +101,7 @@ func (c *Client) newMultipartRequest(ctx context.Context, target string, fields 
 	mw := multipart.NewWriter(pw)
 
 	go func() {
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		// Sorted so the body is deterministic: map iteration is randomised,
 		// and stable bytes make failures reproducible.
@@ -133,7 +133,7 @@ func (c *Client) newMultipartRequest(ctx context.Context, target string, fields 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, pr)
 	if err != nil {
-		pr.Close() // unblocks the writer goroutine so it exits
+		_ = pr.Close() // unblocks the writer goroutine so it exits
 		return nil, err
 	}
 
@@ -161,7 +161,7 @@ func PutPresigned(ctx context.Context, url, contentType, filePath string) error 
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", filePath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	info, err := f.Stat()
 	if err != nil {
@@ -186,7 +186,7 @@ func PutPresigned(ctx context.Context, url, contentType, filePath string) error 
 		}
 		return fmt.Errorf("uploading %s: %w", filepath.Base(filePath), err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
