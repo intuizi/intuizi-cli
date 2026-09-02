@@ -24,22 +24,19 @@ var baseURLFlag, idempotencyKeyFlag string
 var jsonOutput bool
 
 // flagsParsed goes true in PersistentPreRun, which cobra reaches only once
-// flags parse. An error before that is a bad invocation (exit 2); after it, a
-// real failure (exit 1).
+// flags parse: an error before that is a bad invocation, after it a real one.
 var flagsParsed bool
 
 var rootCmd = &cobra.Command{
 	Use:   "intuizi",
 	Short: "Intuizi CLI",
-	// SilenceUsage stays false so a bad flag still prints usage - the one case
-	// where usage is the answer. PersistentPreRun turns it on once flags parse,
-	// so a failed API call is not followed by the whole usage block.
+	// False so a bad flag still prints usage; PersistentPreRun turns it on once
+	// flags parse, so a failed API call is not followed by the usage block.
 	SilenceErrors: true,
-	// Runs after flag parsing, before any subcommand. Note cobra runs only the
-	// closest PersistentPreRun in the tree: a subcommand that defines its own
-	// must repeat all three, or --idempotency-key is silently ignored and a
-	// failed call exits 2 as though the flags were wrong.
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	// Runs after flag parsing. Cobra runs only the closest PersistentPreRun, so
+	// a subcommand defining its own must repeat all three: otherwise
+	// --idempotency-key is ignored and a failed call exits 2 instead of 1.
+	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 		api.IdempotencyKey = idempotencyKeyFlag
 		flagsParsed = true
 		cmd.Root().SilenceUsage = true
@@ -56,9 +53,8 @@ func client() (*api.Client, error) {
 	return api.New(config.BaseURL(baseURLFlag), token), nil
 }
 
-// Exit codes are a contract scripts depend on: 0 success, 1 API or wait
-// failure, 2 bad invocation. A signal reports 128+N, as the shell would have
-// before this process started catching signals.
+// A contract scripts read: 0 success, 1 API or wait failure, 2 bad invocation.
+// A signal reports 128+N, as the shell did before we caught signals.
 const (
 	exitError = 1
 	exitUsage = 2
@@ -114,7 +110,7 @@ func exitCode(caught os.Signal, parsed bool) int {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		fmt.Println(version)
 	},
 }
