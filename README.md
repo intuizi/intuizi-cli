@@ -62,8 +62,9 @@ jq --arg r "$ref" '.upload_reference = $r | del(.file_uri)' examples/cohort.json
 # Or turn a completed audience into a cohort
 intuizi cohorts create --file examples/cohort-from-audience.json
 
-# Everything supports --json for scripting
-intuizi audiences list --json
+# Everything supports --json for scripting, and --quiet for ids alone
+intuizi audiences list --json | jq '.data.items[0].id'
+id=$(intuizi audiences create --file examples/audience-poi.json --wait --quiet)
 ```
 
 Ready-made payloads for every `--file` command live in [`examples/`](examples).
@@ -94,7 +95,7 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 - **Full v2 parity.** Auth, audiences (including refine and crosspurchase),
   activations, cohorts, POI, and reference reads.
 - **Human first, script friendly.** Readable tables by default, `--json` for
-  raw responses, non-zero exit codes on API errors.
+  raw responses, `--quiet` for ids alone, and exit codes scripts can branch on.
 
 ## Exit codes
 
@@ -102,7 +103,7 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 | --- | --- |
 | `0` | Success |
 | `1` | API error, or a `--wait` that ended in a failed or timed-out state |
-| `2` | Usage error - unknown flag or bad arguments |
+| `2` | Usage error - an unknown flag, or an invocation the CLI rejects before sending anything (missing or conflicting flags) |
 | `130` | Interrupted with Ctrl-C (SIGINT) |
 | `143` | Terminated (SIGTERM) |
 
