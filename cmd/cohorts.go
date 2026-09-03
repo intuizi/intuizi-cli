@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -90,7 +89,7 @@ duplicate import.`,
 				// Mixing the two would beg the question of which wins.
 				for _, f := range cohortFields {
 					if flags.Changed(f) {
-						return errors.New("--file carries the whole body; drop --" + f)
+						return usageErr("--file carries the whole body; drop --" + f)
 					}
 				}
 				return createFromFile(cmd, cohortsPrefix+"/create", file, cohortColumns,
@@ -104,7 +103,7 @@ duplicate import.`,
 				}
 			}
 			if len(missing) > 0 {
-				return errors.New("a cohort from a cloud file needs " +
+				return usageErr("a cohort from a cloud file needs " +
 					strings.Join(missing, ", ") + " - or pass the whole body with --file")
 			}
 			if err := validateFileURI(fileURI); err != nil {
