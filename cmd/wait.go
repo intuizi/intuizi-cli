@@ -68,7 +68,7 @@ func waitFlags(cmd *cobra.Command) func() (bool, time.Duration, error) {
 
 	return func() (bool, time.Duration, error) {
 		if !wait && flags.Changed("timeout") {
-			return false, 0, errors.New("--timeout only applies with --wait")
+			return false, 0, usageErr("--timeout only applies with --wait")
 		}
 		return wait, timeout, nil
 	}
@@ -80,6 +80,11 @@ func waitFlags(cmd *cobra.Command) func() (bool, time.Duration, error) {
 func waitAndPrint(cmd *cobra.Command, c *api.Client, prefix, singular string, id int, cols []string, timeout time.Duration) error {
 	path := prefix + "/" + strconv.Itoa(id)
 	final, err := waitFor(cmd, c, path, singular, id, timeout)
+	if quietOutput {
+		// The id exists either way; the exit code carries the outcome.
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), id)
+		return err
+	}
 	if err != nil {
 		return err
 	}
