@@ -174,11 +174,17 @@ func cell(v any) string {
 	}
 }
 
-// ID returns a record's id as text: "id" on reads, "value" on POI creates.
+// ID returns a record's identifier as text: "id" on reads, "value" on POI
+// creates, "upload_reference" on an upload reservation.
 func ID(r Record) (string, bool) {
-	for _, k := range []string{"id", "value"} {
-		if n, ok := r[k].(json.Number); ok {
-			return n.String(), true
+	for _, k := range []string{"id", "value", "upload_reference"} {
+		switch v := r[k].(type) {
+		case json.Number:
+			return v.String(), true
+		case string:
+			if v != "" {
+				return v, true
+			}
 		}
 	}
 	return "", false
