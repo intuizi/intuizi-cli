@@ -151,7 +151,7 @@ func readEmail() (string, error) {
 		return loginEmail, nil
 	}
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return "", errors.New("not a terminal - pass --email")
+		return "", usageErr("not a terminal - pass --email")
 	}
 
 	fmt.Print("Email: ")
