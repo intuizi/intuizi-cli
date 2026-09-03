@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -85,7 +84,7 @@ duplicate export.`,
 			for _, f := range []string{"audience-id", "endpoint-connection-id",
 				"pricing-model-id", "description", "project-id"} {
 				if flags.Changed(f) {
-					return errors.New("--file carries the whole body; drop --" + f)
+					return usageErr("--file carries the whole body; drop --" + f)
 				}
 			}
 			payload, err := readPayload(cmd, file)
@@ -96,7 +95,7 @@ duplicate export.`,
 		} else {
 			if !flags.Changed("audience-id") || !flags.Changed("endpoint-connection-id") ||
 				!flags.Changed("pricing-model-id") {
-				return errors.New("pass --file, or all of --audience-id, " +
+				return usageErr("pass --file, or all of --audience-id, " +
 					"--endpoint-connection-id and --pricing-model-id")
 			}
 			m := map[string]any{
