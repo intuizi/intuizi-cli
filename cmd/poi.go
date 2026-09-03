@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -328,10 +327,10 @@ Exactly one source:
 				}
 			}
 			if sources != 1 {
-				return errors.New("pass exactly one of --file, --upload-reference or --list")
+				return usageErr("pass exactly one of --file, --upload-reference or --list")
 			}
 			if (update || remove) && key == "" {
-				return errors.New("--update and --remove need --key to match on")
+				return usageErr("--update and --remove need --key to match on")
 			}
 			// Not MarkFlagRequired: cobra applies that to every branch before
 			// RunE, and --list legitimately takes both from the file.
@@ -344,7 +343,7 @@ Exactly one source:
 					missing = append(missing, "--brand-id")
 				}
 				if len(missing) > 0 {
-					return fmt.Errorf("pass %s", strings.Join(missing, " and "))
+					return usageErr("pass " + strings.Join(missing, " and "))
 				}
 			}
 
@@ -419,10 +418,10 @@ func mergeSubmissionFields(payload []byte, name string, brandID int, setName, se
 		body["brand_id"] = brandID
 	}
 	if _, ok := body["name"]; !ok {
-		return nil, errors.New("the list file has no name - pass --name")
+		return nil, usageErr("the list file has no name - pass --name")
 	}
 	if _, ok := body["brand_id"]; !ok {
-		return nil, errors.New("the list file has no brand_id - pass --brand-id")
+		return nil, usageErr("the list file has no brand_id - pass --brand-id")
 	}
 	return body, nil
 }
@@ -522,6 +521,9 @@ func createSubmissionByFile(cmd *cobra.Command, name string, brandID int, file s
 		return err
 	}
 
+	if quietOutput {
+		return output.IDs(cmd.OutOrStdout(), []output.Record{created})
+	}
 	if err := output.Detail(cmd.OutOrStdout(), flatten(created), submissionColumns); err != nil {
 		return err
 	}
