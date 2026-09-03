@@ -6,6 +6,7 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -171,6 +172,30 @@ func cell(v any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// ID returns a record's id as text: "id" on reads, "value" on POI creates.
+func ID(r Record) (string, bool) {
+	for _, k := range []string{"id", "value"} {
+		if n, ok := r[k].(json.Number); ok {
+			return n.String(), true
+		}
+	}
+	return "", false
+}
+
+// IDs writes one id per line, for --quiet. No id is an error, not a blank line.
+func IDs(w io.Writer, items []Record) error {
+	for _, r := range items {
+		id, ok := ID(r)
+		if !ok {
+			return errors.New("response carried no id")
+		}
+		if _, err := fmt.Fprintln(w, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Footer reports pagination. Goes to stderr: commentary, not payload.
