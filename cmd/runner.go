@@ -103,7 +103,11 @@ func renderList(cmd *cobra.Command, path string, query url.Values, cols []string
 		return nil
 	}
 
-	if len(cols) > 0 {
+	if quietOutput {
+		if err := output.IDs(cmd.OutOrStdout(), items); err != nil {
+			return err
+		}
+	} else if len(cols) > 0 {
 		rows := make([]output.Record, len(items))
 		for i, item := range items {
 			rows[i] = summarise(item, cols)
@@ -138,6 +142,9 @@ func renderOne(cmd *cobra.Command, path string, lead []string) error {
 	item, err := api.Read[output.Record](cmd.Context(), c, path, nil)
 	if err != nil {
 		return err
+	}
+	if quietOutput {
+		return output.IDs(cmd.OutOrStdout(), []output.Record{item})
 	}
 	return output.Detail(cmd.OutOrStdout(), flatten(item), lead)
 }
@@ -195,6 +202,9 @@ func createBody(cmd *cobra.Command, path string, payload any, lead []string, nex
 	created, err := api.Create[output.Record](cmd.Context(), c, path, payload)
 	if err != nil {
 		return err
+	}
+	if quietOutput {
+		return output.IDs(cmd.OutOrStdout(), []output.Record{created})
 	}
 	if err := output.Detail(cmd.OutOrStdout(), flatten(created), lead); err != nil {
 		return err
@@ -256,7 +266,7 @@ func payloadName(file string) string {
 func confirm(cmd *cobra.Command, question string) error {
 	in := cmd.InOrStdin()
 	if f, ok := in.(*os.File); ok && !term.IsTerminal(int(f.Fd())) {
-		return errors.New("not a terminal - pass --yes to confirm")
+		return usageErr("not a terminal - pass --yes to confirm")
 	}
 
 	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s [y/N] ", question)
