@@ -149,3 +149,39 @@ func TestQuietWaitPrintsIDOnSuccessAndFailure(t *testing.T) {
 		})
 	}
 }
+
+// uploads reserve has no id: its composable value is the reference, which is
+// what 'uploads put' already prints bare.
+func TestQuietUploadsReservePrintsTheReference(t *testing.T) {
+	quiet(t)
+	srv, _ := stub(t, `{"status":"success","code":201,"data":[{"upload_url":"https://s3/x","upload_reference":"upl_abc","headers":{}}]}`)
+	out, _, err := run(t, uploadsReserveCommand(), srv,
+		"--purpose", "cohort", "--filename", "a.csv", "--content-length", "10")
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if out != "upl_abc\n" {
+		t.Errorf("stdout = %q, want the upload_reference", out)
+	}
+}
+
+// A preview has no identifier at all, so --quiet is refused rather than
+// silently falling back to the table a script would then try to parse.
+func TestQuietRefusedOnCohortsPreview(t *testing.T) {
+	quiet(t)
+	srv, got := stub(t, `{"status":"success","code":200,"data":[{"columns":["email"]}]}`)
+	p := filepath.Join(t.TempDir(), "p.json")
+	if err := os.WriteFile(p, []byte(`{"file_uri":"s3://example-bucket/a.csv"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := run(t, cohortsPreviewCommand(), srv, "--file", p)
+	if err == nil || !strings.Contains(err.Error(), "does not apply") {
+		t.Fatalf("err = %v", err)
+	}
+	if exitCode(err, nil, true) != 2 {
+		t.Errorf("exit = %d, want 2", exitCode(err, nil, true))
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("refusal should cost no round trip, got %v", got.paths)
+	}
+}
