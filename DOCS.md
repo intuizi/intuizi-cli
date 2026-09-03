@@ -28,6 +28,7 @@ environment variable, which wins over the stored one.
 | Flag | Meaning |
 | --- | --- |
 | `--json` | Print the raw response envelope instead of a table |
+| `--quiet` | Print only ids on stdout, one per line, for shell scripts. Not with `--json` |
 | `--base-url` | Console base URL (default: the stored value, then production) |
 | `--idempotency-key` | Reuse one Idempotency-Key to retry a create whose outcome is unknown |
 
