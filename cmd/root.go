@@ -23,9 +23,28 @@ var baseURLFlag, idempotencyKeyFlag string
 // jsonOutput is the global --json: print the server's envelope, not a table.
 var jsonOutput bool
 
+// quietOutput is the global --quiet: ids only on stdout, one per line.
+var quietOutput bool
+
 // flagsParsed goes true in PersistentPreRun, which cobra reaches only once
 // flags parse: an error before that is a bad invocation, after it a real one.
 var flagsParsed bool
+
+// usageError is a bad invocation the CLI caught after cobra's flag parsing.
+// exitCode returns 2 for it; the message is shown as is, with no usage dump.
+type usageError struct{ msg string }
+
+func (e usageError) Error() string { return e.msg }
+
+func usageErr(msg string) error { return usageError{msg} }
+
+// outputFlagsConflict rejects --json with --quiet. Separate so it is testable.
+func outputFlagsConflict() error {
+	if jsonOutput && quietOutput {
+		return usageErr("--json and --quiet contradict: one prints the envelope, the other only ids")
+	}
+	return nil
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "intuizi",
@@ -36,10 +55,11 @@ var rootCmd = &cobra.Command{
 	// Runs after flag parsing. Cobra runs only the closest PersistentPreRun, so
 	// a subcommand defining its own must repeat all three: otherwise
 	// --idempotency-key is ignored and a failed call exits 2 instead of 1.
-	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		api.IdempotencyKey = idempotencyKeyFlag
 		flagsParsed = true
 		cmd.Root().SilenceUsage = true
+		return outputFlagsConflict()
 	},
 }
 
@@ -89,19 +109,20 @@ func Execute() {
 	} else {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 	}
-	os.Exit(exitCode(sig, flagsParsed))
+	os.Exit(exitCode(err, sig, flagsParsed))
 }
 
 // exitCode maps how the run ended onto the documented codes. Split out from
 // Execute so it can be tested without a subprocess.
-func exitCode(caught os.Signal, parsed bool) int {
+func exitCode(err error, caught os.Signal, parsed bool) int {
 	if caught != nil {
 		if sig, ok := caught.(syscall.Signal); ok {
 			return 128 + int(sig)
 		}
 		return exitError
 	}
-	if !parsed {
+	var ue usageError
+	if !parsed || errors.As(err, &ue) {
 		return exitUsage
 	}
 	return exitError
@@ -123,6 +144,9 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false,
 		"Print the raw JSON response envelope instead of a table")
+
+	rootCmd.PersistentFlags().BoolVar(&quietOutput, "quiet", false,
+		"Print only ids on stdout, one per line, so commands compose in scripts")
 
 	rootCmd.PersistentFlags().StringVar(&idempotencyKeyFlag, "idempotency-key", "",
 		"Reuse this Idempotency-Key on create commands, to retry a create whose "+
