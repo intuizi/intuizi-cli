@@ -205,6 +205,10 @@ file_uri or upload_reference, plus an optional file_format.
 Parquet files cannot be previewed - only csv and gzip.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// A preview is sample rows, not a resource, so there is no id to print.
+			if quietOutput {
+				return usageErr("cohorts preview returns sample rows, not an id - --quiet does not apply")
+			}
 			return createFromFile(cmd, cohortsPrefix+"/preview", file, nil, "")
 		},
 	}
