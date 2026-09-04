@@ -112,13 +112,36 @@ tell a cancelled run from a failed one.
 
 ## Development
 
-Requires Go 1.25+.
+Requires Go 1.25+, matching the `go` directive in `go.mod`. Lint with
+golangci-lint 2.13.2; CI pins that exact patch, so another version will report
+findings CI does not, or miss ones it catches.
 
 ```bash
 make build   # build ./bin/intuizi
 make test    # go test ./...
 make lint    # golangci-lint
 ```
+
+### Tests
+
+Tests never contact the real API. Each one starts a `net/http/httptest` server,
+hands it a canned response envelope and points the client's base URL at it, so
+the whole suite runs offline and needs no token.
+
+Realistic multi-field envelopes live as files in `cmd/testdata/responses/`; see
+the README there for what is captured and how to refresh it. Short bodies, and
+any body whose exact values a test asserts on, stay inline in the test that
+uses them.
+
+### CI
+
+`.github/workflows/ci.yml` runs `go vet`, golangci-lint and `go test -race` on
+every push to master and every pull request, across ubuntu-latest and
+macos-latest. Lint runs on Ubuntu only, since results do not vary by OS.
+
+The `ci` job aggregates the matrix and is the required status check for merging
+to master. Require that one, not an individual matrix leg, because a leg's name
+changes whenever the matrix does.
 
 ## Related
 
