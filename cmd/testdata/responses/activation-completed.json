@@ -1,0 +1,16 @@
+{"status":"success","code":200,"message":"Resource fetched successfully.","data":[
+ {"id":5621,"description":"Coffee Buyers NYC Activation",
+  "status":{"id":104,"name":"Completed"},
+  "audience":{"id":15572,"name":"Coffee Buyers NYC"},
+  "created_by":{"name":"Example User","email":"user@example.com"},
+  "project":null,
+  "partner":{"name":"Example Partner","description":"Example Partner"},
+  "pricing_model":{"name":"Cost per EID","price":0},
+  "datastreams":[
+   {"name":"marketing_audience","status":"success",
+    "results":{"uri":"s3://example-bucket/ExampleDefault/20260901_marketing_audience_id5621.csv"}},
+   {"name":"affinity_transactions_report","status":"success",
+    "results":{"uri":"s3://example-bucket/ExampleDefault/20260901_affinity_report_id5621.csv"}}],
+  "filters":{"freq_limit":false,"freq_min":0,"freq_max":0},
+  "filter_hash":null,
+  "created_at":"2026-09-01 21:18:30","updated_at":"2026-09-01 21:23:39"}]}
