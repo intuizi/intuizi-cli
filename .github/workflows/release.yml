@@ -1,0 +1,54 @@
+name: release
+
+# Only tags publish. A tag is the single trigger, so nothing here can fire on
+# an ordinary push and surprise anyone with a release.
+on:
+  push:
+    tags: ["v*"]
+
+# Read is not enough: goreleaser creates the GitHub Release and uploads the
+# archives, both of which are writes to repository contents.
+permissions:
+  contents: write
+
+jobs:
+  # Tests gate the release. A tag that fails here publishes nothing, which is
+  # the whole reason this is a separate job rather than a goreleaser hook.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: go vet ./...
+
+      - run: go test -race ./...
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # fetch-depth 0 because goreleaser reads the tag history to work out the
+      # version and to build the changelog from commits since the last tag.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          # Issued automatically to the run; no secret to create or rotate.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
