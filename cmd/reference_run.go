@@ -187,6 +187,18 @@ func runReference(cmd *cobra.Command, path string, query url.Values) error {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "no results")
 		return nil
 	}
+
+	// output.ID reads value and id, covering every catalog shape. The footer
+	// still prints: it is stderr commentary, and without it a paged catalog
+	// truncates silently.
+	if quietOutput {
+		if err := output.IDs(cmd.OutOrStdout(), items); err != nil {
+			return err
+		}
+		output.Footer(cmd.ErrOrStderr(), pg)
+		return nil
+	}
+
 	if err := output.Table(cmd.OutOrStdout(), items); err != nil {
 		return err
 	}
