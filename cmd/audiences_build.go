@@ -1,0 +1,204 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/intuizi/intuizi-cli/internal/api"
+	"github.com/intuizi/intuizi-cli/internal/output"
+)
+
+// Catalogs the create flags resolve against, mirroring the equivalent
+// 'intuizi reference <group> <item>'.
+const (
+	brandsPath    = referencePrefix + "poi/brands"
+	providersPath = referencePrefix + "common/signal-providers"
+)
+
+// categoryCatalog is where --category resolves and where the ids then go.
+// Both differ per type: WebDomain keeps its categories under web/iab-categories
+// and reads them from iab_category_codes, not categories.
+type categoryCatalog struct {
+	path string
+	key  string
+}
+
+var categoryCatalogs = map[string]categoryCatalog{
+	"POI":                  {referencePrefix + "poi/categories", "categories"},
+	"Apps":                 {referencePrefix + "apps/categories", "categories"},
+	"AffinityTransactions": {referencePrefix + "affinity-transactions/categories", "categories"},
+	"WebDomain":            {referencePrefix + "web/iab-categories", "iab_category_codes"},
+}
+
+// categoryFor rejects types with no category catalog, rather than sending a
+// field the API would ignore.
+func categoryFor(dsType string) (categoryCatalog, error) {
+	if c, ok := categoryCatalogs[dsType]; ok {
+		return c, nil
+	}
+	valid := make([]string, 0, len(categoryCatalogs))
+	for k := range categoryCatalogs {
+		valid = append(valid, k)
+	}
+	sort.Strings(valid)
+	return categoryCatalog{}, usageErr("--category applies to " +
+		strings.Join(valid, ", ") + ", not " + dsType)
+}
+
+// resolveOne insists on exactly one match. A guessed id builds an audience
+// that completes with no devices and no error. ReadList takes both catalog
+// shapes, so nothing here switches on that.
+func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (any, error) {
+	query := url.Values{}
+	query.Set("search", search)
+
+	items, _, err := api.ReadList[output.Record](ctx, c, path, query)
+	if err != nil {
+		return nil, err
+	}
+
+	switch len(items) {
+	case 1:
+		return catalogValue(items[0], path)
+	case 0:
+		return nil, usageErr(fmt.Sprintf("no %s match %q", what, search))
+	default:
+		// Ids too: the fix is usually to pass one.
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d %s match %q - narrow the search, or pass an id:",
+			len(items), what, search)
+		for _, it := range items {
+			fmt.Fprintf(&b, "\n  %-8v %v", it["value"], it["text"])
+		}
+		return nil, usageErr(b.String())
+	}
+}
+
+// catalogValue reads a row's id. Catalogs answer with value/text or id/name,
+// and a missing one would marshal as null - which the API ignores, leaving an
+// audience that completes with no devices.
+func catalogValue(r output.Record, path string) (any, error) {
+	for _, k := range []string{"value", "id"} {
+		if v := r[k]; v != nil {
+			return v, nil
+		}
+	}
+	return nil, fmt.Errorf("a row from %s carries no value or id", path)
+}
+
+// resolveOrID takes a name or the id itself; names are never purely numeric.
+// An id goes through unchecked - no catalog filters by id.
+func resolveOrID(ctx context.Context, c *api.Client, path, value, what string) (any, error) {
+	if id, err := strconv.Atoi(value); err == nil {
+		return id, nil
+	}
+	return resolveOne(ctx, c, path, value, what)
+}
+
+// allProviders backs the --provider default. A provider left out is the
+// quietest way to get an empty audience. Sets differ per type, so no cache.
+func allProviders(ctx context.Context, c *api.Client, dataType string) ([]any, error) {
+	query := url.Values{}
+	query.Set("dataType", dataType)
+
+	items, _, err := api.ReadList[output.Record](ctx, c, providersPath, query)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("no signal providers for dataset type %q", dataType)
+	}
+
+	values := make([]any, 0, len(items))
+	for _, it := range items {
+		v, err := catalogValue(it, providersPath)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, v)
+	}
+	return values, nil
+}
+
+// datasetTypes maps a lowercased type to the API's spelling, which varies and
+// is not guessable. Hardcoded because dataset-types comes back empty on
+// unprovisioned accounts.
+var datasetTypes = map[string]string{
+	"poi":                  "POI",
+	"webdomain":            "WebDomain",
+	"ctv":                  "CTV",
+	"apps":                 "Apps",
+	"cohorts":              "Cohorts",
+	"affinitytransactions": "AffinityTransactions",
+	"demographics":         "Demographics",
+	"deidentified":         "Deidentified",
+	"profileattributes":    "ProfileAttributes",
+}
+
+// canonicalType makes --type case-insensitive and rejects unknown ones.
+func canonicalType(t string) (string, error) {
+	if canon, ok := datasetTypes[strings.ToLower(t)]; ok {
+		return canon, nil
+	}
+	valid := make([]string, 0, len(datasetTypes))
+	for _, v := range datasetTypes {
+		valid = append(valid, v)
+	}
+	sort.Strings(valid)
+	return "", usageErr("unknown --type " + t + "; one of " + strings.Join(valid, ", "))
+}
+
+// audienceLocation omits dmas, which the API rejects.
+type audienceLocation struct {
+	Countries []string `json:"countries,omitempty"`
+	States    []string `json:"states,omitempty"`
+	Cities    []string `json:"cities,omitempty"`
+	Zipcodes  []string `json:"zipcodes,omitempty"`
+}
+
+// audienceDataset is typed, not a map, so a misspelled key is a compile error
+// - the one mistake --file cannot catch. analysisdata is POI's brand selector;
+// AffinityTransactions calls the same thing "brands".
+type audienceDataset struct {
+	Type             string            `json:"type"`
+	StartDate        string            `json:"start_date"`
+	EndDate          string            `json:"end_date"`
+	Analysisdata     []any             `json:"analysisdata,omitempty"`
+	Categories       []any             `json:"categories,omitempty"`
+	IABCategoryCodes []any             `json:"iab_category_codes,omitempty"`
+	SignalProviders  []any             `json:"signal_providers,omitempty"`
+	Location         *audienceLocation `json:"location,omitempty"`
+}
+
+// audienceBody is the single-dataset payload; two datasets go through --file.
+// No operator: the API stores "Single" itself, and it is not a valid input.
+type audienceBody struct {
+	Name     string            `json:"name"`
+	Datasets []audienceDataset `json:"datasets"`
+}
+
+// dateLayout is the payload's format. The summary "dataset" field renders
+// MM/DD/YYYY on read; normalized_payload echoes this one.
+const dateLayout = "2006-01-02"
+
+// parseWindow catches a transposed pair, which otherwise builds an empty
+// audience with nothing to explain why.
+func parseWindow(start, end string) error {
+	s, err := time.Parse(dateLayout, start)
+	if err != nil {
+		return usageErr("--start-date must be YYYY-MM-DD, not " + start)
+	}
+	e, err := time.Parse(dateLayout, end)
+	if err != nil {
+		return usageErr("--end-date must be YYYY-MM-DD, not " + end)
+	}
+	if e.Before(s) {
+		return usageErr(fmt.Sprintf("--end-date %s is before --start-date %s", end, start))
+	}
+	return nil
+}
