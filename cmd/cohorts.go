@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -29,20 +30,32 @@ Cohort status ids are their own scale, not the audience one: 1 Uploading,
 // cohortFields are the flat create flags - the whole body for a cohort imported
 // from a cloud file.
 var cohortFields = []string{
-	"name", "file-uri", "file-format", "identifier-type", "identifier-column",
-	"metadata-columns", "ip-enrichment", "device-limit", "project-id",
+	"name", "file-uri", "upload-reference", "audience-id", "file-format",
+	"identifier-type", "identifier-column", "metadata-columns",
+	"ip-enrichment", "device-limit", "project-id",
 }
 
-// cohortRequired are the fields a cloud-file import cannot be built without.
+// cohortRequired covers both file sources. The source itself is checked
+// separately: exactly one of three.
 var cohortRequired = []string{
-	"name", "file-uri", "file-format", "identifier-type", "identifier-column",
+	"name", "file-format", "identifier-type", "identifier-column",
+}
+
+// cohortAudienceOnly describe a file import. The API ignores them on an
+// audience source rather than rejecting them, so name the mistake here.
+var cohortAudienceOnly = []string{
+	"name", "file-format", "identifier-type", "identifier-column",
+	"metadata-columns", "ip-enrichment",
 }
 
 func cohortsCreateCommand() *cobra.Command {
 	var (
 		file        string
+		dryRun      bool
 		name        string
 		fileURI     string
+		uploadRef   string
+		audienceID  int
 		fileFormat  string
 		idType      string
 		idColumn    string
@@ -69,13 +82,25 @@ from flags:
 A file_uri ending .csv, .gz or .parquet is read as a single file; anything else
 is read as a folder.
 
-The other two sources are nested, so pass the whole body instead:
+The other two sources are flat too. From a file you uploaded, swap --file-uri
+for the reference 'intuizi uploads reserve' handed back:
 
-  from an upload - upload_reference from 'intuizi uploads reserve', instead of
-  file_uri
-  from an audience - source "audience" plus audience_id
+    intuizi cohorts create --name "Q3 customers" \
+      --upload-reference upl_abc123 --file-format csv \
+      --identifier-type hem_sha256 --identifier-column email_sha256
+
+From a Completed audience, --audience-id is the only flag needed; the cohort
+takes the audience's own name, so --name is ignored:
+
+    intuizi cohorts create --audience-id 88 --device-limit 1000
+
+An audience makes at most one live cohort. Capping by visit frequency or by
+distance instead of a device count needs freq_limit or distance_limit and their
+bounds, so those go through the whole body:
 
     intuizi cohorts create --file cohort.json
+
+--dry-run prints the body the flags produce and sends nothing.
 
 Check the column mapping before importing with 'intuizi cohorts preview'.
 
@@ -85,40 +110,68 @@ duplicate import.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()
 
+			next := "importing - run 'intuizi cohorts show <id>' for its status"
+
 			if file != "" {
 				// Mixing the two would beg the question of which wins.
-				for _, f := range cohortFields {
+				if err := rejectBodyFlags(flags, cohortFields); err != nil {
+					return err
+				}
+				if dryRun {
+					return usageErr("--dry-run builds a body from flags; --file already has one")
+				}
+				return createFromFile(cmd, cohortsPrefix+"/create", file, cohortColumns, next)
+			}
+
+			// Two sources would leave the API to decide silently.
+			sources := 0
+			for _, f := range []string{"file-uri", "upload-reference", "audience-id"} {
+				if flags.Changed(f) {
+					sources++
+				}
+			}
+			if sources != 1 {
+				return usageErr("give exactly one of --file-uri, --upload-reference or " +
+					"--audience-id - or pass the whole body with --file")
+			}
+
+			body := map[string]any{}
+
+			switch {
+			case flags.Changed("audience-id"):
+				// The cohort takes the audience's name.
+				for _, f := range cohortAudienceOnly {
 					if flags.Changed(f) {
-						return usageErr("--file carries the whole body; drop --" + f)
+						why := " describes a file import"
+						if f == "name" {
+							why = " is ignored: the cohort takes the audience's name"
+						}
+						return usageErr("--" + f + why +
+							"; drop it when the source is --audience-id")
 					}
 				}
-				return createFromFile(cmd, cohortsPrefix+"/create", file, cohortColumns,
-					"importing - run 'intuizi cohorts show <id>' for its status")
-			}
+				body["source"] = "audience"
+				body["audience_id"] = audienceID
 
-			var missing []string
-			for _, f := range cohortRequired {
-				if !flags.Changed(f) {
-					missing = append(missing, "--"+f)
+			default:
+				if err := missingFlags(flags, cohortRequired, "a cohort from a file"); err != nil {
+					return err
 				}
-			}
-			if len(missing) > 0 {
-				return usageErr("a cohort from a cloud file needs " +
-					strings.Join(missing, ", ") + " - or pass the whole body with --file")
-			}
-			if err := validateFileURI(fileURI); err != nil {
-				return err
-			}
-
-			body := map[string]any{
-				"name":              name,
-				"file_uri":          fileURI,
-				"file_format":       fileFormat,
-				"identifier_type":   idType,
-				"identifier_column": idColumn,
-			}
-			if len(metadata) > 0 {
-				body["metadata_columns"] = metadata
+				body["name"] = name
+				body["file_format"] = fileFormat
+				body["identifier_type"] = idType
+				body["identifier_column"] = idColumn
+				if flags.Changed("upload-reference") {
+					body["upload_reference"] = uploadRef
+				} else {
+					if err := validateFileURI(fileURI); err != nil {
+						return err
+					}
+					body["file_uri"] = fileURI
+				}
+				if len(metadata) > 0 {
+					body["metadata_columns"] = metadata
+				}
 			}
 			// An optional left unset is left out of the body: sending false or
 			// 0 is not the same as saying nothing about the field.
@@ -132,8 +185,12 @@ duplicate import.`,
 				body["project_id"] = projectID
 			}
 
-			return createBody(cmd, cohortsPrefix+"/create", body, cohortColumns,
-				"importing - run 'intuizi cohorts show <id>' for its status")
+			if dryRun {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(body)
+			}
+			return createBody(cmd, cohortsPrefix+"/create", body, cohortColumns, next)
 		},
 	}
 
@@ -141,8 +198,14 @@ duplicate import.`,
 	flags.StringVar(&file, "file", "",
 		`Path to the cohort payload, or "-" to read it from stdin`)
 	flags.StringVar(&name, "name", "", "The cohort name")
+	flags.BoolVar(&dryRun, "dry-run", false,
+		"Print the body the flags produce and send nothing")
 	flags.StringVar(&fileURI, "file-uri", "",
 		"The file to import: s3://bucket/path or gs://bucket/path")
+	flags.StringVar(&uploadRef, "upload-reference", "",
+		"An upload_reference from 'intuizi uploads reserve', instead of --file-uri")
+	flags.IntVar(&audienceID, "audience-id", 0,
+		"Build from this Completed audience instead of a file")
 	flags.StringVar(&fileFormat, "file-format", "",
 		"How the file is encoded: csv, gzip or parquet")
 	flags.StringVar(&idType, "identifier-type", "",
@@ -189,33 +252,88 @@ func validateFileURI(uri string) error {
 // --------------------------------------------------------------------------------- preview
 
 func cohortsPreviewCommand() *cobra.Command {
-	var file string
+	var (
+		file       string
+		fileURI    string
+		uploadRef  string
+		fileFormat string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "preview",
-		Short: "Preview a cohort file before importing it",
-		Long: `Preview a cohort file before importing it.
+		Short: "Preview the columns in a staged cohort file",
+		Long: `Preview the columns in a staged cohort file.
 
-Reads the first rows of a file you have staged and reports the columns it found,
-so you can pick identifier_column with confidence. The body names the file:
-file_uri or upload_reference, plus an optional file_format.
+Reads the first rows of a file you have staged and reports the columns it
+found, so you can pick identifier_column with confidence. The body is two or
+three scalars, so it can be built from flags:
 
-    intuizi cohorts preview --file preview.json
+    intuizi cohorts preview --file-uri s3://example-bucket/cohorts/q3.csv
+    intuizi cohorts preview --upload-reference upl_abc123 --file-format csv
 
-Parquet files cannot be previewed - only csv and gzip.`,
+Give exactly one of --file-uri or --upload-reference. --file-format is
+optional; the file is sniffed when it is left off.
+
+Parquet files cannot be previewed - only csv and gzip.
+
+The whole body still works if you prefer:
+
+    intuizi cohorts preview --file preview.json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			flags := cmd.Flags()
+
 			// A preview is sample rows, not a resource, so there is no id to print.
 			if quietOutput {
 				return usageErr("cohorts preview returns sample rows, not an id - --quiet does not apply")
 			}
-			return createFromFile(cmd, cohortsPrefix+"/preview", file, nil, "")
+
+			previewFields := []string{"file-uri", "upload-reference", "file-format"}
+			if file != "" {
+				if err := rejectBodyFlags(flags, previewFields); err != nil {
+					return err
+				}
+				return createFromFile(cmd, cohortsPrefix+"/preview", file, nil, "")
+			}
+
+			sources := 0
+			for _, f := range []string{"file-uri", "upload-reference"} {
+				if flags.Changed(f) {
+					sources++
+				}
+			}
+			if sources != 1 {
+				return usageErr("give exactly one of --file-uri or --upload-reference " +
+					"- or pass the whole body with --file")
+			}
+
+			body := map[string]any{}
+			if flags.Changed("upload-reference") {
+				body["upload_reference"] = uploadRef
+			} else {
+				if err := validateFileURI(fileURI); err != nil {
+					return err
+				}
+				body["file_uri"] = fileURI
+			}
+			if flags.Changed("file-format") {
+				body["file_format"] = fileFormat
+			}
+
+			return createBody(cmd, cohortsPrefix+"/preview", body, nil, "")
 		},
 	}
 
-	cmd.Flags().StringVar(&file, "file", "",
+	flags := cmd.Flags()
+	flags.StringVar(&file, "file", "",
 		`Path to the preview request, or "-" to read it from stdin`)
-	_ = cmd.MarkFlagRequired("file")
+	flags.StringVar(&fileURI, "file-uri", "",
+		"The file to preview: s3://bucket/path or gs://bucket/path")
+	flags.StringVar(&uploadRef, "upload-reference", "",
+		"An upload_reference from 'intuizi uploads reserve', instead of --file-uri")
+	flags.StringVar(&fileFormat, "file-format", "",
+		"How the file is encoded: csv or gzip (parquet cannot be previewed)")
+	cmd.MarkFlagsOneRequired("file", "file-uri", "upload-reference")
 	return cmd
 }
 
