@@ -5,9 +5,9 @@ signal platform. A single-binary client for the Intuizi API v2: manage
 audiences, activations, cohorts, and POI data from your terminal, scripts, or
 CI.
 
-> **Status: pre-alpha.** This repository was just created and the CLI is under
-> active development. Nothing is released yet - the interface below describes
-> the planned v0.1.0 surface and may change.
+> **Status: pre-release.** Under active development and not yet published. The
+> release pipeline is in place and verified, but no public version exists; the
+> first will be v0.1.0.
 
 ## Why a CLI
 
@@ -31,43 +31,69 @@ npm install -g @intuizi/cli
 No runtime dependencies - the CLI ships as a single static Go binary for
 macOS, Linux, and Windows (amd64 and arm64).
 
-## Planned usage
+## Usage
+
+Every command runs from flags. Names are resolved against the reference
+catalogs, so you pass "starbucks" rather than an id you had to look up first,
+and a name matching nothing or several things is an error that lists what it
+found.
 
 ```bash
 # Authenticate once; stores a bearer token in ~/.config/intuizi/
 intuizi auth login
 
-# Look up reference data for building audiences
-intuizi reference common dataset-types
-intuizi reference common states --countries USA
-intuizi reference apps categories --search fitness
+# Build an audience and block until it has built
+intuizi audiences create \
+  --type poi --brand starbucks \
+  --country USA --state CA --city "San Francisco" \
+  --start-date 2026-09-02 --end-date 2026-09-09 \
+  --name "Starbucks visitors - SF - 1 week" --wait
 
-# Create an audience from a payload file and block until it has built
-intuizi audiences create --file examples/audience-poi.json --wait
-
-# Export it to a destination and follow it to Completed (--timeout defaults to 60m)
+# Export it, following the delivery to Completed
 intuizi activations create --audience-id 88 \
   --endpoint-connection-id 12 --pricing-model-id 3 --wait
 
 # Import your own identifiers as a cohort from a cloud file
 intuizi cohorts create --name "Loyalty members" \
-  --file-uri s3://my-bucket/exports/loyalty.csv.gz --file-format gzip \
+  --file-uri s3://example-bucket/exports/loyalty.csv.gz --file-format gzip \
   --identifier-type hem_sha256 --identifier-column email_sha256
 
-# Or upload the file first and reference it from the payload
+# Or upload the file first and build from the reference it returns
 ref=$(intuizi uploads put customers.csv --purpose cohort)
-jq --arg r "$ref" '.upload_reference = $r | del(.file_uri)' examples/cohort.json \
-  | intuizi cohorts create --file -
+intuizi cohorts create --name "Customers" --upload-reference "$ref" \
+  --file-format csv --identifier-type hem_sha256 --identifier-column email
 
 # Or turn a completed audience into a cohort
-intuizi cohorts create --file examples/cohort-from-audience.json
+intuizi cohorts create --audience-id 88 --device-limit 1000
 
-# Everything supports --json for scripting, and --quiet for ids alone
-intuizi audiences list --json | jq '.data.items[0].id'
-id=$(intuizi audiences create --file examples/audience-poi.json --wait --quiet)
+# Rebuild an audience every week
+intuizi schedules create --name "Weekly refresh" --audience-id 88 \
+  --start "2026-09-15 06:00:00" --timezone America/New_York \
+  --frequency weekly --window 2
 ```
 
-Ready-made payloads for every `--file` command live in [`examples/`](examples).
+`--dry-run` prints the request body those flags produce and sends nothing, so
+you can check a payload before it costs anything, or redirect it to a file as a
+starting point.
+
+```bash
+intuizi audiences create --type poi --brand starbucks ... --dry-run > audience.json
+```
+
+`--file payload.json` (or `-` for stdin) stays for the genuinely nested cases:
+two datasets combined with an operator, refine and crosspurchase blocks, a
+schedule's auto-export, and cohort caps by visit frequency or distance.
+Ready-made payloads live in [`examples/`](examples).
+
+```bash
+# Everything supports --json for scripting, and --quiet for ids alone
+intuizi reference poi brands --search starbucks --quiet       # 208
+id=$(intuizi audiences create --type poi ... --wait --quiet)
+intuizi audiences show "$id" --json | jq '.data[0].normalized_payload'
+```
+
+Full flag reference, including the lookup command behind every value, is in
+[DOCS.md](DOCS.md).
 
 ## Commands
 
@@ -84,6 +110,7 @@ Ready-made payloads for every `--file` command live in [`examples/`](examples).
 | `reference` | 60 read-only catalogs across 10 groups |
 | `usage` | monthly data-scan usage |
 | `webhooks` | `list` |
+| `completion` | shell completion for bash, zsh, fish, powershell |
 
 In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 
@@ -96,6 +123,9 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
   activations, cohorts, POI, and reference reads.
 - **Human first, script friendly.** Readable tables by default, `--json` for
   raw responses, `--quiet` for ids alone, and exit codes scripts can branch on.
+- **Wrong input fails before it is sent.** Names are resolved against the
+  catalogs, dataset types and date ranges are validated locally, and payloads
+  are built from typed fields rather than free-form JSON.
 
 ## Exit codes
 
@@ -142,6 +172,19 @@ macos-latest. Lint runs on Ubuntu only, since results do not vary by OS.
 The `ci` job aggregates the matrix and is the required status check for merging
 to master. Require that one, not an individual matrix leg, because a leg's name
 changes whenever the matrix does.
+
+### Releases
+
+`.github/workflows/release.yml` fires on a `v*` tag. It runs the test suite,
+then goreleaser cross-compiles six binaries (darwin, linux and windows, each
+amd64 and arm64), packages them with a checksums file, and publishes a GitHub
+Release. Configuration is in `.goreleaser.yaml`.
+
+Test the packaging locally without publishing anything:
+
+```bash
+goreleaser release --snapshot --clean
+```
 
 ## Related
 
