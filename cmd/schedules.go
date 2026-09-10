@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -28,33 +31,193 @@ common schedule-frequencies, schedule-windows and schedule-endings.`,
 
 // --------------------------------------------------------------------------------- create
 
+// scheduleEnding: 1 Never carries nothing, 2 after_recurrences, 3 end_date.
+type scheduleEnding struct {
+	Type             int    `json:"type"`
+	AfterRecurrences int    `json:"after_recurrences,omitempty"`
+	EndDate          string `json:"end_date,omitempty"`
+}
+
+// scheduleRecurrence: window 3 Custom is the only one needing window_days.
+type scheduleRecurrence struct {
+	Start      string         `json:"start"`
+	Timezone   string         `json:"timezone"`
+	Frequency  string         `json:"frequency"`
+	WindowType int            `json:"window_type"`
+	WindowDays int            `json:"window_days,omitempty"`
+	Ending     scheduleEnding `json:"ending"`
+}
+
+type scheduleBody struct {
+	Name       string             `json:"name"`
+	AudienceID int                `json:"audience_id"`
+	Recurrence scheduleRecurrence `json:"recurrence"`
+}
+
+// scheduleFields are the body-building flags, for --file to reject.
+var scheduleFields = []string{
+	"name", "audience-id", "start", "timezone", "frequency",
+	"window", "window-days", "ending", "after-recurrences", "end-date",
+}
+
+var scheduleRequired = []string{"name", "audience-id", "start", "timezone", "frequency", "window"}
+
+// scheduleFrequencies are the catalog's values: lowercase, unlike the labels
+// the console shows.
+var scheduleFrequencies = map[string]string{
+	"daily": "daily", "weekly": "weekly", "bi-weekly": "bi-weekly", "monthly": "monthly",
+}
+
 func schedulesCreateCommand() *cobra.Command {
-	var file string
+	var (
+		file       string
+		dryRun     bool
+		name       string
+		audienceID int
+		start      string
+		timezone   string
+		frequency  string
+		window     int
+		windowDays int
+		ending     int
+		after      int
+		endDate    string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a schedule from a payload file",
-		Long: `Create a schedule from a payload file.
+		Short: "Create a schedule, from flags or a payload file",
+		Long: `Create a schedule.
 
-The body nests a recurrence block (start, timezone, frequency, window and
-ending) and an optional activation block for auto-export, so it is taken from a
-file:
+The recurrence block is one level deep, so it can be built from flags:
+
+    intuizi schedules create --name "Weekly coffee refresh" --audience-id 88 \
+      --start "2026-09-15 06:00:00" --timezone America/New_York \
+      --frequency weekly --window 2
+
+--frequency, --window and --ending take values from the catalogs:
+
+    intuizi reference common schedule-frequencies
+    intuizi reference common schedule-windows
+    intuizi reference common schedule-endings
+
+--start must be in the future and is read in --timezone. --window 3 is Custom
+and also needs --window-days. --ending defaults to 1 Never; 2 Recurrences needs
+--after-recurrences and 3 Custom Date needs --end-date.
+
+An activation block for auto-export is nested, so a schedule that exports every
+cycle is passed whole instead:
 
     intuizi schedules create --file schedule.json
-
-recurrence.start must be in the future, and is read in recurrence.timezone.
 
 A retry of this command reuses its Idempotency-Key, so it cannot create a
 duplicate schedule.`,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return createFromFile(cmd, schedulesPrefix+"/create", file, scheduleColumns, "")
-		},
 	}
 
-	cmd.Flags().StringVar(&file, "file", "",
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		flags := cmd.Flags()
+		path := schedulesPrefix + "/create"
+
+		if file != "" {
+			if err := rejectBodyFlags(flags, scheduleFields); err != nil {
+				return err
+			}
+			if dryRun {
+				return usageErr("--dry-run builds a body from flags; --file already has one")
+			}
+			return createFromFile(cmd, path, file, scheduleColumns, "")
+		}
+
+		if err := missingFlags(flags, scheduleRequired, "a schedule"); err != nil {
+			return err
+		}
+
+		freq, ok := scheduleFrequencies[strings.ToLower(frequency)]
+		if !ok {
+			return usageErr("unknown --frequency " + frequency +
+				"; one of bi-weekly, daily, monthly, weekly")
+		}
+
+		// Each rule carries its own field, and sending the wrong one is not
+		// rejected - it is ignored, leaving a schedule that never stops.
+		switch ending {
+		case 1:
+			if after != 0 || endDate != "" {
+				return usageErr("--ending 1 is Never; drop --after-recurrences and --end-date")
+			}
+		case 2:
+			if after == 0 {
+				return usageErr("--ending 2 is Recurrences and needs --after-recurrences")
+			}
+			if endDate != "" {
+				return usageErr("--end-date belongs to --ending 3, not 2")
+			}
+		case 3:
+			if endDate == "" {
+				return usageErr("--ending 3 is Custom Date and needs --end-date")
+			}
+			if _, err := time.Parse(dateLayout, endDate); err != nil {
+				return usageErr("--end-date must be YYYY-MM-DD, not " + endDate)
+			}
+			if after != 0 {
+				return usageErr("--after-recurrences belongs to --ending 2, not 3")
+			}
+		default:
+			return usageErr("unknown --ending " + strconv.Itoa(ending) +
+				"; 1 Never, 2 Recurrences or 3 Custom Date")
+		}
+
+		if window == 3 && windowDays == 0 {
+			return usageErr("--window 3 is Custom and needs --window-days")
+		}
+		if window != 3 && windowDays != 0 {
+			return usageErr("--window-days belongs to --window 3 Custom")
+		}
+
+		body := scheduleBody{
+			Name:       name,
+			AudienceID: audienceID,
+			Recurrence: scheduleRecurrence{
+				Start:      start,
+				Timezone:   timezone,
+				Frequency:  freq,
+				WindowType: window,
+				WindowDays: windowDays,
+				Ending: scheduleEnding{
+					Type: ending, AfterRecurrences: after, EndDate: endDate,
+				},
+			},
+		}
+
+		if dryRun {
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(body)
+		}
+		return createBody(cmd, path, body, scheduleColumns, "")
+	}
+
+	f := cmd.Flags()
+	f.StringVar(&file, "file", "",
 		`Path to the schedule payload, or "-" to read it from stdin`)
-	_ = cmd.MarkFlagRequired("file")
+	f.BoolVar(&dryRun, "dry-run", false,
+		"Print the body the flags produce and send nothing")
+	f.StringVar(&name, "name", "", "Name for the schedule")
+	f.IntVar(&audienceID, "audience-id", 0, "The audience to rebuild each cycle")
+	f.StringVar(&start, "start", "",
+		`First run, "YYYY-MM-DD HH:MM:SS", read in --timezone; must be in the future`)
+	f.StringVar(&timezone, "timezone", "", "IANA timezone, e.g. America/New_York")
+	f.StringVar(&frequency, "frequency", "",
+		"daily, weekly, bi-weekly or monthly (case-insensitive)")
+	f.IntVar(&window, "window", 0,
+		"Data window id from 'reference common schedule-windows'")
+	f.IntVar(&windowDays, "window-days", 0, "Day count for --window 3 Custom")
+	f.IntVar(&ending, "ending", 1,
+		"Stop rule from 'reference common schedule-endings': 1 Never, 2 Recurrences, 3 Custom Date")
+	f.IntVar(&after, "after-recurrences", 0, "Number of runs before stopping (--ending 2)")
+	f.StringVar(&endDate, "end-date", "", "Last run date, YYYY-MM-DD (--ending 3)")
+	cmd.MarkFlagsOneRequired("file", "audience-id")
 	return cmd
 }
 
