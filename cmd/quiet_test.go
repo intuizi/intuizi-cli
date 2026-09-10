@@ -103,6 +103,31 @@ func TestQuietListPrintsOneIDPerLine(t *testing.T) {
 	}
 }
 
+// Reference reads render through runReference, not renderList, and that
+// branch was missing --quiet entirely.
+//
+// This does not pin the ids to stdout: the harness calls SetOut, and cobra's
+// OutOrStderr returns the out writer when one is set, so the two are
+// indistinguishable here while differing in the binary. Use ErrOrStderr for
+// commentary; OutOrStderr is a fallback helper, not a stderr accessor.
+func TestQuietReferenceReadPrintsOneValuePerLine(t *testing.T) {
+	quiet(t)
+	srv, _ := stub(t, `{"status":"success","code":200,"data":[{"value":208,"text":"Starbucks"}]}`)
+
+	e := findEndpoint(t, "poi", "brands")
+	out, errOut, err := run(t, e.command("poi"), srv, "--search", "starbucks")
+	if err != nil {
+		t.Fatalf("reference read: %v", err)
+	}
+	// stdout: the point of --quiet is $(...) capture.
+	if out != "208\n" {
+		t.Errorf("stdout = %q, want the bare value", out)
+	}
+	if strings.Contains(errOut, "208") || strings.Contains(errOut, "Starbucks") {
+		t.Errorf("ids or table leaked to stderr: %q", errOut)
+	}
+}
+
 func TestQuietShowPrintsTheID(t *testing.T) {
 	quiet(t)
 	srv, _ := stub(t, `{"status":"success","code":200,"data":[{"id":42,"name":"Shoppers"}]}`)
