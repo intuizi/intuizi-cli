@@ -1,0 +1,307 @@
+package cmd
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/intuizi/intuizi-cli/internal/api"
+	"github.com/intuizi/intuizi-cli/internal/output"
+)
+
+// catalogServer answers every request with body and counts them.
+func catalogServer(t *testing.T, body string) (*api.Client, *int) {
+	t.Helper()
+
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+
+	return api.New(srv.URL, "test-token"), &calls
+}
+
+// Both envelope shapes: paged catalogs answer with data.items, unpaged ones
+// with a bare array.
+func TestResolveOneTakesBothEnvelopeShapes(t *testing.T) {
+	for name, body := range map[string]string{
+		"flat":  `{"status":"success","code":200,"message":"ok","data":[{"value":208,"text":"Starbucks"}]}`,
+		"paged": `{"status":"success","code":200,"message":"ok","data":{"items":[{"value":208,"text":"Starbucks"}],"pagination":{"current_page":1,"per_page":250,"total":1,"last_page":1}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, _ := catalogServer(t, body)
+
+			got, err := resolveOne(context.Background(), c, brandsPath, "starbucks", "brands")
+			if err != nil {
+				t.Fatalf("resolveOne: %v", err)
+			}
+			// Compare as JSON: the decoder's Go type is incidental.
+			raw, err := json.Marshal(got)
+			if err != nil {
+				t.Fatalf("marshalling the resolved id: %v", err)
+			}
+			if string(raw) != "208" {
+				t.Errorf("resolved to %s, want 208", raw)
+			}
+		})
+	}
+}
+
+// No match names the search term rather than selecting nothing.
+func TestResolveOneRejectsNoMatch(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[]}`)
+
+	_, err := resolveOne(context.Background(), c, brandsPath, "nosuchbrand", "brands")
+	if err == nil {
+		t.Fatal("resolveOne accepted a search with no matches")
+	}
+	if !strings.Contains(err.Error(), "nosuchbrand") {
+		t.Errorf("error does not name the search term: %v", err)
+	}
+}
+
+// Several matches list what was found. Picking one silently is the failure
+// that builds an audience with zero devices.
+func TestResolveOneRejectsAmbiguity(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":929,"text":"Dutch Bros Coffee"},{"value":921,"text":"Gregorys Coffee"}]}`)
+
+	_, err := resolveOne(context.Background(), c, brandsPath, "coffee", "brands")
+	if err == nil {
+		t.Fatal("resolveOne picked one of several matches")
+	}
+	// Ids as well as labels: the fix is usually to pass the id.
+	for _, want := range []string{"929", "Dutch Bros Coffee", "921", "Gregorys Coffee", "2 brands"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error omits %q: %v", want, err)
+		}
+	}
+	// One per line, so a long list stays readable.
+	if lines := strings.Count(err.Error(), "\n"); lines != 2 {
+		t.Errorf("got %d newlines, want one per candidate:\n%v", lines, err)
+	}
+}
+
+// A numeric argument is the id itself and costs no round trip.
+func TestResolveOrIDSkipsTheLookupForANumber(t *testing.T) {
+	c, calls := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[]}`)
+
+	got, err := resolveOrID(context.Background(), c, brandsPath, "208", "brands")
+	if err != nil {
+		t.Fatalf("resolveOrID: %v", err)
+	}
+	if got != 208 {
+		t.Errorf("got %v, want 208", got)
+	}
+	if *calls != 0 {
+		t.Errorf("made %d requests for a literal id, want 0", *calls)
+	}
+}
+
+// A non-numeric argument goes through the catalog.
+func TestResolveOrIDLooksUpAName(t *testing.T) {
+	c, calls := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[{"value":208,"text":"Starbucks"}]}`)
+
+	if _, err := resolveOrID(context.Background(), c, brandsPath, "starbucks", "brands"); err != nil {
+		t.Fatalf("resolveOrID: %v", err)
+	}
+	if *calls != 1 {
+		t.Errorf("made %d requests for a name, want 1", *calls)
+	}
+}
+
+// Every provider, in order; an empty catalog is an error.
+func TestAllProviders(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":"aaa","text":"aaa"},{"value":"bbb","text":"bbb"}]}`)
+
+	got, err := allProviders(context.Background(), c, "POI")
+	if err != nil {
+		t.Fatalf("allProviders: %v", err)
+	}
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshalling providers: %v", err)
+	}
+	if string(raw) != `["aaa","bbb"]` {
+		t.Errorf("got %s, want [\"aaa\",\"bbb\"]", raw)
+	}
+}
+
+func TestAllProvidersRejectsAnEmptyCatalog(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[]}`)
+
+	if _, err := allProviders(context.Background(), c, "POI"); err == nil {
+		t.Fatal("allProviders accepted a dataset type with no providers")
+	}
+}
+
+func TestParseWindow(t *testing.T) {
+	for name, tc := range map[string]struct {
+		start, end string
+		wantErr    string
+	}{
+		"valid":        {"2026-09-02", "2026-09-09", ""},
+		"same day":     {"2026-09-02", "2026-09-02", ""},
+		"transposed":   {"2026-09-09", "2026-09-02", "before"},
+		"bad start":    {"09/02/2026", "2026-09-09", "--start-date"},
+		"bad end":      {"2026-09-02", "next tuesday", "--end-date"},
+		"empty is bad": {"", "2026-09-09", "--start-date"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := parseWindow(tc.start, tc.end)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("parseWindow(%q, %q): %v", tc.start, tc.end, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("parseWindow(%q, %q) accepted an invalid window", tc.start, tc.end)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not mention %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// Documented field names, and unset selectors drop out rather than ship null.
+// Case-insensitive in, canonical out: the API's spelling is not derivable.
+func TestCanonicalType(t *testing.T) {
+	for in, want := range map[string]string{
+		"poi":                  "POI",
+		"POI":                  "POI",
+		"PoI":                  "POI",
+		"apps":                 "Apps",
+		"webdomain":            "WebDomain",
+		"affinitytransactions": "AffinityTransactions",
+		"profileattributes":    "ProfileAttributes",
+	} {
+		got, err := canonicalType(in)
+		if err != nil {
+			t.Errorf("canonicalType(%q): %v", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("canonicalType(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// An unknown type names the valid ones rather than reaching the API.
+func TestCanonicalTypeRejectsUnknown(t *testing.T) {
+	_, err := canonicalType("pois")
+	if err == nil {
+		t.Fatal("canonicalType accepted an unknown type")
+	}
+	for _, want := range []string{"pois", "POI", "AffinityTransactions"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error omits %q: %v", want, err)
+		}
+	}
+}
+
+func TestResolveOneRejectsARowWithNoID(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[{"text":"Starbucks"}]}`)
+
+	if _, err := resolveOne(context.Background(), c, brandsPath, "starbucks", "brands"); err == nil {
+		t.Fatal("resolveOne accepted a row carrying neither value nor id")
+	}
+}
+
+// Catalogs answer with value/text or id/name; both are ids.
+func TestCatalogValueReadsEitherKey(t *testing.T) {
+	for name, r := range map[string]output.Record{
+		"value": {"value": 208, "text": "Starbucks"},
+		"id":    {"id": 3, "name": "Custom"},
+	} {
+		got, err := catalogValue(r, "/x")
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if got == nil {
+			t.Errorf("%s: got nil", name)
+		}
+	}
+	if _, err := catalogValue(output.Record{"text": "no id here"}, "/x"); err == nil {
+		t.Error("catalogValue accepted a row with neither key")
+	}
+}
+
+// WebDomain reads its categories from iab_category_codes, not categories.
+// Writing the wrong field is not rejected by the API, just ignored.
+func TestCategoryForNamesBothCatalogAndField(t *testing.T) {
+	for dsType, wantKey := range map[string]string{
+		"POI":                  "categories",
+		"Apps":                 "categories",
+		"AffinityTransactions": "categories",
+		"WebDomain":            "iab_category_codes",
+	} {
+		cat, err := categoryFor(dsType)
+		if err != nil {
+			t.Errorf("categoryFor(%q): %v", dsType, err)
+			continue
+		}
+		if cat.key != wantKey {
+			t.Errorf("categoryFor(%q).key = %q, want %q", dsType, cat.key, wantKey)
+		}
+		if cat.path == "" {
+			t.Errorf("categoryFor(%q) has no path", dsType)
+		}
+	}
+
+	if _, err := categoryFor("CTV"); err == nil {
+		t.Fatal("categoryFor accepted a type with no category catalog")
+	}
+}
+
+func TestAudienceBodyMarshalling(t *testing.T) {
+
+	body := audienceBody{
+		Name: "Starbucks visitors - SF - 1 week",
+		Datasets: []audienceDataset{{
+			Type:            "POI",
+			StartDate:       "2026-09-02",
+			EndDate:         "2026-09-09",
+			Analysisdata:    []any{208},
+			SignalProviders: []any{"aaa"},
+			Location:        &audienceLocation{Countries: []string{"USA"}, Cities: []string{"San Francisco"}},
+		}},
+	}
+
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshalling the body: %v", err)
+	}
+	got := string(raw)
+
+	for _, want := range []string{
+		`"name":"Starbucks visitors - SF - 1 week"`,
+		`"type":"POI"`, `"start_date":"2026-09-02"`, `"end_date":"2026-09-09"`,
+		`"analysisdata":[208]`, `"signal_providers":["aaa"]`,
+		`"countries":["USA"]`, `"cities":["San Francisco"]`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("payload missing %s:\n%s", want, got)
+		}
+	}
+	// One dataset carries no operator; the API stores "Single" itself.
+	if strings.Contains(got, "operator") {
+		t.Errorf("payload carries an operator for a single dataset:\n%s", got)
+	}
+	// Unset selectors must not ship as null.
+	for _, unwanted := range []string{"categories", "states", "zipcodes"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("payload carries an unset %s:\n%s", unwanted, got)
+		}
+	}
+}
