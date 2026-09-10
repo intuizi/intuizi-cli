@@ -1,0 +1,15 @@
+{"status":"success","code":200,"message":"Resource fetched successfully.","data":[
+ {"id":15572,"name":"Coffee Buyers NYC","status":{"id":104,"name":"Completed"},
+  "is_cohort":false,"is_lookalike":false,"results_count":583,
+  "is_activation_allowed":true,
+  "eligibility":{"allowed":true,"reasons":[],
+   "metrics":{"unique_eids":583,"unique_scids":271,"eid_scid_ratio":2.15,"is_affinity":true}},
+  "totals":{"uniques":583,"scids":271,"transactions":460,
+   "amount":22497.42,"avg_amount_per_scid":83.02},
+  "feature_families":null,
+  "created_by":{"name":"Example User","email":"user@example.com"},
+  "project":null,"operator":null,
+  "dataset":[{"analysis_type":"AffinityTransactions",
+   "start_date":"08/01/2026","end_date":"08/01/2026"}],
+  "recipe_hash":null,"normalized_payload":null,
+  "created_at":"2026-09-01 21:07:58","updated_at":"2026-09-01 21:09:35"}]}

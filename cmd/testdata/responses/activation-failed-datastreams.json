@@ -1,0 +1,18 @@
+{"status":"success","code":200,"message":"Resource fetched successfully.","data":[
+ {"id":5561,"description":"Grocery and Convenience Activation",
+  "status":{"id":104,"name":"Completed"},
+  "audience":{"id":15463,"name":"Grocery and Convenience"},
+  "created_by":{"name":"Example User","email":"user@example.com"},
+  "project":null,
+  "partner":{"name":"Example Cloud","description":"Example Cloud Platform"},
+  "pricing_model":{"name":"Cost Per IP","price":0.002},
+  "datastreams":[
+   {"name":"marketing_audience","status":"failed",
+    "error":"An error occurred while uploading to Example Cloud. Try again or contact support.",
+    "results":[]},
+   {"name":"visitation_details","status":"failed",
+    "error":"An error occurred while uploading to Example Cloud. Try again or contact support.",
+    "results":[]}],
+  "filters":{"freq_limit":false,"freq_min":0,"freq_max":0},
+  "filter_hash":null,
+  "created_at":"2026-08-26 17:09:20","updated_at":"2026-08-26 17:16:13"}]}
