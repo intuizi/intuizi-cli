@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Repeated pushes to the same ref cancel the older run rather than burning
+# private-repo minutes on a result nobody will read.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      # A macOS-only flake must not hide the Ubuntu result.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Its own step, though golangci-lint runs govet too: a separate step
+      # names the failure.
+      - run: go vet ./...
+
+      # Lint results do not vary by OS, and macOS minutes bill at ten times
+      # the Ubuntu rate on a private repo. Pinned to the version developers
+      # run locally, so a clean local lint means a clean CI lint.
+      - name: golangci-lint
+        if: matrix.os == 'ubuntu-latest'
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+
+      # Race is clean today and costs about seven seconds on the slowest
+      # package, which is cheap insurance for the poller and the retry loop.
+      - run: go test -race ./...
+
+  # One stable check name for branch protection: this is the check to make
+  # required, not either matrix leg, because it survives a matrix change.
+  #
+  # !cancelled() rather than always(): always() runs even on a cancelled run,
+  # so a push superseded by cancel-in-progress above would fail here and paint
+  # a red X on a commit whose only fault was being overtaken.
+  ci:
+    needs: test
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.test.result }}" = "success"
