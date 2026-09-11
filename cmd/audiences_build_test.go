@@ -264,6 +264,65 @@ func TestCategoryForNamesBothCatalogAndField(t *testing.T) {
 	}
 }
 
+// --brand-all takes every match.
+func TestResolveAllTakesEveryMatch(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":929,"text":"Dutch Bros Coffee"},{"value":921,"text":"Gregorys Coffee"}]}`)
+
+	got, err := resolveAll(context.Background(), c, brandsPath, "coffee", "brands")
+	if err != nil {
+		t.Fatalf("resolveAll: %v", err)
+	}
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	if string(raw) != "[929,921]" {
+		t.Errorf("got %s, want [929,921]", raw)
+	}
+}
+
+func TestResolveAllRejectsNoMatch(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[]}`)
+
+	if _, err := resolveAll(context.Background(), c, brandsPath, "zzzz", "brands"); err == nil {
+		t.Fatal("resolveAll accepted a search with no matches")
+	}
+}
+
+// A paged catalog is refused, not silently truncated. POI brands do not
+// paginate today, so this guards the invariant rather than a live path.
+func TestResolveAllRefusesAPagedCatalog(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":{`+
+		`"items":[{"value":1,"text":"a"},{"value":2,"text":"b"}],`+
+		`"pagination":{"current_page":1,"per_page":2,"total":400,"last_page":200}}}`)
+
+	_, err := resolveAll(context.Background(), c, brandsPath, "wide", "categories")
+	if err == nil {
+		t.Fatal("resolveAll took page one of a 200-page catalog")
+	}
+	for _, want := range []string{"400", "200 pages", "narrow"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error omits %q: %v", want, err)
+		}
+	}
+}
+
+// One page is fine even when pagination is reported.
+func TestResolveAllAcceptsASinglePage(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":{`+
+		`"items":[{"value":23,"text":"Food & Drink"}],`+
+		`"pagination":{"current_page":1,"per_page":250,"total":1,"last_page":1}}}`)
+
+	got, err := resolveAll(context.Background(), c, brandsPath, "food", "categories")
+	if err != nil {
+		t.Fatalf("resolveAll refused a single page: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("got %d ids, want 1", len(got))
+	}
+}
+
 func TestAudienceBodyMarshalling(t *testing.T) {
 
 	body := audienceBody{
