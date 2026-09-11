@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +12,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/intuizi/intuizi-cli/internal/output"
 )
 
 // Commands are built fresh from their constructors rather than reached through
@@ -163,8 +168,13 @@ func TestShowUnwrapsOneElementArray(t *testing.T) {
 
 func TestShowRejectsABadID(t *testing.T) {
 	srv, got := stub(t, `{}`)
-	if _, _, err := run(t, showCommand("audience", audiencesPrefix, audienceColumns), srv, "eighty-eight"); err == nil {
+	_, _, err := run(t, showCommand("audience", audiencesPrefix, audienceColumns), srv, "eighty-eight")
+	if err == nil {
 		t.Fatal("expected an error for a non-numeric id")
+	}
+	// A malformed argument is a bad invocation, not a failed call.
+	if code := exitCode(err, nil, true); code != 2 {
+		t.Errorf("exit = %d, want 2", code)
 	}
 	if len(got.paths) != 0 {
 		t.Errorf("a bad id should cost no round trip, got %v", got.paths)
@@ -484,5 +494,82 @@ func TestDeleteJSONPrintsTheEnvelopeNotJustData(t *testing.T) {
 	}
 	if !strings.Contains(out, `"status"`) || !strings.Contains(out, `"code"`) {
 		t.Errorf("delete --json output is not an envelope:\n%s", out)
+	}
+}
+
+// webhooks list carries events as a list of strings, which "[2 items]" hid.
+// Scalars join; anything holding a map or a list keeps the count, since a
+// joined dump of those would be unreadable in a cell.
+func TestSummariseJoinsScalarArrays(t *testing.T) {
+	var item output.Record
+	if err := json.Unmarshal([]byte(`{"id":1,
+	 "events":["audience.completed","activation.completed"],
+	 "flags":[true,false],"nums":[1,2.50],
+	 "streams":[{"id":1}],"nested":[[1]],"none":[]}`), &item); err != nil {
+		t.Fatal(err)
+	}
+	cols := []string{"id", "events", "flags", "nums", "streams", "nested", "none"}
+	row := summarise(item, cols)
+
+	for col, want := range map[string]string{
+		"events": "audience.completed, activation.completed",
+		"flags":  "true, false",
+		"nums":   "1, 2.50",
+	} {
+		if row[col] != want {
+			t.Errorf("%s = %#v, want %q", col, row[col], want)
+		}
+	}
+	for _, col := range []string{"streams", "nested", "none"} {
+		if _, ok := row[col].([]any); !ok {
+			t.Errorf("%s = %#v, want the array left for the cell to count", col, row[col])
+		}
+	}
+	// flatten applies the same collapse to the detail view.
+	if got, _ := flatten(item)["events"].(string); got != row["events"] {
+		t.Errorf("flatten disagrees with summarise: %#v", flatten(item)["events"])
+	}
+}
+
+func TestListRendersScalarArraysJoined(t *testing.T) {
+	srv, _ := stub(t, `{"status":"success","code":200,"data":[
+	 {"id":1,"name":"deploy hook","events":["audience.completed","activation.completed"]}]}`)
+
+	cmd := &cobra.Command{Use: "list", RunE: func(cmd *cobra.Command, _ []string) error {
+		return renderList(cmd, "/webhooks/index", nil, []string{"id", "name", "events"}, "no webhooks")
+	}}
+	out, _, err := run(t, cmd, srv)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(out, "audience.completed, activation.completed") || strings.Contains(out, "items]") {
+		t.Errorf("events column not joined:\n%s", out)
+	}
+}
+
+// Ctrl-C at the prompt used to be swallowed: the read blocked on stdin, the
+// signal only cancelled a context nobody here watched, and a second press
+// killed the process by default disposition.
+func TestConfirmReturnsWhenTheContextIsCancelled(t *testing.T) {
+	pr, pw := io.Pipe() // never written to, so the read blocks like a terminal
+	t.Cleanup(func() { _ = pw.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cmd := &cobra.Command{Use: "x"}
+	cmd.SetIn(pr)
+	cmd.SetErr(io.Discard)
+	cmd.SetContext(ctx)
+
+	done := make(chan error, 1)
+	go func() { done <- confirm(cmd, "Delete audience 88?") }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want the context's own error so Execute maps it to 130/143", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("confirm is still blocked on stdin after the context was cancelled")
 	}
 }

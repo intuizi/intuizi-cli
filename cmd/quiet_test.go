@@ -56,6 +56,14 @@ func TestOutputIDReadsIDOrValue(t *testing.T) {
 	if _, ok := output.ID(rec(`{"name":"x"}`)); ok {
 		t.Error("no id should report !ok")
 	}
+	// Some catalogs (iab-categories) carry value, text and id together; the
+	// value is what the API takes back, so it is what --quiet prints.
+	if id, ok := output.ID(rec(`{"value":"IAB2","text":"Automotive","id":2}`)); !ok || id != "IAB2" {
+		t.Errorf("value+id shape: %q %v, want the value", id, ok)
+	}
+	if id, ok := output.ID(rec(`{"upload_reference":"upl_abc","upload_url":"x"}`)); !ok || id != "upl_abc" {
+		t.Errorf("upload shape: %q %v", id, ok)
+	}
 }
 
 func TestQuietCreatePrintsOnlyTheID(t *testing.T) {

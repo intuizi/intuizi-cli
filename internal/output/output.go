@@ -67,8 +67,13 @@ func Table(w io.Writer, items []Record) error {
 // useful fields are a small subset of what the endpoint returns. A column absent
 // from a record renders as an empty cell.
 func TableWith(w io.Writer, items []Record, cols []string) error {
-	if len(items) == 0 || len(cols) == 0 {
+	if len(items) == 0 {
 		return nil
+	}
+	if len(cols) == 0 {
+		// Rows with nothing in them would print nothing and exit 0, which a
+		// script cannot tell from success.
+		return errors.New("response rows carry no fields")
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -174,10 +179,12 @@ func cell(v any) string {
 	}
 }
 
-// ID returns a record's identifier as text: "id" on reads, "value" on POI
-// creates, "upload_reference" on an upload reservation.
+// ID returns a record's identifier as text: "value" on catalogs and POI
+// creates, "id" on reads, "upload_reference" on an upload reservation. value
+// comes first because some catalogs carry both, and the value is what the API
+// takes back.
 func ID(r Record) (string, bool) {
-	for _, k := range []string{"id", "value", "upload_reference"} {
+	for _, k := range []string{"value", "id", "upload_reference"} {
 		switch v := r[k].(type) {
 		case json.Number:
 			return v.String(), true

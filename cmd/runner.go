@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -89,6 +90,12 @@ func renderList(cmd *cobra.Command, path string, query url.Values, cols []string
 	if jsonOutput {
 		raw, err := c.GetRaw(cmd.Context(), path, query)
 		if err != nil {
+			// The envelope still goes out on a failure: --json promises what
+			// the server sent, and a script reads 422 field errors from it.
+			var apiErr *api.Error
+			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
+				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
+			}
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
@@ -134,6 +141,11 @@ func renderOne(cmd *cobra.Command, path string, lead []string) error {
 	if jsonOutput {
 		raw, err := c.GetRaw(cmd.Context(), path, nil)
 		if err != nil {
+			// As in renderList: the error envelope is still data for --json.
+			var apiErr *api.Error
+			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
+				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
+			}
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
@@ -160,6 +172,11 @@ func postID(cmd *cobra.Command, path string, id int, done string) error {
 	if jsonOutput {
 		raw, err := c.PostRaw(cmd.Context(), path, map[string]int{"id": id})
 		if err != nil {
+			// As in renderList: the error envelope is still data for --json.
+			var apiErr *api.Error
+			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
+				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
+			}
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
@@ -194,6 +211,11 @@ func createBody(cmd *cobra.Command, path string, payload any, lead []string, nex
 	if jsonOutput {
 		raw, err := c.PostRaw(cmd.Context(), path, payload)
 		if err != nil {
+			// As in renderList: the error envelope is still data for --json.
+			var apiErr *api.Error
+			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
+				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
+			}
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
@@ -270,11 +292,35 @@ func confirm(cmd *cobra.Command, question string) error {
 	}
 
 	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s [y/N] ", question)
-	line, err := bufio.NewReader(in).ReadString('\n')
-	if err != nil && line == "" {
+
+	// The read runs aside so a Ctrl-C at the prompt is seen: a blocking read
+	// on stdin cannot be interrupted, and only the context's error lets
+	// Execute map the signal to its exit code. The reader is left behind when
+	// cancelled; the process is exiting.
+	type answer struct {
+		line string
+		err  error
+	}
+	ch := make(chan answer, 1)
+	go func() {
+		line, err := bufio.NewReader(in).ReadString('\n')
+		ch <- answer{line, err}
+	}()
+
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background() // built outside cobra's Execute, as in a test
+	}
+	var a answer
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case a = <-ch:
+	}
+	if a.err != nil && a.line == "" {
 		return errors.New("aborted")
 	}
-	switch strings.ToLower(strings.TrimSpace(line)) {
+	switch strings.ToLower(strings.TrimSpace(a.line)) {
 	case "y", "yes":
 		return nil
 	default:
@@ -283,10 +329,11 @@ func confirm(cmd *cobra.Command, question string) error {
 }
 
 // parseID rejects a bad id locally rather than spending a round trip on it.
+// A usage error: the command line is wrong, and nothing was sent.
 func parseID(arg, singular string) (int, error) {
 	id, err := strconv.Atoi(strings.TrimSpace(arg))
 	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("%q is not a valid %s id", arg, singular)
+		return 0, usageErr(fmt.Sprintf("%q is not a valid %s id", arg, singular))
 	}
 	return id, nil
 }
@@ -313,16 +360,44 @@ func flatten(item output.Record) output.Record {
 	return out
 }
 
-// name unwraps {"id": .., "name": ".."} to the name, leaving anything else be.
+// name unwraps {"id": .., "name": ".."} to the name and joins a list of
+// scalars, leaving anything else be: a list holding maps or lists is better
+// counted by the cell than dumped into it.
 func name(v any) any {
-	m, ok := v.(map[string]any)
-	if !ok {
-		return v
-	}
-	if n, ok := m["name"]; ok {
-		return n
+	switch t := v.(type) {
+	case map[string]any:
+		if n, ok := t["name"]; ok {
+			return n
+		}
+	case []any:
+		if s, ok := joinScalars(t); ok {
+			return s
+		}
 	}
 	return v
+}
+
+// joinScalars renders ["a", "b"] as "a, b", so webhooks list shows its events.
+// An empty list is left alone: "[0 items]" says there are none, a blank cell
+// does not.
+func joinScalars(list []any) (string, bool) {
+	if len(list) == 0 {
+		return "", false
+	}
+	parts := make([]string, len(list))
+	for i, e := range list {
+		switch s := e.(type) {
+		case string:
+			parts[i] = s
+		case json.Number:
+			parts[i] = s.String()
+		case bool:
+			parts[i] = strconv.FormatBool(s)
+		default:
+			return "", false
+		}
+	}
+	return strings.Join(parts, ", "), true
 }
 
 // createRecord posts a body and returns the created record without printing

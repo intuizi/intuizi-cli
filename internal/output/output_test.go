@@ -216,3 +216,22 @@ func TestFooter(t *testing.T) {
 		})
 	}
 }
+
+// Rows with no keys used to render as nothing at all: no header, no error,
+// exit 0, and a script none the wiser that the response was empty objects.
+func TestTableRejectsRowsWithNoFields(t *testing.T) {
+	items := decode(t, `[{},{}]`)
+
+	var out strings.Builder
+	err := Table(&out, items)
+	if err == nil || !strings.Contains(err.Error(), "no fields") {
+		t.Fatalf("err = %v, want the rows reported as carrying no fields", err)
+	}
+	if out.String() != "" {
+		t.Errorf("wrote %q alongside the error", out.String())
+	}
+	// Explicit columns are the same contract.
+	if err := TableWith(&out, decode(t, `[{"a":1}]`), nil); err == nil {
+		t.Error("TableWith with rows but no columns should fail, not print nothing")
+	}
+}

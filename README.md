@@ -133,17 +133,12 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 | --- | --- |
 | `0` | Success |
 | `1` | API error, or a `--wait` that ended in a failed or timed-out state |
-| `2` | Usage error - an unknown flag or flag value, an unknown top-level command, or flags that are missing or conflict. Caught before anything is sent |
+| `2` | Usage error - an unknown flag or flag value, an unknown command or subcommand, an invalid id argument, or flags that are missing or conflict. Caught before anything is sent |
 | `130` | Interrupted with Ctrl-C (SIGINT) |
 | `143` | Terminated (SIGTERM) |
 
 The signal codes follow the shell's `128 + signal` convention, so a script can
 tell a cancelled run from a failed one.
-
-One gap worth knowing in a script: an unrecognised *subcommand* under a command
-group prints that group's help and exits `0`, rather than erroring. So
-`intuizi reference common state` (the catalog is `states`) succeeds silently
-with help text on stdout. Only an unrecognised top-level command exits `2`.
 
 ## Development
 

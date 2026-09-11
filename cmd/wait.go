@@ -70,6 +70,11 @@ func waitFlags(cmd *cobra.Command) func() (bool, time.Duration, error) {
 		if !wait && flags.Changed("timeout") {
 			return false, 0, usageErr("--timeout only applies with --wait")
 		}
+		if wait && timeout <= 0 {
+			// Otherwise the wait "times out" before its first read.
+			return false, 0, usageErr(fmt.Sprintf(
+				"--timeout %s cannot bound a wait - pass a positive duration such as 30m", timeout))
+		}
 		return wait, timeout, nil
 	}
 }
@@ -89,13 +94,40 @@ func waitAndPrint(cmd *cobra.Command, c *api.Client, prefix, singular string, id
 		return err
 	}
 	if jsonOutput {
-		raw, err := c.GetRaw(cmd.Context(), path, nil)
+		raw, err := rawAfterWait(cmd, c, path, final)
 		if err != nil {
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
 	}
 	return output.Detail(cmd.OutOrStdout(), flatten(final), cols)
+}
+
+// rawAfterWait re-reads the finished record for --json. The wait has already
+// succeeded, so a blip here is retried with the poll's own tolerance and,
+// failing that, the last polled record is printed instead: exit 1 with
+// nothing on stdout would read as the job having failed.
+func rawAfterWait(cmd *cobra.Command, c *api.Client, path string, final output.Record) ([]byte, error) {
+	ctx := cmd.Context()
+	var err error
+	for attempt := 1; ; attempt++ {
+		var raw []byte
+		if raw, err = c.GetRaw(ctx, path, nil); err == nil {
+			return raw, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if attempt >= maxPollFailures || isHardError(err) {
+			break
+		}
+		if err := sleepCtx(ctx, pollInterval); err != nil {
+			return nil, err
+		}
+	}
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+		"re-reading the final state failed (%v) - printing the last polled record instead\n", err)
+	return json.MarshalIndent(final, "", "  ")
 }
 
 // createAndWait posts a body, reports the new id on stderr, then follows it.
@@ -159,6 +191,11 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
 			return rec, timeoutError(singular, id, lastName, timeout)
 
+		case ctx.Err() != nil:
+			// Ctrl-C or SIGTERM landed mid-request. Execute maps it to the
+			// signal's code; a "retrying" line would be noise on the way out.
+			return rec, ctx.Err()
+
 		case isHardError(err):
 			// 401, 403, 404: retrying cannot help.
 			return rec, err
@@ -184,12 +221,14 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 // resumes the wait - the two things a CI log needs. The job keeps running
 // server-side; a timeout is the CLI giving up, not the export.
 func timeoutError(singular string, id int, lastName string, timeout time.Duration) error {
-	if lastName == "" {
-		lastName = "unknown"
+	// With no read at all, nothing is known to be running.
+	seen := "no status was read"
+	if lastName != "" {
+		seen = fmt.Sprintf("last status %s - it is still running", lastName)
 	}
-	return fmt.Errorf("%w after %s waiting for %s %d (last status %s) - it is still running; "+
+	return fmt.Errorf("%w after %s waiting for %s %d: %s; "+
 		"rerun 'intuizi %ss show %d --wait' to keep waiting",
-		errWaitTimeout, timeout, singular, id, lastName, singular, id)
+		errWaitTimeout, timeout, singular, id, seen, singular, id)
 }
 
 // statusOf reads {id, name} out of the status object. Numbers are json.Number
