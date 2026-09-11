@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -89,11 +91,94 @@ func TestResolveOneRejectsAmbiguity(t *testing.T) {
 	}
 }
 
+// Catalogs that answer {id,name} instead of {value,text} must list ids and
+// labels too, not a column of <nil>.
+func TestResolveOneAmbiguityListsIDNameRows(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"id":200,"name":"Brand 0"},{"id":201,"name":"Brand 1"}]}`)
+
+	_, err := resolveOne(context.Background(), c, brandsPath, "brand", "brands")
+	if err == nil {
+		t.Fatal("resolveOne picked one of several matches")
+	}
+	for _, want := range []string{"200", "Brand 0", "201", "Brand 1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error omits %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "<nil>") {
+		t.Errorf("error renders nil cells:\n%v", err)
+	}
+}
+
+// A paged catalog answers one page. Listing it as if it were everything hides
+// the matches that would have made the search obviously too broad.
+func TestResolveOneAmbiguitySaysWhenMoreMatchesExist(t *testing.T) {
+	page := func(total int) string {
+		return `{"status":"success","code":200,"message":"ok","data":{"items":[` +
+			`{"value":1,"text":"Games A"},{"value":2,"text":"Games B"}],` +
+			`"pagination":{"current_page":1,"per_page":2,"total":` + strconv.Itoa(total) + `,"last_page":1}}}`
+	}
+	appsCategories := referencePrefix + "apps/categories"
+
+	t.Run("truncated", func(t *testing.T) {
+		c, _ := catalogServer(t, page(30))
+		_, err := resolveOne(context.Background(), c, appsCategories, "games", "categories")
+		if err == nil {
+			t.Fatal("resolveOne picked one of several matches")
+		}
+		for _, want := range []string{"showing 2 of 30", "narrow the search", "Games A", "Games B"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error omits %q: %v", want, err)
+			}
+		}
+		// The hint must not cost the one-line-per-candidate layout.
+		if lines := strings.Count(err.Error(), "\n"); lines != 2 {
+			t.Errorf("got %d newlines, want one per candidate:\n%v", lines, err)
+		}
+	})
+
+	t.Run("complete page", func(t *testing.T) {
+		c, _ := catalogServer(t, page(2))
+		_, err := resolveOne(context.Background(), c, appsCategories, "games", "categories")
+		if err == nil {
+			t.Fatal("resolveOne picked one of several matches")
+		}
+		if strings.Contains(err.Error(), "showing") {
+			t.Errorf("a complete page needs no truncation hint: %v", err)
+		}
+	})
+}
+
+// Zero and negative numbers parse as ids, but no catalog holds them, so they
+// would build an empty audience. Rejected locally, like parseID.
+func TestResolveOrIDRejectsNonPositiveIDs(t *testing.T) {
+	c, calls := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[]}`)
+
+	for _, bad := range []string{"0", "-5"} {
+		_, err := resolveOrID(context.Background(), c, brandsPath, "--brand", bad, "brands")
+		if err == nil {
+			t.Errorf("resolveOrID accepted %q as an id", bad)
+			continue
+		}
+		var ue usageError
+		if !errors.As(err, &ue) {
+			t.Errorf("%q: not a usage error: %v", bad, err)
+		}
+		if !strings.Contains(err.Error(), "--brand") || !strings.Contains(err.Error(), bad) {
+			t.Errorf("error should name the flag and the value: %v", err)
+		}
+	}
+	if *calls != 0 {
+		t.Errorf("made %d requests for a bad id, want 0", *calls)
+	}
+}
+
 // A numeric argument is the id itself and costs no round trip.
 func TestResolveOrIDSkipsTheLookupForANumber(t *testing.T) {
 	c, calls := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[]}`)
 
-	got, err := resolveOrID(context.Background(), c, brandsPath, "208", "brands")
+	got, err := resolveOrID(context.Background(), c, brandsPath, "--brand", "208", "brands")
 	if err != nil {
 		t.Fatalf("resolveOrID: %v", err)
 	}
@@ -109,7 +194,7 @@ func TestResolveOrIDSkipsTheLookupForANumber(t *testing.T) {
 func TestResolveOrIDLooksUpAName(t *testing.T) {
 	c, calls := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[{"value":208,"text":"Starbucks"}]}`)
 
-	if _, err := resolveOrID(context.Background(), c, brandsPath, "starbucks", "brands"); err != nil {
+	if _, err := resolveOrID(context.Background(), c, brandsPath, "--brand", "starbucks", "brands"); err != nil {
 		t.Fatalf("resolveOrID: %v", err)
 	}
 	if *calls != 1 {

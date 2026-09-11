@@ -57,7 +57,7 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 	query := url.Values{}
 	query.Set("search", search)
 
-	items, _, err := api.ReadList[output.Record](ctx, c, path, query)
+	items, pg, err := api.ReadList[output.Record](ctx, c, path, query)
 	if err != nil {
 		return nil, err
 	}
@@ -70,13 +70,39 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 	default:
 		// Ids too: the fix is usually to pass one.
 		var b strings.Builder
-		fmt.Fprintf(&b, "%d %s match %q - narrow the search, or pass an id:",
-			len(items), what, search)
+		if pg != nil && pg.Total > len(items) {
+			// A paged catalog answered one page; the rest are not listed.
+			fmt.Fprintf(&b, "%d %s match %q - showing %d of %d matches, narrow the search or pass an id:",
+				pg.Total, what, search, len(items), pg.Total)
+		} else {
+			fmt.Fprintf(&b, "%d %s match %q - narrow the search, or pass an id:",
+				len(items), what, search)
+		}
 		for _, it := range items {
-			fmt.Fprintf(&b, "\n  %-8v %v", it["value"], it["text"])
+			fmt.Fprintf(&b, "\n  %-8v %v", catalogID(it), catalogLabel(it))
 		}
 		return nil, usageErr(b.String())
 	}
+}
+
+// catalogID is catalogValue for a listing, where a row with no id is still
+// worth showing rather than aborting the message.
+func catalogID(r output.Record) any {
+	v, err := catalogValue(r, "")
+	if err != nil {
+		return "?"
+	}
+	return v
+}
+
+// catalogLabel reads a row's label from either catalog shape.
+func catalogLabel(r output.Record) any {
+	for _, k := range []string{"text", "name"} {
+		if v := r[k]; v != nil {
+			return v
+		}
+	}
+	return "?"
 }
 
 // catalogValue reads a row's id. Catalogs answer with value/text or id/name,
@@ -92,9 +118,15 @@ func catalogValue(r output.Record, path string) (any, error) {
 }
 
 // resolveOrID takes a name or the id itself; names are never purely numeric.
-// An id goes through unchecked - no catalog filters by id.
-func resolveOrID(ctx context.Context, c *api.Client, path, value, what string) (any, error) {
+// No catalog filters by id, so an id is only checked for sign: zero and
+// negatives stop here, like parseID, rather than building an empty audience.
+// flag is the flag the value came from, for the error.
+func resolveOrID(ctx context.Context, c *api.Client, path, flag, value, what string) (any, error) {
 	if id, err := strconv.Atoi(value); err == nil {
+		if id <= 0 {
+			return nil, usageErr(fmt.Sprintf("%s %s is not a valid id; ids are positive, or pass a name",
+				flag, value))
+		}
 		return id, nil
 	}
 	return resolveOne(ctx, c, path, value, what)
@@ -123,6 +155,30 @@ func allProviders(ctx context.Context, c *api.Client, dataType string) ([]any, e
 		values = append(values, v)
 	}
 	return values, nil
+}
+
+// checkProviders keeps --provider to the type's catalog, in the order given.
+// The API does not reject an id outside it: the audience completes with zero
+// devices, which is what the help warns about, and a typo is the likeliest
+// way there.
+func checkProviders(given []string, catalog []any, dataType string) ([]any, error) {
+	valid := make([]string, 0, len(catalog))
+	known := make(map[string]bool, len(catalog))
+	for _, v := range catalog {
+		// Compared as text: catalog values decode as json.Number or string.
+		s := fmt.Sprint(v)
+		valid = append(valid, s)
+		known[s] = true
+	}
+	out := make([]any, 0, len(given))
+	for _, p := range given {
+		if !known[p] {
+			return nil, usageErr(fmt.Sprintf("--provider %s is not a signal provider for %s; one of %s",
+				p, dataType, strings.Join(valid, ", ")))
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 // datasetTypes maps a lowercased type to the API's spelling, which varies and

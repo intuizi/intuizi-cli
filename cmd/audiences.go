@@ -72,7 +72,9 @@ value.
 
 Omitting --provider includes every signal provider for the dataset type, which
 is almost always what you want: a provider left out builds an audience that
-completes with zero devices and no error.
+completes with zero devices and no error. A --provider the type's catalog does
+not list is rejected, since the API would accept it and build that same empty
+audience.
 
 --dry-run prints the body those flags produce and sends nothing, so it doubles
 as a starting point for the file form:
@@ -128,6 +130,9 @@ duplicate.`,
 		if err := missingFlags(flags, audienceRequired, "a single-dataset audience"); err != nil {
 			return err
 		}
+		if err := nonEmpty("name", name); err != nil {
+			return err
+		}
 		if err := parseWindow(startDate, endDate); err != nil {
 			return err
 		}
@@ -145,6 +150,25 @@ duplicate.`,
 			}
 			return usageErr("--brand applies to --type POI, not " + dsType + hint)
 		}
+		// Before client(): a type with no category catalog is a usage error
+		// whether or not there is a token.
+		var cat categoryCatalog
+		if len(categories) > 0 {
+			if cat, err = categoryFor(dsType); err != nil {
+				return err
+			}
+		}
+		for _, r := range []struct {
+			flag   string
+			values []string
+		}{
+			{"brand", brands}, {"category", categories}, {"provider", providers},
+			{"country", countries}, {"state", states}, {"city", cities}, {"zipcode", zipcodes},
+		} {
+			if err := nonEmpty(r.flag, r.values...); err != nil {
+				return err
+			}
+		}
 
 		c, err := client()
 		if err != nil {
@@ -155,20 +179,16 @@ duplicate.`,
 		ds := audienceDataset{Type: dsType, StartDate: startDate, EndDate: endDate}
 
 		for _, b := range brands {
-			id, err := resolveOrID(ctx, c, brandsPath, b, "brands")
+			id, err := resolveOrID(ctx, c, brandsPath, "--brand", b, "brands")
 			if err != nil {
 				return err
 			}
 			ds.Analysisdata = append(ds.Analysisdata, id)
 		}
 		if len(categories) > 0 {
-			cat, err := categoryFor(dsType)
-			if err != nil {
-				return err
-			}
 			ids := make([]any, 0, len(categories))
 			for _, name := range categories {
-				id, err := resolveOrID(ctx, c, cat.path, name, "categories")
+				id, err := resolveOrID(ctx, c, cat.path, "--category", name, "categories")
 				if err != nil {
 					return err
 				}
@@ -182,11 +202,15 @@ duplicate.`,
 			}
 		}
 
-		if len(providers) > 0 {
-			for _, p := range providers {
-				ds.SignalProviders = append(ds.SignalProviders, p)
-			}
-		} else if ds.SignalProviders, err = allProviders(ctx, c, dsType); err != nil {
+		// The catalog is read either way: it is the default, and the check
+		// that a given --provider belongs to this type.
+		all, err := allProviders(ctx, c, dsType)
+		if err != nil {
+			return err
+		}
+		if len(providers) == 0 {
+			ds.SignalProviders = all
+		} else if ds.SignalProviders, err = checkProviders(providers, all, dsType); err != nil {
 			return err
 		}
 
@@ -236,7 +260,8 @@ duplicate.`,
 		"City name (repeat the flag for more than one)")
 	f.StringArrayVar(&zipcodes, "zipcode", nil,
 		"Zip code (repeat the flag for more than one)")
-	cmd.MarkFlagsOneRequired("file", "type")
+	// No MarkFlagsOneRequired("file", "type"): cobra checks flag groups after
+	// PersistentPreRunE, so its error exits 1. missingFlags covers --type.
 	return cmd
 }
 
@@ -363,6 +388,9 @@ var lookalikeFields = []string{
 // default to false.
 var lookalikeRequired = []string{"name", "source-audience-id", "target-size", "signal", "country"}
 
+// maxLookalikeTarget is the API's cap on target_size.
+const maxLookalikeTarget = 4_000_000
+
 // lookalikeSignals: web and ctv were withdrawn and are rejected.
 var lookalikeSignals = map[string]bool{
 	"poi": true, "apps": true, "demographics": true,
@@ -403,11 +431,12 @@ least 1,000 devices by default. --target-size is capped at 4,000,000.
 repeated for more than one. web and ctv are withdrawn and rejected.
 
 --exclude-seed-devices and --expand-eids default to false and are always sent,
-because the API requires both fields. --dry-run prints the body and sends
-nothing.
+because the API requires both fields. --contrast-audience-id names a Completed,
+non-lookalike audience to contrast the seed against. --dry-run prints the body
+and sends nothing.
 
-A contrast audience, or anything the API grows that these flags do not cover,
-goes through the whole body instead:
+Anything the API grows that these flags do not model goes through the whole
+body instead, with --file:
 
     intuizi audiences lookalike create --file lookalike.json
 
@@ -434,11 +463,34 @@ Requires the Lookalike capability; a 403 means it is not enabled.`,
 		if err := missingFlags(flags, lookalikeRequired, "a lookalike"); err != nil {
 			return err
 		}
+		// Changed is true for "" and 0, so missingFlags alone let those through.
+		if err := nonEmpty("name", name); err != nil {
+			return err
+		}
+		if err := positiveID(flags, "source-audience-id", sourceID); err != nil {
+			return err
+		}
+		if targetSize < 1 || targetSize > maxLookalikeTarget {
+			return usageErr(fmt.Sprintf("--target-size must be between 1 and 4,000,000, not %d", targetSize))
+		}
+		for _, r := range []struct {
+			flag   string
+			values []string
+		}{{"signal", signals}, {"country", countries}, {"state", states}} {
+			if err := nonEmpty(r.flag, r.values...); err != nil {
+				return err
+			}
+		}
+		// A repeated --signal is one signal to the API too; send it once.
+		signals = dedupe(signals)
 		for _, sig := range signals {
 			if !lookalikeSignals[sig] {
 				return usageErr("--signal " + sig + " is not accepted; one of " +
 					"apps, demographics, poi, profile_attributes, transactions")
 			}
+		}
+		if err := positiveID(flags, "contrast-audience-id", contrastID); err != nil {
+			return err
 		}
 
 		body := lookalikeBody{
@@ -487,7 +539,7 @@ Requires the Lookalike capability; a 403 means it is not enabled.`,
 		"Completed, non-lookalike audience to contrast against")
 	f.BoolVar(&notify, "notify", false,
 		"Notify the account owner when the run finishes")
-	cmd.MarkFlagsOneRequired("file", "source-audience-id")
+	// No MarkFlagsOneRequired("file", "source-audience-id"): see audiencesCreateCommand.
 	return cmd
 }
 
