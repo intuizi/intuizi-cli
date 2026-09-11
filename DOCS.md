@@ -7,10 +7,13 @@ script, or CI pipeline.
 ## Install
 
 ```bash
-go build -o ~/go/bin/intuizi .
+brew install intuizi/intuizi-cli/intuizi   # Homebrew, macOS or Linux
+npm install -g @intuizi/cli                # npm, any platform with Node 18+
+go build -o ~/go/bin/intuizi .             # from source
 ```
 
-Homebrew, npm, and GitHub Releases are planned for v0.1.0.
+Archives for every platform are on the GitHub Releases page. Homebrew and npm
+serve versions from v0.1.0, the first public release.
 
 ## Authenticate
 
