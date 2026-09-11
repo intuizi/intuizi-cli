@@ -42,6 +42,7 @@ func audiencesCreateCommand() *cobra.Command {
 		startDate  string
 		endDate    string
 		brands     []string
+		brandAll   []string
 		categories []string
 		providers  []string
 		countries  []string
@@ -65,7 +66,9 @@ with names resolved against the reference catalogs rather than pasted as ids:
       --name "Starbucks visitors - SF - 1 week"
 
 --brand and --category both take a name or an id; a name matching no entry, or
-more than one, is an error listing what was found. --brand applies to POI.
+more than one, is an error listing what was found. --brand-all takes every
+match for a search instead, for the deliberate "all the coffee brands" case,
+and reports to stderr how many it selected. --brand applies to POI.
 --category applies to POI, Apps, WebDomain and AffinityTransactions, each
 resolving against its own catalog. Every selector repeats for more than one
 value.
@@ -135,15 +138,18 @@ duplicate.`,
 		if err != nil {
 			return err
 		}
-		if len(brands) > 0 && dsType != "POI" {
-			// AffinityTransactions has brands too, under its own "brands" field,
-			// which no flag writes yet - so do not send anyone to --category,
-			// which is a different filter.
+		if len(brands)+len(brandAll) > 0 && dsType != "POI" {
+			// AffinityTransactions keeps brands in its own "brands" field, which
+			// no flag writes - so do not point at --category, a different filter.
+			flag := "--brand"
+			if len(brands) == 0 {
+				flag = "--brand-all"
+			}
 			hint := "; use --category"
 			if dsType == "AffinityTransactions" {
 				hint = "; affinity brands need --file"
 			}
-			return usageErr("--brand applies to --type POI, not " + dsType + hint)
+			return usageErr(flag + " applies to --type POI, not " + dsType + hint)
 		}
 
 		c, err := client()
@@ -160,6 +166,21 @@ duplicate.`,
 				return err
 			}
 			ds.Analysisdata = append(ds.Analysisdata, id)
+		}
+		for _, search := range brandAll {
+			ids, err := resolveAll(ctx, c, brandsPath, search, "brands")
+			if err != nil {
+				return err
+			}
+			// One word becoming nine ids should be visible; stderr keeps a
+			// piped --dry-run to the payload.
+			noun := "brands"
+			if len(ids) == 1 {
+				noun = "brand"
+			}
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "--brand-all %q selected %d %s\n",
+				search, len(ids), noun)
+			ds.Analysisdata = append(ds.Analysisdata, ids...)
 		}
 		if len(categories) > 0 {
 			cat, err := categoryFor(dsType)
@@ -224,6 +245,8 @@ duplicate.`,
 	// StringArray, not StringSlice: a city name may contain a comma.
 	f.StringArrayVar(&brands, "brand", nil,
 		"Brand name or id, POI only (repeat the flag for more than one)")
+	f.StringArrayVar(&brandAll, "brand-all", nil,
+		"Take every brand matching this search, POI only (repeatable)")
 	f.StringArrayVar(&categories, "category", nil,
 		"Category name or id, per the dataset type\n(repeat the flag for more than one)")
 	f.StringArrayVar(&providers, "provider", nil,
@@ -243,7 +266,8 @@ duplicate.`,
 // audienceFields are the body-building flags, for --file to reject.
 var audienceFields = []string{
 	"type", "name", "start-date", "end-date",
-	"brand", "category", "provider", "country", "state", "city", "zipcode",
+	"brand", "brand-all", "category",
+	"provider", "country", "state", "city", "zipcode",
 }
 
 // audienceRequired is the minimum for a single dataset.
