@@ -25,7 +25,15 @@ const (
 
 // No timeout - the deadline is per call. Shares DefaultTransport with the JSON
 // client, which keeps its 30s.
-var uploadHTTP = &http.Client{}
+//
+// Redirects are not followed: a 3xx from the storage host would re-send the
+// body, and to a cross-host Location it would hand the file to whoever answers
+// there. It surfaces as a rejection carrying its status instead.
+var uploadHTTP = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
 // "context deadline exceeded" alone reads like a server fault.
 func timeoutErr(filePath string, d time.Duration) error {
@@ -146,6 +154,24 @@ func (c *Client) newMultipartRequest(ctx context.Context, target string, fields 
 	return req, nil
 }
 
+// CreateWithEnvelope posts a body and returns the created record alongside the
+// untouched envelope. For a create whose record the command acts on before
+// deciding what to print: reserving an upload is spent by the PUT that follows,
+// so --json cannot fetch the envelope a second time.
+func CreateWithEnvelope[T any](ctx context.Context, c *Client, path string, body any) (T, []byte, error) {
+	var zero T
+
+	raw, data, err := c.doRaw(ctx, http.MethodPost, path, nil, body)
+	if err != nil {
+		return zero, nil, err
+	}
+	created, err := first[T](data, path)
+	if err != nil {
+		return zero, nil, err
+	}
+	return created, raw, nil
+}
+
 // PutPresigned sends a file to a presigned upload URL, bounded by presignedTimeout.
 //
 // Deliberately not a Client method: the signature embedded in the URL is the
@@ -153,7 +179,10 @@ func (c *Client) newMultipartRequest(ctx context.Context, target string, fields 
 // would leak it. It is also not retried - a presigned URL is single-use and
 // expires after 15 minutes, so a fresh reservation is the correct recovery,
 // not a replay.
-func PutPresigned(ctx context.Context, url, contentType, filePath string) error {
+//
+// headers is the set the reservation listed. Every one of them is part of the
+// signature, so all are sent; Content-Type alone defaults when absent.
+func PutPresigned(ctx context.Context, url string, headers map[string]string, filePath string) error {
 	ctx, cancel := context.WithTimeout(ctx, presignedTimeout)
 	defer cancel()
 
@@ -172,10 +201,12 @@ func PutPresigned(ctx context.Context, url, contentType, filePath string) error 
 	if err != nil {
 		return err
 	}
-	if contentType == "" {
-		contentType = "text/csv"
+	// Ours first, so a signed header of the same name would still win.
+	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("Content-Type", "text/csv")
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
-	req.Header.Set("Content-Type", contentType)
 	// Storage rejects a chunked PUT, so the length must be known up front.
 	req.ContentLength = info.Size()
 

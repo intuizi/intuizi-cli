@@ -41,10 +41,12 @@ func (e endpoint) command(group string) *cobra.Command {
 	}
 	path := referencePrefix + group + "/" + segment
 
+	// pageNum, as listFlags uses: the API rejects page=0 rather than treating
+	// it as unset, so the flag refuses anything below 1 as it parses.
 	var (
 		search  string
-		page    int
-		perPage int
+		page    pageNum
+		perPage pageNum
 	)
 
 	// One holder per param, keyed by the API's spelling, so RunE can find the
@@ -66,8 +68,8 @@ func (e endpoint) command(group string) *cobra.Command {
 			"Case-insensitive contains match on the item label")
 	}
 	if e.paged {
-		flags.IntVar(&page, "page", 0, "Page to fetch (default 1)")
-		flags.IntVar(&perPage, "per-page", 0,
+		flags.Var(&page, "page", "Page to fetch (default 1)")
+		flags.Var(&perPage, "per-page",
 			"Items per page (server default; capped at 500 on everything but the apps reads)")
 	}
 
@@ -100,6 +102,13 @@ func (e endpoint) command(group string) *cobra.Command {
 	}
 
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		// Refused rather than synthesised: --quiet prints one id per row
+		// everywhere else, and a made-up "start-end" would still need
+		// splitting, which --json and jq already do properly.
+		if e.noID && quietOutput {
+			return usageErr(cmd.CommandPath() + " returns rows with no id - --quiet does not apply, use --json")
+		}
+
 		query := url.Values{}
 
 		// Only flags the user set: an unset --per-page must not become
@@ -108,10 +117,10 @@ func (e endpoint) command(group string) *cobra.Command {
 			query.Set("search", search)
 		}
 		if flags.Changed("page") {
-			query.Set("page", strconv.Itoa(page))
+			query.Set("page", page.String())
 		}
 		if flags.Changed("per-page") {
-			query.Set("per_page", strconv.Itoa(perPage))
+			query.Set("per_page", perPage.String())
 		}
 
 		for _, p := range e.params {

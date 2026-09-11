@@ -50,7 +50,7 @@ func TestPutPresignedSendsNoToken(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := PutPresigned(context.Background(), srv.URL+"/obj?X-Amz-Signature=abc", "", fp); err != nil {
+	if err := PutPresigned(context.Background(), srv.URL+"/obj?X-Amz-Signature=abc", nil, fp); err != nil {
 		t.Fatalf("PutPresigned: %v", err)
 	}
 
@@ -81,11 +81,81 @@ func TestPutPresignedHonoursContentType(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := PutPresigned(context.Background(), srv.URL, "application/gzip", fp); err != nil {
+	if err := PutPresigned(context.Background(), srv.URL, map[string]string{"Content-Type": "application/gzip"}, fp); err != nil {
 		t.Fatalf("PutPresigned: %v", err)
 	}
 	if got != "application/gzip" {
 		t.Errorf("Content-Type = %q", got)
+	}
+}
+
+// Every header the reservation lists is part of the signature, not just
+// Content-Type: a PUT missing one is a 403 from storage, however correct the
+// bytes are.
+func TestPutPresignedSendsEverySignedHeader(t *testing.T) {
+	fp := tempFile(t, "x")
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+	}))
+	defer srv.Close()
+
+	signed := map[string]string{
+		"Content-Type":                 "text/csv",
+		"x-amz-server-side-encryption": "AES256",
+		"x-goog-content-length-range":  "0,1048576",
+	}
+	if err := PutPresigned(context.Background(), srv.URL, signed, fp); err != nil {
+		t.Fatalf("PutPresigned: %v", err)
+	}
+	for k, want := range signed {
+		if got.Get(k) != want {
+			t.Errorf("%s = %q, want %q", k, got.Get(k), want)
+		}
+	}
+}
+
+// The storage host's logs should say who sent the PUT, the same as the API's.
+func TestPutPresignedIdentifiesItself(t *testing.T) {
+	fp := tempFile(t, "x")
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("User-Agent")
+	}))
+	defer srv.Close()
+
+	if err := PutPresigned(context.Background(), srv.URL, nil, fp); err != nil {
+		t.Fatalf("PutPresigned: %v", err)
+	}
+	if got != UserAgent {
+		t.Errorf("User-Agent = %q, want %q", got, UserAgent)
+	}
+}
+
+// A 3xx from storage is an error, not an instruction: following it would
+// re-send the body, and to a cross-host Location it would hand the file to
+// whoever answers there.
+func TestPutPresignedDoesNotFollowRedirects(t *testing.T) {
+	fp := tempFile(t, "x")
+
+	var elsewhereHits int
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		elsewhereHits++
+	}))
+	defer elsewhere.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", elsewhere.URL+"/moved")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+
+	err := PutPresigned(context.Background(), srv.URL, nil, fp)
+	if err == nil || !strings.Contains(err.Error(), "302") {
+		t.Fatalf("err = %v, want one naming the 302", err)
+	}
+	if elsewhereHits != 0 {
+		t.Errorf("the redirect target was called %d times; the file went to another host", elsewhereHits)
 	}
 }
 
@@ -98,7 +168,7 @@ func TestPutPresignedReportsRejection(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := PutPresigned(context.Background(), srv.URL, "", fp)
+	err := PutPresigned(context.Background(), srv.URL, nil, fp)
 	if err == nil {
 		t.Fatal("want an error on 403")
 	}
@@ -133,7 +203,7 @@ func TestUploadTimeoutNamesTheFile(t *testing.T) {
 			return err
 		}},
 		{"presigned", func(ctx context.Context) error {
-			return PutPresigned(ctx, slow.URL, "", fp)
+			return PutPresigned(ctx, slow.URL, nil, fp)
 		}},
 	}
 

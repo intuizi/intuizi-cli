@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -38,6 +40,16 @@ Caps are per purpose: 50 MB for poi_submission, 1 GB for cohort. A reservation
 that is never used simply expires.`,
 }
 
+// checkPurpose fails a typo here rather than as a 422: the purpose also picks
+// the size cap, so the server cannot guess it.
+func checkPurpose(purpose string) error {
+	switch purpose {
+	case "poi_submission", "cohort":
+		return nil
+	}
+	return usageErr(fmt.Sprintf("--purpose must be poi_submission or cohort, not %q", purpose))
+}
+
 // reserveBody is step one, shared by 'reserve' and 'put'.
 func reserveBody(purpose, filename, contentType string, size int64) map[string]any {
 	body := map[string]any{
@@ -72,6 +84,9 @@ when you want to do the PUT yourself; 'uploads put' is the one-step version.
 content_length must be the exact byte size of the file you will send.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := checkPurpose(purpose); err != nil {
+				return err
+			}
 			return createBody(cmd, uploadsCreatePath,
 				reserveBody(purpose, filename, contentType, size), uploadColumns,
 				"PUT the file to upload_url, then pass upload_reference to the create")
@@ -105,11 +120,17 @@ directly:
 
     ref=$(intuizi uploads put customers.csv --purpose cohort)
 
+With --json the reservation envelope is printed instead, once the PUT has
+succeeded, so .data[0].upload_reference is the same value.
+
 The size is taken from the file, so it always matches what is sent. The PUT
 itself carries no Intuizi credentials - the signature in the URL is what
 authorises it.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := checkPurpose(purpose); err != nil {
+				return err
+			}
 			path := args[0]
 			info, err := os.Stat(path)
 			if err != nil {
@@ -118,13 +139,20 @@ authorises it.`,
 			if info.IsDir() {
 				return fmt.Errorf("%s is a directory", path)
 			}
+			// A zero-length body goes out chunked, which storage rejects, and
+			// the reservation would be spent either way.
+			if info.Size() == 0 {
+				return usageErr(fmt.Sprintf("%s is empty - there is nothing to upload", path))
+			}
 
 			c, err := client()
 			if err != nil {
 				return err
 			}
 
-			slot, err := api.Create[output.Record](cmd.Context(), c, uploadsCreatePath,
+			// The envelope is kept for --json: the PUT spends the reservation,
+			// so it cannot be fetched again afterwards.
+			slot, raw, err := api.CreateWithEnvelope[output.Record](cmd.Context(), c, uploadsCreatePath,
 				reserveBody(purpose, info.Name(), contentType, info.Size()))
 			if err != nil {
 				return err
@@ -136,18 +164,14 @@ authorises it.`,
 				return fmt.Errorf("the reservation did not come back with an upload URL")
 			}
 
-			ct := contentType
-			if ct == "" {
-				if headers, ok := slot["headers"].(map[string]any); ok {
-					ct, _ = headers["Content-Type"].(string)
-				}
-			}
-
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "uploading %s (%d bytes)...\n", info.Name(), info.Size())
-			if err := api.PutPresigned(cmd.Context(), url, ct, path); err != nil {
+			if err := api.PutPresigned(cmd.Context(), url, putHeaders(slot, contentType), path); err != nil {
 				return err
 			}
 
+			if jsonOutput {
+				return output.JSON(cmd.OutOrStdout(), raw)
+			}
 			// The reference alone on stdout, so $(...) captures it cleanly.
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), ref)
 			return nil
@@ -160,6 +184,28 @@ authorises it.`,
 	_ = cmd.MarkFlagRequired("purpose")
 
 	return cmd
+}
+
+// putHeaders is what the PUT must carry: every header the reservation signed,
+// with --content-type replacing Content-Type alone. Keys are canonicalised on
+// the way in so the override replaces the server's spelling rather than
+// racing it on map order.
+func putHeaders(slot output.Record, contentType string) map[string]string {
+	headers := map[string]string{}
+	if signed, ok := slot["headers"].(map[string]any); ok {
+		for k, v := range signed {
+			switch v := v.(type) {
+			case string:
+				headers[http.CanonicalHeaderKey(k)] = v
+			case json.Number:
+				headers[http.CanonicalHeaderKey(k)] = v.String()
+			}
+		}
+	}
+	if contentType != "" {
+		headers["Content-Type"] = contentType
+	}
+	return headers
 }
 
 func init() {

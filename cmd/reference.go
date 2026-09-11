@@ -33,13 +33,16 @@ type param struct {
 
 // endpoint is one reference read. path is set only where the URL segment differs
 // from the command name. paged adds --page and --per-page; noSearch drops
-// --search, for a read that takes no parameters at all.
+// --search, for a read that takes no parameters at all. noID marks rows that
+// carry neither id nor value, so --quiet is refused before the round trip
+// rather than failing after it.
 type endpoint struct {
 	item     string
 	path     string
 	short    string
 	paged    bool
 	noSearch bool
+	noID     bool
 	params   []param
 }
 
@@ -206,8 +209,10 @@ var referenceGroups = []referenceGroup{
 				{name: "category_ids", kind: nums, help: "Category ids to cascade from"},
 				{name: "key", kind: str, help: "The key to cascade from"},
 			}},
-			// The only read with no query parameters at all, search included.
-			{item: "recency-limits", short: "The delivered quarter window dates must fall inside", noSearch: true},
+			// The only read with no query parameters at all, search included,
+			// and the only one whose rows - {start_limit, end_limit} - have
+			// nothing --quiet could print.
+			{item: "recency-limits", short: "The delivered quarter window dates must fall inside", noSearch: true, noID: true},
 		},
 	},
 	{

@@ -80,19 +80,104 @@ func TestPoiSubmissionsCreateNeedsExactlyOneSource(t *testing.T) {
 }
 
 // --update and --remove say what to do with an existing POI; --key says how to
-// recognise it. One without the other is meaningless, so it is caught locally.
+// recognise it. One without the other is meaningless, so it is caught locally,
+// on every source route.
 func TestPoiSubmissionsCreateMatchFlagsNeedAKey(t *testing.T) {
-	for _, flag := range []string{"--update", "--remove"} {
-		t.Run(flag, func(t *testing.T) {
+	sources := map[string][]string{
+		"file":   {"--name", "x", "--brand-id", "9", "--file", "a.csv"},
+		"upload": {"--name", "x", "--brand-id", "9", "--upload-reference", "upl_1"},
+		"list":   {"--list", "locs.json"},
+	}
+	for source, base := range sources {
+		for _, flag := range []string{"--update", "--remove"} {
+			t.Run(source+" "+flag, func(t *testing.T) {
+				srv, got := stub(t, `{}`)
+
+				_, _, err := run(t, poiSubmissionCreateCommand(), srv, append(base, flag)...)
+				if err == nil || !strings.Contains(err.Error(), "--key") {
+					t.Fatalf("err = %v", err)
+				}
+				if len(got.paths) != 0 {
+					t.Errorf("should cost no round trip, got %v", got.paths)
+				}
+			})
+		}
+	}
+}
+
+// --key is a closed set the server validates; a typo should fail here, before
+// it costs a round trip and a 422.
+func TestPoiSubmissionsCreateRejectsAnUnknownKey(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	_, _, err := run(t, poiSubmissionCreateCommand(), srv,
+		"--name", "x", "--brand-id", "9", "--upload-reference", "upl_1",
+		"--update", "--key", "storeid")
+	if err == nil || !strings.Contains(err.Error(), "--key must be") ||
+		!strings.Contains(err.Error(), "store-id") {
+		t.Fatalf("err = %v, want one listing the accepted keys", err)
+	}
+	if exitCode(err, nil, true) != 2 {
+		t.Errorf("exit = %d, want 2", exitCode(err, nil, true))
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
+// --list reads stdin as "-"; --file does not, and the raw "open -: no such
+// file" it used to surface said nothing about the route that does.
+func TestPoiSubmissionsCreateFileRejectsStdin(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	_, _, err := run(t, poiSubmissionCreateCommand(), srv,
+		"--name", "x", "--brand-id", "9", "--file", "-")
+	if err == nil || !strings.Contains(err.Error(), "--list -") {
+		t.Fatalf("err = %v, want one pointing at --list -", err)
+	}
+	if exitCode(err, nil, true) != 2 {
+		t.Errorf("exit = %d, want 2", exitCode(err, nil, true))
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
+// The API accepts .csv and .txt; anything else is a 422 after a 50 MB upload,
+// so the extension is checked before the file is opened.
+func TestPoiSubmissionsCreateFileChecksTheExtension(t *testing.T) {
+	for _, bad := range []string{"locations.json", "locations.xlsx", "locations"} {
+		t.Run(bad, func(t *testing.T) {
 			srv, got := stub(t, `{}`)
 
 			_, _, err := run(t, poiSubmissionCreateCommand(), srv,
-				"--name", "x", "--brand-id", "9", "--file", "a.csv", flag)
-			if err == nil || !strings.Contains(err.Error(), "--key") {
-				t.Fatalf("err = %v", err)
+				"--name", "x", "--brand-id", "9", "--file", bad)
+			if err == nil || !strings.Contains(err.Error(), ".csv or .txt") {
+				t.Fatalf("err = %v, want one naming the accepted extensions", err)
+			}
+			if exitCode(err, nil, true) != 2 {
+				t.Errorf("exit = %d, want 2", exitCode(err, nil, true))
 			}
 			if len(got.paths) != 0 {
 				t.Errorf("should cost no round trip, got %v", got.paths)
+			}
+		})
+	}
+
+	// Case does not matter, and .txt is as welcome as .csv.
+	for _, ok := range []string{"LOCATIONS.CSV", "locations.txt"} {
+		t.Run(ok, func(t *testing.T) {
+			srv, got := stub(t, submissionEnvelope)
+			path := filepath.Join(t.TempDir(), ok)
+			if err := os.WriteFile(path, []byte("name,latitude,longitude\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := run(t, poiSubmissionCreateCommand(), srv,
+				"--name", "x", "--brand-id", "9", "--file", path); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if len(got.paths) != 1 {
+				t.Errorf("paths = %v", got.paths)
 			}
 		})
 	}
@@ -252,6 +337,40 @@ func TestPoiSubmissionsCreateByListPostsTheMergedBody(t *testing.T) {
 	}
 }
 
+// The list route merges the file with the flags and used to stop there: a
+// --update --key that posted no update/key made the server insert duplicates.
+func TestPoiSubmissionsCreateByListCarriesTheMatchFields(t *testing.T) {
+	srv, got := stub(t, submissionEnvelope)
+
+	path := filepath.Join(t.TempDir(), "locations.json")
+	if err := os.WriteFile(path,
+		[]byte(`{"name":"from file","brand_id":9,`+
+			`"locations":[{"country":"US","longitude":-89.6501,"latitude":39.7817}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := run(t, poiSubmissionCreateCommand(), srv,
+		"--list", path, "--update", "--key", "store-id")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal([]byte(got.bodies[0]), &body); err != nil {
+		t.Fatal(err)
+	}
+	// create-by-list is JSON, so these are real booleans like create-by-upload.
+	if body["update"] != true {
+		t.Errorf("update = %#v, want the JSON boolean true", body["update"])
+	}
+	if body["key"] != "store-id" {
+		t.Errorf("key = %#v, want store-id", body["key"])
+	}
+	if _, ok := body["remove"]; ok {
+		t.Errorf("unset --remove leaked: %v", body)
+	}
+}
+
 // --------------------------------------------------------------------------------- locations
 
 func TestPoiLocationsListBuildsTheQuery(t *testing.T) {
@@ -296,12 +415,32 @@ func TestPoiLocationsListBuildsTheQuery(t *testing.T) {
 	}
 }
 
+// Same rule as the reference reads: page=0 is a 422, so the flag refuses it.
+func TestPoiLocationsListPageFlagsRefuseZero(t *testing.T) {
+	for _, args := range [][]string{{"--page", "0"}, {"--per-page", "0"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			srv, got := stub(t, `{}`)
+
+			_, _, err := run(t, poiLocationsCommand(), srv, append([]string{"list"}, args...)...)
+			if err == nil || !strings.Contains(err.Error(), "must be 1 or more") {
+				t.Fatalf("err = %v, want the flag to refuse it", err)
+			}
+			if len(got.paths) != 0 {
+				t.Errorf("should cost no round trip, got %v", got.paths)
+			}
+		})
+	}
+}
+
 func TestPoiLocationsListRejectsABadGeometry(t *testing.T) {
 	srv, got := stub(t, `{}`)
 
 	_, _, err := run(t, poiLocationsCommand(), srv, "list", "--geometry", "hexagon")
 	if err == nil || !strings.Contains(err.Error(), "polygon or coordinates") {
 		t.Fatalf("err = %v", err)
+	}
+	if exitCode(err, nil, true) != 2 {
+		t.Errorf("exit = %d, want 2", exitCode(err, nil, true))
 	}
 	if len(got.paths) != 0 {
 		t.Errorf("should cost no round trip, got %v", got.paths)
@@ -350,6 +489,9 @@ func TestPoiSubmissionsListRejectsBadSorts(t *testing.T) {
 			_, _, err := run(t, poiSubmissionsCommand(), srv, tc.args...)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v", err)
+			}
+			if exitCode(err, nil, true) != 2 {
+				t.Errorf("exit = %d, want 2", exitCode(err, nil, true))
 			}
 			if len(got.paths) != 0 {
 				t.Errorf("should cost no round trip, got %v", got.paths)
@@ -464,6 +606,57 @@ func TestPoiSegmentsListOmitsAnUnsetSearch(t *testing.T) {
 	}
 	if got.queries[0] != "" {
 		t.Errorf("an unset --search leaked: %q", got.queries[0])
+	}
+}
+
+// MarkFlagRequired checks presence, not content: --name "" and --segment-id 0
+// both satisfied it and went out as a body the server rejects.
+func TestPoiTaxonomyCreatesRejectEmptyNameAndZeroParent(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"empty name", []string{"--name", "", "--segment-id", "12"}, "--name"},
+		{"zero parent", []string{"--name", "x", "--segment-id", "0"}, "--segment-id"},
+		{"negative parent", []string{"--name", "x", "--segment-id", "-3"}, "--segment-id"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, `{}`)
+
+			cmd := poiCreateCommand("create", "", poiPrefix+"/categories/create",
+				"segment-id", "", "", []string{"id", "name"})
+			_, _, err := run(t, cmd, srv, tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to name %s", err, tc.want)
+			}
+			if exitCode(err, nil, true) != 2 {
+				t.Errorf("exit = %d, want 2", exitCode(err, nil, true))
+			}
+			if len(got.paths) != 0 {
+				t.Errorf("should cost no round trip, got %v", got.paths)
+			}
+		})
+	}
+}
+
+// The three taxonomy nouns read the same way: 'poi segments list' used to be
+// the odd one out, a leaf where categories and brands were groups.
+func TestPoiTaxonomyNounsAllHaveList(t *testing.T) {
+	for _, noun := range []string{"segments", "categories", "brands"} {
+		group, _, err := poiCmd.Find([]string{noun})
+		if err != nil || group.Name() != noun {
+			t.Fatalf("poi %s: %v", noun, err)
+		}
+		if group.Runnable() {
+			t.Errorf("poi %s is a leaf; want a group holding list", noun)
+		}
+		list, _, err := poiCmd.Find([]string{noun, "list"})
+		if err != nil || list.Name() != "list" || !list.Runnable() {
+			t.Errorf("poi %s list is missing: %v", noun, err)
+		}
 	}
 }
 

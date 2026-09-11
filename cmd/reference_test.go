@@ -409,6 +409,46 @@ func TestBuilderOmitsSearchWhenNoSearch(t *testing.T) {
 	}
 }
 
+// recency-limits rows are {start_limit, end_limit}: nothing output.ID can
+// print, so --quiet used to fail after the round trip with "response carried
+// no id" and exit 1. It is refused up front instead, pointing at --json.
+func TestQuietRefusedOnRecencyLimits(t *testing.T) {
+	quiet(t)
+	srv, got := stub(t, `{"status":"success","code":200,"data":[{"start_limit":"2024-01-01","end_limit":"2026-06-30"}]}`)
+
+	e := findEndpoint(t, "profile-attributes", "recency-limits")
+	_, _, err := run(t, e.command("profile-attributes"), srv)
+	if err == nil || !strings.Contains(err.Error(), "does not apply") || !strings.Contains(err.Error(), "--json") {
+		t.Fatalf("err = %v, want a refusal pointing at --json", err)
+	}
+	if exitCode(err, nil, true) != 2 {
+		t.Errorf("exit = %d, want 2", exitCode(err, nil, true))
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("refusal should cost no round trip, got %v", got.paths)
+	}
+}
+
+// The API rejects page=0 rather than treating it as unset, so the reference
+// reads refuse it as the flag parses, the way listFlags already does for the
+// resource indexes. Cobra reports it before RunE, so nothing is sent.
+func TestReferencePageFlagsRefuseZero(t *testing.T) {
+	for _, args := range [][]string{{"--page", "0"}, {"--per-page", "0"}, {"--page", "-1"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			srv, got := stub(t, pagedEnvelope)
+
+			e := findEndpoint(t, "apps", "categories")
+			_, _, err := run(t, e.command("apps"), srv, args...)
+			if err == nil || !strings.Contains(err.Error(), "must be 1 or more") {
+				t.Fatalf("err = %v, want the flag to refuse it", err)
+			}
+			if len(got.paths) != 0 {
+				t.Errorf("should cost no round trip, got %v", got.paths)
+			}
+		})
+	}
+}
+
 // dummy is a stand-in value for a required flag.
 func dummy(k kind) string {
 	switch k {
