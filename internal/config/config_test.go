@@ -54,8 +54,67 @@ func TestLoadRejectsMalformedJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := Load(); err == nil {
+	_, err := Load()
+	if err == nil {
 		t.Fatal("malformed JSON should be an error, not a silent empty config")
+	}
+	// The user has to find and fix the file, so the error must name it.
+	if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "not valid JSON") {
+		t.Fatalf("error = %v, want %q and \"not valid JSON\"", err, path)
+	}
+}
+
+func TestLoadNamesTheFileOnReadError(t *testing.T) {
+	isolate(t)
+
+	// A directory where the file should be: ReadFile fails without ErrNotExist.
+	path, _ := Path()
+	if err := os.MkdirAll(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("a config path that is a directory should be an error")
+	}
+	if !strings.Contains(err.Error(), "reading "+path) {
+		t.Fatalf("error = %v, want it to start with \"reading %s\"", err, path)
+	}
+}
+
+// Login needs the directory writable before it spends one of the account's
+// ten token slots; EnsureDir is what it checks with.
+func TestEnsureDirCreatesOwnerOnlyDir(t *testing.T) {
+	isolate(t)
+
+	if err := EnsureDir(); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := Path()
+	fi, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fi.IsDir() || fi.Mode().Perm() != 0700 {
+		t.Fatalf("config dir = %v, want a 0700 directory", fi.Mode())
+	}
+	if err := EnsureDir(); err != nil {
+		t.Fatalf("second call should be a no-op: %v", err)
+	}
+}
+
+func TestEnsureDirReportsUnwritableParent(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := isolate(t)
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+
+	if err := EnsureDir(); err == nil {
+		t.Fatal("expected an error creating a directory under a read-only parent")
 	}
 }
 
@@ -336,5 +395,48 @@ func TestStoredFileIsValidJSON(t *testing.T) {
 	}
 	if into["base_url"] != "https://example.com" || into["token"] != "t" {
 		t.Fatalf("unexpected keys: %v", into)
+	}
+}
+
+// root.go validates --base-url with this before any request: a bare host
+// would otherwise fail deep inside net/http with a message about the scheme.
+func TestValidateBaseURL(t *testing.T) {
+	ok := []string{
+		"https://console.intuizi.com",
+		"http://localhost:8000",
+		"https://example.com/prefix/",
+		"  https://example.com  ",
+	}
+	for _, raw := range ok {
+		if err := ValidateBaseURL(raw); err != nil {
+			t.Errorf("ValidateBaseURL(%q) = %v, want nil", raw, err)
+		}
+	}
+
+	bad := []struct{ raw, want, fix string }{
+		{"example.invalid", "has no scheme", "use https://example.invalid"},
+		{"example.invalid:8080", "has no scheme", "use https://example.invalid:8080"},
+		{"ftp://example.invalid", "ftp", "http or https"},
+		{"https://", "has no host", ""},
+		{"", "is empty", ""},
+		{"https://example.com/?x=1", "query", ""},
+		{"https://example.com/#frag", "fragment", ""},
+		{"https://exa mple.com", "not a valid URL", ""},
+	}
+	for _, tc := range bad {
+		err := ValidateBaseURL(tc.raw)
+		if err == nil {
+			t.Errorf("ValidateBaseURL(%q) = nil, want an error", tc.raw)
+			continue
+		}
+		if !strings.Contains(err.Error(), "--base-url") {
+			t.Errorf("ValidateBaseURL(%q) = %v, want it to name the flag", tc.raw, err)
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("ValidateBaseURL(%q) = %v, want %q", tc.raw, err, tc.want)
+		}
+		if tc.fix != "" && !strings.Contains(err.Error(), tc.fix) {
+			t.Errorf("ValidateBaseURL(%q) = %v, want the fix %q", tc.raw, err, tc.fix)
+		}
 	}
 }

@@ -3,6 +3,8 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -66,14 +68,31 @@ func Load() (*Config, error) {
 		return &Config{}, nil
 	}
 	if err != nil {
-		return nil, err
+		// The user has to find the file to fix it, so name it - once: the
+		// PathError already carries the path.
+		var pe *os.PathError
+		if errors.As(err, &pe) {
+			err = pe.Err
+		}
+		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s is not valid JSON: %w", path, err)
 	}
 	return &cfg, nil
+}
+
+// EnsureDir creates the config directory, owner-only. Login calls it before
+// minting: a token slot spent on an unwritable directory cannot be recovered
+// without revoking every token on the account.
+func EnsureDir() error {
+	path, err := Path()
+	if err != nil {
+		return err
+	}
+	return os.MkdirAll(filepath.Dir(path), 0700)
 }
 
 // Save writes the config atomically with owner-only permissions.
@@ -88,11 +107,10 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := EnsureDir(); err != nil {
 		return err
 	}
+	dir := filepath.Dir(path)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -137,10 +155,46 @@ func BaseURL(override string) string {
 	return DefaultBaseURL
 }
 
+// ValidateBaseURL rejects a --base-url that could never reach a console: no
+// scheme, a scheme other than http or https, or no host. A path prefix is
+// fine. Checked up front because the failure otherwise surfaces deep inside
+// net/http, worded about the scheme rather than the flag.
+func ValidateBaseURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return errors.New("--base-url is empty")
+	}
+	// Checked before url.Parse: "host:8080" parses with "host" as the scheme,
+	// which would produce a message about the wrong thing.
+	if !strings.Contains(raw, "://") {
+		return fmt.Errorf("--base-url %s has no scheme; use https://%s", raw, raw)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("--base-url %s is not a valid URL: %w", raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("--base-url %s uses scheme %s; use http or https", raw, u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("--base-url %s has no host", raw)
+	}
+	// Paths are joined onto the base, so anything after them would be sent
+	// in the middle of every request URL.
+	if u.RawQuery != "" || u.ForceQuery {
+		return fmt.Errorf("--base-url %s must not carry a query string", raw)
+	}
+	if u.Fragment != "" || u.RawFragment != "" || strings.Contains(raw, "#") {
+		return fmt.Errorf("--base-url %s must not carry a fragment", raw)
+	}
+	return nil
+}
+
 // TokenSource returns the active token and where it came from, so `auth status`
 // can report the source without printing the secret. An unreadable config file
-// is reported as no token rather than an error - status should still be able to
-// say "not logged in".
+// is reported as no token rather than an error, so every command meets one
+// "not logged in" path; the auth commands call Load themselves to name a
+// broken file.
 func TokenSource() (string, string) {
 	if t := os.Getenv(EnvToken); t != "" {
 		return t, SourceEnv

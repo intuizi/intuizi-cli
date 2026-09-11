@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -19,10 +20,21 @@ import (
 // verifyPath is a cheap authenticated GET used to check a token is live.
 const verifyPath = "/analyses/reference/common/operators"
 
-var authCmd = &cobra.Command{
-	Use:   "auth",
-	Short: "Manage authentication",
-	Long: `Manage authentication.
+// The terminal is reached through these so tests can stand in for it:
+// term.ReadPassword blocks on a real tty and nothing else. The check stays on
+// os.Stdin rather than cmd.InOrStdin() because only a real file has a tty.
+var (
+	stdinIsTerminal  = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+	termGetState     = term.GetState
+	termRestore      = term.Restore
+	termReadPassword = term.ReadPassword
+)
+
+func authCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "auth",
+		Short: "Manage authentication",
+		Long: `Manage authentication.
 
 The CLI looks for a token in two places, highest priority first:
 
@@ -33,19 +45,20 @@ For CI, mint a token in the console at My Account > API Tokens on a dedicated
 service account, rather than running 'auth login'.
 
 Run 'intuizi auth status' to see which token is in use and where the file lives.`,
+	}
+	cmd.AddCommand(authLoginCommand(), authStatusCommand(), authLogoutCommand())
+	return cmd
 }
 
 // --------------------------------------------------------------------------------- login
 
-var (
-	loginEmail    string
-	loginPassword string
-)
+func authLoginCommand() *cobra.Command {
+	var email, password string
 
-var authLoginCmd = &cobra.Command{
-	Use:   "login",
-	Short: "Log in and store an API token",
-	Long: `Log in and store an API token.
+	cmd := &cobra.Command{
+		Use:   "login",
+		Short: "Log in and store an API token",
+		Long: `Log in and store an API token.
 
 Prompts for an email and password unless --email and --password are given.
 When stdin is not a terminal the password is read from stdin, so it works
@@ -53,74 +66,95 @@ unattended:
 
     echo "$PASSWORD" | intuizi auth login --email you@example.com
 
-If a working token is already stored it is reused rather than minting another -
-accounts are capped at 10 active tokens. Run 'intuizi auth logout' first if you
-genuinely need a fresh one.
+If a working token is already stored for the same console it is reused rather
+than minting another - accounts are capped at 10 active tokens. Run 'intuizi
+auth logout' first if you genuinely need a fresh one. A token is bound to the
+console that minted it, so logging in with a different --base-url mints a new
+one and replaces the stored base URL and token together.
 
 The token is written to the config file with owner-only permissions. It is not
 affected by logging in elsewhere, and 'auth logout' does not revoke it on the
 server - it only forgets it locally.`,
-	RunE: func(cmd *cobra.Command, _ []string) error {
-		base := config.BaseURL(baseURLFlag)
-
-		// Accounts cap at 10 active tokens and logout doesn't revoke, so don't
-		// mint another when a working one is already stored.
-		if storedTokenUsable(cmd.Context(), base) {
-			fmt.Printf("Already logged in to %s\n", base)
-			fmt.Println("Run 'intuizi auth logout' first if you need a new token.")
-			return nil
-		}
-
-		email, err := readEmail()
-		if err != nil {
-			return err
-		}
-		password, err := readPassword()
-		if err != nil {
-			return err
-		}
-
-		res, err := api.MintAPIToken(cmd.Context(), base, email, password)
-		if err != nil {
-			return err
-		}
-
-		cfg, err := config.Load()
-		if err != nil {
-			return err
-		}
-		cfg.BaseURL = base
-		cfg.Token = res.Token
-		cfg.ExpiresAt = res.ExpiresAt
-		if err := config.Save(cfg); err != nil {
-			return err
-		}
-
-		path, _ := config.Path()
-		fmt.Printf("Logged in to %s\n", base)
-		fmt.Printf("Token saved to %s\n", path)
-		if exp := formatExpiry(res.ExpiresAt); exp != "" {
-			fmt.Printf("Expires %s\n", exp)
-		}
-		if os.Getenv(config.EnvToken) != "" {
-			fmt.Fprintf(os.Stderr,
-				"\nWarning: %s is set and takes precedence over the token just saved.\n",
-				config.EnvToken)
-		}
-		return nil
-	},
-}
-
-// storedTokenUsable reports whether the config holds a token the API still
-// accepts. Expiry is checked locally first to avoid a pointless request.
-func storedTokenUsable(ctx context.Context, base string) bool {
-	tok, src := config.TokenSource()
-	if src != config.SourceConfig || tok == "" {
-		return false
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return login(cmd, email, password)
+		},
 	}
 
+	cmd.Flags().StringVar(&email, "email", "", "Account email")
+	cmd.Flags().StringVar(&password, "password", "",
+		"Account password (discouraged - visible in shell history; pipe it on stdin instead)")
+	return cmd
+}
+
+// login is commentary end to end - nothing here is data for a pipe - so every
+// line goes to stderr.
+func login(cmd *cobra.Command, email, password string) error {
+	ctx := cmd.Context()
+	stderr := cmd.ErrOrStderr()
+	base := config.BaseURL(baseURLFlag)
+
+	// Before minting: a corrupt file or an unwritable directory would otherwise
+	// burn one of the account's ten token slots on every attempt and store
+	// nothing, and a slot cannot be freed without revoking CI's token too.
 	cfg, err := config.Load()
 	if err != nil {
+		return err
+	}
+	if err := config.EnsureDir(); err != nil {
+		return fmt.Errorf("config directory is not writable: %w", err)
+	}
+	path, _ := config.Path()
+
+	// Accounts cap at 10 active tokens and logout doesn't revoke, so don't
+	// mint another when a working one is already stored for this console.
+	if storedTokenUsable(ctx, cfg, base) {
+		_, _ = fmt.Fprintf(stderr, "Already logged in to %s\n", base)
+		_, _ = fmt.Fprintln(stderr, "Run 'intuizi auth logout' first if you need a new token.")
+		warnEnvToken(stderr, "is set and takes precedence over the stored token")
+		return nil
+	}
+
+	email, err = readEmail(cmd, email)
+	if err != nil {
+		return err
+	}
+	password, err = readPassword(cmd, password)
+	if err != nil {
+		return err
+	}
+
+	res, err := api.MintAPIToken(ctx, base, email, password)
+	if err != nil {
+		return err
+	}
+
+	// Base and token change together: the token is only good for this base.
+	cfg.BaseURL = base
+	cfg.Token = res.Token
+	cfg.ExpiresAt = res.ExpiresAt
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintf(stderr, "Logged in to %s\n", base)
+	_, _ = fmt.Fprintf(stderr, "Token saved to %s\n", path)
+	if exp := formatExpiry(res.ExpiresAt); exp != "" {
+		_, _ = fmt.Fprintf(stderr, "Expires %s\n", exp)
+	}
+	warnEnvToken(stderr, "is set and takes precedence over the token just saved")
+	return nil
+}
+
+// storedTokenUsable reports whether cfg holds a token the API at base still
+// accepts. Expiry is checked locally first to avoid a pointless request.
+func storedTokenUsable(ctx context.Context, cfg *config.Config, base string) bool {
+	if cfg.Token == "" {
+		return false
+	}
+	// A token is bound to the console that minted it. Checking it against a
+	// different base would send it there, and an unreachable host below would
+	// then pass for "usable" and nothing would be stored for the new base.
+	if cfg.BaseURL != "" && !sameBase(cfg.BaseURL, base) {
 		return false
 	}
 	if cfg.ExpiresAt != "" {
@@ -130,7 +164,7 @@ func storedTokenUsable(ctx context.Context, base string) bool {
 	}
 
 	// Not expired is not enough - it may have been revoked in the console.
-	err = api.New(base, tok).Get(ctx, verifyPath, nil, nil)
+	err := api.New(base, cfg.Token).Get(ctx, verifyPath, nil, nil)
 	if err == nil {
 		return true
 	}
@@ -144,18 +178,33 @@ func storedTokenUsable(ctx context.Context, base string) bool {
 	return true
 }
 
+// sameBase compares two base URLs the way BaseURL normalises them.
+func sameBase(a, b string) bool {
+	norm := func(s string) string { return strings.TrimRight(strings.TrimSpace(s), "/") }
+	return norm(a) == norm(b)
+}
+
+// warnEnvToken says when INTUIZI_API_TOKEN will shadow whatever login or
+// logout just did to the file; the CLI cannot change the caller's shell.
+func warnEnvToken(w io.Writer, effect string) {
+	if os.Getenv(config.EnvToken) == "" {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "\nWarning: %s %s.\n", config.EnvToken, effect)
+}
+
 // readEmail takes --email, otherwise prompts. Scripts must use the flag: there
 // is no terminal to prompt on.
-func readEmail() (string, error) {
-	if loginEmail != "" {
-		return loginEmail, nil
+func readEmail(cmd *cobra.Command, flag string) (string, error) {
+	if flag != "" {
+		return flag, nil
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !stdinIsTerminal() {
 		return "", usageErr("not a terminal - pass --email")
 	}
 
-	fmt.Print("Email: ")
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	_, _ = fmt.Fprint(cmd.ErrOrStderr(), "Email: ")
+	line, err := awaitLine(cmd.Context(), cmd.InOrStdin())
 	if err != nil {
 		return "", err
 	}
@@ -167,22 +216,27 @@ func readEmail() (string, error) {
 }
 
 // readPassword takes --password, then stdin when piped, then a hidden prompt.
-func readPassword() (string, error) {
-	if loginPassword != "" {
-		return loginPassword, nil
+func readPassword(cmd *cobra.Command, flag string) (string, error) {
+	if flag != "" {
+		return flag, nil
 	}
 
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if !stdinIsTerminal() {
+		line, err := awaitLine(cmd.Context(), cmd.InOrStdin())
 		if err != nil && line == "" {
 			return "", fmt.Errorf("reading password from stdin: %w", err)
 		}
-		return strings.TrimRight(line, "\r\n"), nil
+		password := strings.TrimRight(line, "\r\n")
+		if password == "" {
+			return "", errors.New("password is required")
+		}
+		return password, nil
 	}
 
-	fmt.Print("Password: ")
-	raw, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println() // ReadPassword swallows the newline the user typed
+	stderr := cmd.ErrOrStderr()
+	_, _ = fmt.Fprint(stderr, "Password: ")
+	raw, err := readHidden(cmd.Context(), int(os.Stdin.Fd()))
+	_, _ = fmt.Fprintln(stderr) // ReadPassword swallows the newline the user typed
 	if err != nil {
 		return "", err
 	}
@@ -192,81 +246,155 @@ func readPassword() (string, error) {
 	return string(raw), nil
 }
 
+// awaitLine reads one line off the main goroutine so a Ctrl-C at the prompt
+// ends the command: the signal handler only cancels the context, which a
+// blocking read never observes, and the second press would kill the process.
+func awaitLine(ctx context.Context, in io.Reader) (string, error) {
+	type result struct {
+		line string
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		line, err := bufio.NewReader(in).ReadString('\n')
+		ch <- result{line, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case r := <-ch:
+		return r.line, r.err
+	}
+}
+
+// readHidden is awaitLine for the hidden prompt, with one more duty: ReadPassword
+// turns echo off and restores it only when it returns, so an interrupted read
+// would leave the user's shell needing `stty sane`. The state is captured up
+// front and put back here when the context ends the prompt.
+func readHidden(ctx context.Context, fd int) ([]byte, error) {
+	state, err := termGetState(fd)
+	if err != nil {
+		return nil, err
+	}
+
+	type result struct {
+		raw []byte
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		raw, err := termReadPassword(fd)
+		ch <- result{raw, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		_ = termRestore(fd, state)
+		return nil, ctx.Err()
+	case r := <-ch:
+		return r.raw, r.err
+	}
+}
+
 // --------------------------------------------------------------------------------- status
 
-var statusVerify bool
+func authStatusCommand() *cobra.Command {
+	var verify bool
 
-var authStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show whether you are logged in",
-	RunE: func(cmd *cobra.Command, _ []string) error {
-		base := config.BaseURL(baseURLFlag)
-		path, _ := config.Path()
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show whether you are logged in",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return status(cmd, verify)
+		},
+	}
 
-		fmt.Printf("Base URL: %s\n", base)
+	cmd.Flags().BoolVar(&verify, "verify", false, "Check the token against the API")
+	return cmd
+}
 
-		token, source := config.TokenSource()
-		switch source {
-		case config.SourceEnv:
-			fmt.Printf("Token:    present (from %s)\n", config.EnvToken)
-		case config.SourceConfig:
-			fmt.Printf("Token:    present (from %s)\n", path)
-			if cfg, err := config.Load(); err == nil {
-				if exp := formatExpiry(cfg.ExpiresAt); exp != "" {
-					fmt.Printf("Expires:  %s\n", exp)
-				}
-			}
-		default:
-			fmt.Println("Token:    none")
-			return errors.New("not logged in - run 'intuizi auth login'")
+// status is the one auth command whose output is data, so it goes to stdout.
+func status(cmd *cobra.Command, verify bool) error {
+	stdout := cmd.OutOrStdout()
+	base := config.BaseURL(baseURLFlag)
+	path, _ := config.Path()
+
+	token, source := config.TokenSource()
+
+	// TokenSource hides a broken file behind "none"; someone who cannot log in
+	// needs to know which file to fix, so read it here when it is in play.
+	var cfg *config.Config
+	if source != config.SourceEnv {
+		var err error
+		if cfg, err = config.Load(); err != nil {
+			return err
 		}
+	}
 
-		if statusVerify {
-			c := api.New(base, token)
-			if err := c.Get(cmd.Context(), verifyPath, nil, nil); err != nil {
-				// Only a 401 means the token is the problem. A 500, a timeout or
-				// a bad URL would otherwise send people off to re-authenticate.
-				if errors.Is(err, api.ErrUnauthorized) {
-					return fmt.Errorf("token rejected: %w", err)
-				}
-				return fmt.Errorf("could not verify the token: %w", err)
-			}
-			fmt.Println("Verified: the API accepted this token")
+	_, _ = fmt.Fprintf(stdout, "Base URL: %s\n", base)
+
+	switch source {
+	case config.SourceEnv:
+		_, _ = fmt.Fprintf(stdout, "Token:    present (from %s)\n", config.EnvToken)
+	case config.SourceConfig:
+		_, _ = fmt.Fprintf(stdout, "Token:    present (from %s)\n", path)
+		if exp := formatExpiry(cfg.ExpiresAt); exp != "" {
+			_, _ = fmt.Fprintf(stdout, "Expires:  %s\n", exp)
 		}
-		return nil
-	},
+	default:
+		_, _ = fmt.Fprintln(stdout, "Token:    none")
+		return errors.New("not logged in - run 'intuizi auth login'")
+	}
+
+	if verify {
+		c := api.New(base, token)
+		if err := c.Get(cmd.Context(), verifyPath, nil, nil); err != nil {
+			// Only a 401 means the token is the problem. A 500, a timeout or
+			// a bad URL would otherwise send people off to re-authenticate.
+			if errors.Is(err, api.ErrUnauthorized) {
+				return fmt.Errorf("token rejected: %w", err)
+			}
+			return fmt.Errorf("could not verify the token: %w", err)
+		}
+		_, _ = fmt.Fprintln(stdout, "Verified: the API accepted this token")
+	}
+	return nil
 }
 
 // --------------------------------------------------------------------------------- logout
 
-var authLogoutCmd = &cobra.Command{
-	Use:   "logout",
-	Short: "Forget the stored token",
-	RunE: func(_ *cobra.Command, _ []string) error {
-		cfg, err := config.Load()
-		if err != nil {
-			return err
-		}
-		had := cfg.Token != ""
+func authLogoutCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "logout",
+		Short: "Forget the stored token",
+		RunE:  logout,
+	}
+}
 
-		if err := config.ClearToken(); err != nil {
-			return err
-		}
+// logout, like login, is all commentary: stderr throughout.
+func logout(cmd *cobra.Command, _ []string) error {
+	stderr := cmd.ErrOrStderr()
 
-		if had {
-			fmt.Println("Removed the stored token.")
-			fmt.Println("It stays valid until it expires or you revoke it at My Account > API Tokens.")
-		} else {
-			fmt.Println("No stored token to remove.")
-		}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	had := cfg.Token != ""
 
-		if os.Getenv(config.EnvToken) != "" {
-			fmt.Fprintf(os.Stderr,
-				"\nWarning: %s is still set in this shell, so you remain authenticated.\n",
-				config.EnvToken)
-		}
-		return nil
-	},
+	if err := config.ClearToken(); err != nil {
+		return err
+	}
+
+	if had {
+		_, _ = fmt.Fprintln(stderr, "Removed the stored token.")
+		_, _ = fmt.Fprintln(stderr, "It stays valid until it expires or you revoke it at My Account > API Tokens.")
+	} else {
+		_, _ = fmt.Fprintln(stderr, "No stored token to remove.")
+	}
+
+	warnEnvToken(stderr, "is still set in this shell, so you remain authenticated")
+	return nil
 }
 
 // --------------------------------------------------------------------------------- helpers
@@ -294,13 +422,5 @@ func formatExpiry(iso string) string {
 }
 
 func init() {
-	authLoginCmd.Flags().StringVar(&loginEmail, "email", "", "Account email")
-	authLoginCmd.Flags().StringVar(&loginPassword, "password", "",
-		"Account password (discouraged - visible in shell history; pipe it on stdin instead)")
-
-	authStatusCmd.Flags().BoolVar(&statusVerify, "verify", false,
-		"Check the token against the API")
-
-	authCmd.AddCommand(authLoginCmd, authStatusCmd, authLogoutCmd)
-	rootCmd.AddCommand(authCmd)
+	rootCmd.AddCommand(authCommand())
 }

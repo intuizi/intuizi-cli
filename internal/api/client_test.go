@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -231,6 +232,20 @@ func TestReadShapes(t *testing.T) {
 	}
 }
 
+// recordSleeps replaces the retry wait with a recorder, so a 429 test asserts
+// the requested durations instead of spending them.
+func recordSleeps(t *testing.T) *[]time.Duration {
+	t.Helper()
+	var got []time.Duration
+	prev := sleep
+	sleep = func(_ context.Context, d time.Duration) error {
+		got = append(got, d)
+		return nil
+	}
+	t.Cleanup(func() { sleep = prev })
+	return &got
+}
+
 func TestRetry429(t *testing.T) {
 	// --- header parsing rules, no server needed ---
 	if d := retryAfter(""); d != fallbackRetryIn {
@@ -245,6 +260,8 @@ func TestRetry429(t *testing.T) {
 	if d := retryAfter("3600"); d != maxRetryIn {
 		t.Errorf("huge header not capped: %v", d)
 	}
+
+	waits := recordSleeps(t)
 
 	// --- two 429s then success: the third attempt must carry the body intact ---
 	var (
@@ -270,11 +287,9 @@ func TestRetry429(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	start := time.Now()
 	var out []map[string]any
 	err := New(srv.URL, "t").Post(context.Background(), "/analyses/audiences/create",
 		map[string]string{"name": "a"}, &out)
-	elapsed := time.Since(start)
 
 	if err != nil {
 		t.Fatalf("post after retries: %v", err)
@@ -294,12 +309,10 @@ func TestRetry429(t *testing.T) {
 	if keys[1] != keys[0] || keys[2] != keys[0] {
 		t.Fatalf("key changed across retries: %v", keys)
 	}
-	if elapsed < 2*time.Second {
-		t.Fatalf("elapsed = %v; Retry-After of 1s twice should wait at least 2s", elapsed)
+	if len(*waits) != 2 || (*waits)[0] != time.Second || (*waits)[1] != time.Second {
+		t.Fatalf("waits = %v; Retry-After of 1s twice should request two 1s sleeps", *waits)
 	}
-	if elapsed > 4*time.Second {
-		t.Fatalf("elapsed = %v; waited far longer than the two 1s Retry-After values", elapsed)
-	}
+	*waits = nil
 
 	// --- exhaustion: a third 429 is returned to the caller, not retried again ---
 	always := 0
@@ -323,20 +336,29 @@ func TestRetry429(t *testing.T) {
 	if always != 3 {
 		t.Fatalf("always = %d, want exactly 3 attempts", always)
 	}
+	if len(*waits) != 2 {
+		t.Fatalf("waits = %v; two retries should request two sleeps", *waits)
+	}
+}
 
-	// --- cancellation: Ctrl-C during the wait must abort promptly ---
+// The real wait, not the recorder: Ctrl-C during a Retry-After must abort
+// promptly rather than run the timer out.
+func TestSleepHonoursCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
-	start = time.Now()
-	err = New(burn.URL, "t").Get(ctx, "/anything", nil, &discard)
+	start := time.Now()
+	err := waitFor(ctx, maxRetryIn)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled wait should return context.Canceled, got: %v", err)
 	}
 	if time.Since(start) > time.Second {
 		t.Fatalf("cancel took %v; sleep is not honouring the context", time.Since(start))
+	}
+	if err := waitFor(context.Background(), time.Millisecond); err != nil {
+		t.Fatalf("an uncancelled wait should return nil, got %v", err)
 	}
 }
 
@@ -364,6 +386,7 @@ func TestCreateMultipart(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	waits := recordSleeps(t)
 	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
@@ -414,6 +437,9 @@ func TestCreateMultipart(t *testing.T) {
 	}
 	if hits != 2 {
 		t.Fatalf("hits = %d, want 2 (429 then success)", hits)
+	}
+	if len(*waits) != 1 || (*waits)[0] != time.Second {
+		t.Fatalf("waits = %v; one Retry-After of 1s should request one 1s sleep", *waits)
 	}
 	// The envelope wraps the new record in an array; the caller gets the record.
 	if out["id"] != float64(9) {
@@ -471,5 +497,280 @@ func TestMintAPITokenTakesEitherEnvelopeShape(t *testing.T) {
 				t.Error("expires_at was dropped")
 			}
 		})
+	}
+}
+
+// A CDN sends Retry-After as an HTTP-date (RFC 7231), not delta-seconds. The
+// header has one-second resolution, so a +3s date lands anywhere in (2s, 3s].
+func TestRetryAfterHTTPDate(t *testing.T) {
+	future := time.Now().Add(3 * time.Second).UTC().Format(http.TimeFormat)
+	if d := retryAfter(future); d <= 1500*time.Millisecond || d > 3*time.Second {
+		t.Errorf("date 3s ahead: %v, want about 3s", d)
+	}
+
+	past := time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat)
+	if d := retryAfter(past); d != 0 {
+		t.Errorf("date in the past: %v, want 0 (retry now, not the fallback)", d)
+	}
+
+	far := time.Now().Add(24 * time.Hour).UTC().Format(http.TimeFormat)
+	if d := retryAfter(far); d != maxRetryIn {
+		t.Errorf("date a day ahead not capped: %v", d)
+	}
+}
+
+// A top-level "errors": [] must not make the whole envelope unparseable: on a
+// 422 that would lose the message, on a 200 it would fail as malformed.
+func TestEnvelopeToleratesErrorsArray(t *testing.T) {
+	ctx := context.Background()
+	var discard map[string]any
+
+	val := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(422)
+		w.Write([]byte(`{"status":"error","code":422,"message":"Validation error.","data":[],"errors":[]}`))
+	}))
+	defer val.Close()
+	err := New(val.URL, "t").Get(ctx, "/x", nil, &discard)
+	var apiErr *Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 422 {
+		t.Fatalf("want a 422 *Error, got %v", err)
+	}
+	if apiErr.Message != "Validation error." {
+		t.Errorf("message lost to the errors array: %q", apiErr.Message)
+	}
+	if !strings.Contains(err.Error(), "Validation error. (422)") {
+		t.Errorf("text = %q", err.Error())
+	}
+
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"status":"success","code":200,"data":{"id":7},"errors":[]}`))
+	}))
+	defer ok.Close()
+	if err := New(ok.URL, "t").Get(ctx, "/x", nil, &discard); err != nil {
+		t.Fatalf("200 with an empty errors array should decode, got %v", err)
+	}
+	if discard["id"] != float64(7) {
+		t.Errorf("data = %v", discard)
+	}
+
+	// null and an object keep working as before.
+	obj := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(403)
+		w.Write([]byte(`{"status":"error","code":403,"message":"Missing header.","data":[],"errors":{"headers":"X-Requested-With is required."}}`))
+	}))
+	defer obj.Close()
+	err = New(obj.URL, "t").Get(ctx, "/x", nil, &discard)
+	if err == nil || !strings.Contains(err.Error(), "headers: X-Requested-With is required.") {
+		t.Errorf("object errors regressed: %v", err)
+	}
+	nul := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"status":"success","code":200,"data":{"id":8},"errors":null}`))
+	}))
+	defer nul.Close()
+	if err := New(nul.URL, "t").Get(ctx, "/x", nil, &discard); err != nil {
+		t.Errorf("null errors regressed: %v", err)
+	}
+}
+
+// A 3xx from a proxy or a wrong --base-url must surface, not be followed: a
+// same-host hop would forward the bearer token, and a 301 turns a create POST
+// into a GET.
+func TestRedirectsAreNotFollowed(t *testing.T) {
+	var leaked int
+	var leakedAuth string
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked++
+		leakedAuth = r.Header.Get("Authorization")
+		w.Write([]byte(`{"status":"success","code":200,"data":[{"id":1}]}`))
+	}))
+	defer second.Close()
+
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, second.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer first.Close()
+
+	var out []map[string]any
+	err := New(first.URL, "secret").Post(context.Background(), "/analyses/audiences/create",
+		map[string]string{"name": "a"}, &out)
+
+	var apiErr *Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusFound {
+		t.Fatalf("want a 302 *Error, got %v", err)
+	}
+	if leaked != 0 {
+		t.Fatalf("redirect target was hit %d times (Authorization %q); redirects must not be followed",
+			leaked, leakedAuth)
+	}
+	// "Found (302)" alone is a puzzle; the text should point at the cause.
+	if !strings.Contains(err.Error(), "302") || !strings.Contains(err.Error(), "--base-url") {
+		t.Errorf("text = %q, want the status and a --base-url hint", err.Error())
+	}
+	if !strings.Contains(err.Error(), second.URL) {
+		t.Errorf("text = %q, want the Location the server named", err.Error())
+	}
+}
+
+// --json prints the envelope the server sent, and on a failure that has to
+// include the error envelope: a script reads 422 field errors from it.
+func TestErrorCarriesTheEnvelopeBody(t *testing.T) {
+	ctx := context.Background()
+	body := `{"status":"error","code":422,"message":"Validation error.",` +
+		`"data":{"errors":{"name":["The name field is required."]}}}`
+	val := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(422)
+		w.Write([]byte(body))
+	}))
+	defer val.Close()
+
+	_, err := New(val.URL, "t").PostRaw(ctx, "/analyses/projects/create", map[string]string{"name": ""})
+	var apiErr *Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 422 {
+		t.Fatalf("want a 422 *Error, got %v", err)
+	}
+	if string(apiErr.Body) != body {
+		t.Errorf("Body = %s, want the envelope verbatim", apiErr.Body)
+	}
+
+	// Not JSON: nothing a script could parse, so Body stays empty.
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(502)
+		w.Write([]byte("<html>502</html>"))
+	}))
+	defer bad.Close()
+	_, err = New(bad.URL, "t").GetRaw(ctx, "/x", nil)
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 502 {
+		t.Fatalf("want a 502 *Error, got %v", err)
+	}
+	if len(apiErr.Body) != 0 {
+		t.Errorf("Body = %s, want empty for a non-JSON response", apiErr.Body)
+	}
+}
+
+// setKey installs --idempotency-key for one test.
+func setKey(t *testing.T, key string) {
+	t.Helper()
+	prev := IdempotencyKey
+	IdempotencyKey = key
+	t.Cleanup(func() { IdempotencyKey = prev })
+}
+
+// --idempotency-key's help says "on create commands", but only seven routes
+// read the header. Silently ignoring it elsewhere breaks the promise.
+func TestIdempotencyKeyWarnsOnUnkeyedRoutes(t *testing.T) {
+	ctx := context.Background()
+	setKey(t, "abc-123")
+
+	var keys []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		w.Write([]byte(`{"status":"success","code":200,"data":[]}`))
+	}))
+	defer srv.Close()
+
+	// Unkeyed POST: one warning, however many times the client posts.
+	c := New(srv.URL, "t")
+	var warn strings.Builder
+	c.Warn = &warn
+	for range 2 {
+		if err := c.Post(ctx, "/analyses/cohorts/preview", map[string]string{"a": "b"}, nil); err != nil {
+			t.Fatalf("post: %v", err)
+		}
+	}
+	want := "--idempotency-key has no effect on /analyses/cohorts/preview"
+	if got := warn.String(); strings.Count(got, want) != 1 {
+		t.Errorf("warn = %q, want exactly one %q", got, want)
+	}
+
+	// Reads stay quiet: a --wait create polls with GETs after its keyed POST.
+	c = New(srv.URL, "t")
+	warn.Reset()
+	c.Warn = &warn
+	if err := c.Get(ctx, "/analyses/audiences/1", nil, nil); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if warn.Len() != 0 {
+		t.Errorf("a GET warned: %q", warn.String())
+	}
+
+	// Keyed route: quiet, and the header carries the chosen key.
+	c = New(srv.URL, "t")
+	warn.Reset()
+	c.Warn = &warn
+	if err := c.Post(ctx, "/analyses/projects/create", map[string]string{"name": "x"}, nil); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if warn.Len() != 0 {
+		t.Errorf("a keyed create warned: %q", warn.String())
+	}
+	if last := keys[len(keys)-1]; last != "abc-123" {
+		t.Errorf("Idempotency-Key = %q, want abc-123", last)
+	}
+
+	// No writer: no output and no panic.
+	c = New(srv.URL, "t")
+	c.Warn = nil
+	if err := c.Post(ctx, "/analyses/cohorts/preview", map[string]string{"a": "b"}, nil); err != nil {
+		t.Fatalf("post with nil Warn: %v", err)
+	}
+}
+
+// When a keyed create dies in transit its outcome is unknown, and the only
+// safe retry is one that reuses the key - which the user never saw when it
+// was generated.
+func TestKeyedPostTransportErrorNamesTheKey(t *testing.T) {
+	ctx := context.Background()
+
+	// Guarded: with no response there is no happens-before between the handler
+	// and the test goroutine, and the race detector notices.
+	var (
+		mu   sync.Mutex
+		seen []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("Idempotency-Key"))
+		mu.Unlock()
+		// Drop the connection without answering: the request may have landed.
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "t")
+	var warn strings.Builder
+	c.Warn = &warn
+	err := c.Post(ctx, "/analyses/audiences/create", map[string]string{"name": "a"}, nil)
+	if err == nil {
+		t.Fatal("expected a transport error")
+	}
+	var apiErr *Error
+	if errors.As(err, &apiErr) {
+		t.Fatalf("a dropped connection is not an HTTP status, got %v", err)
+	}
+	mu.Lock()
+	sent := append([]string(nil), seen...)
+	mu.Unlock()
+	if len(sent) == 0 || len(sent[0]) != 36 {
+		t.Fatalf("server saw keys %v, want one generated UUID", sent)
+	}
+	want := "Idempotency-Key used: " + sent[0] + "; pass --idempotency-key " + sent[0] + " to retry safely"
+	if !strings.Contains(warn.String(), want) {
+		t.Errorf("warn = %q, want %q", warn.String(), want)
+	}
+
+	// An unkeyed POST has nothing to retry with, so no hint.
+	c = New(srv.URL, "t")
+	warn.Reset()
+	c.Warn = &warn
+	if err := c.Post(ctx, "/analyses/cohorts/preview", map[string]string{"a": "b"}, nil); err == nil {
+		t.Fatal("expected a transport error")
+	}
+	if warn.Len() != 0 {
+		t.Errorf("an unkeyed POST printed a key hint: %q", warn.String())
 	}
 }
