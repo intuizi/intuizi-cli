@@ -153,6 +153,36 @@ func canonicalType(t string) (string, error) {
 	return "", usageErr("unknown --type " + t + "; one of " + strings.Join(valid, ", "))
 }
 
+// resolveAll backs --brand-all: every match, where resolveOne insists on one.
+// A multi-page catalog is refused rather than quietly taking the first page.
+func resolveAll(ctx context.Context, c *api.Client, path, search, what string) ([]any, error) {
+	query := url.Values{}
+	query.Set("search", search)
+
+	items, pg, err := api.ReadList[output.Record](ctx, c, path, query)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, usageErr(fmt.Sprintf("no %s match %q", what, search))
+	}
+	if pg != nil && pg.LastPage > 1 {
+		return nil, usageErr(fmt.Sprintf(
+			"%q matches %d %s across %d pages - narrow the search, or pass ids",
+			search, pg.Total, what, pg.LastPage))
+	}
+
+	ids := make([]any, 0, len(items))
+	for _, it := range items {
+		v, err := catalogValue(it, path)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, v)
+	}
+	return ids, nil
+}
+
 // audienceLocation omits dmas, which the API rejects.
 type audienceLocation struct {
 	Countries []string `json:"countries,omitempty"`
