@@ -24,6 +24,24 @@ The token can also be supplied per-call with the `INTUIZI_API_TOKEN`
 environment variable, which wins over the stored one. `auth logout` forgets the
 token locally; it does not revoke it on the server.
 
+Unattended, pass the email as a flag and pipe the password:
+
+```bash
+echo "$PASSWORD" | intuizi auth login --email you@example.com
+```
+
+A token is bound to the console that minted it, and the config file stores the
+base URL alongside it. `auth login` reuses a stored token that still works for
+the same console, since accounts are capped at 10 active tokens; logging in
+with a different `--base-url` mints a new token there and replaces the stored
+base URL and token together. The file and its directory are checked before
+anything is minted, so a corrupt file or an unwritable directory fails without
+spending a token slot, and `auth login`, `auth status` and `auth logout` all
+name the file when it cannot be read. `auth status --verify` makes one request
+to confirm the token is still accepted. Login and logout print commentary on
+stderr; only `auth status` writes to stdout. Ctrl-C at a prompt exits 130 and
+leaves the terminal as it found it.
+
 ## Global flags
 
 | Flag | Meaning |
@@ -129,8 +147,8 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
 | `--type` | one dataset type, case-insensitive | `reference common dataset-types` |
-| `--name` | any string | — |
-| `--start-date` `--end-date` | `YYYY-MM-DD` | — |
+| `--name` | any string | - |
+| `--start-date` `--end-date` | `YYYY-MM-DD` | - |
 | `--brand` | name or id, POI only, repeatable | `reference poi brands --search <name>` |
 | `--category` | name or id, repeatable | one catalog per type, below |
 | `--provider` | id, repeatable | `reference common signal-providers --data-type <type>` |
@@ -138,7 +156,7 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--city` | city name, repeatable | `reference common cities --states CA` |
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
-| `--dry-run` `--wait` `--timeout` | — | — |
+| `--dry-run` `--wait` `--timeout` | - | - |
 
 `--type` is case-insensitive in and canonical out: `poi` sends `POI`. Accepted
 types are POI, Apps, WebDomain, CTV, Cohorts, AffinityTransactions,
@@ -159,7 +177,13 @@ resolved ids go into a different payload field:
 
 Omitting `--provider` includes every provider for the dataset type, which is
 almost always right: a provider left out builds an audience that completes with
-zero devices and no error. Provider sets differ per type.
+zero devices and no error. Provider sets differ per type, and a `--provider`
+outside the type's catalog is rejected before anything is sent: the API would
+accept it and build that same empty audience.
+
+Blank values are rejected before anything is sent, as is a zero or negative
+`--brand` or `--category` id. Beyond that a numeric id is passed through as
+given, since no catalog filters by id.
 
 ```bash
 intuizi audiences create \
@@ -308,19 +332,26 @@ intuizi audiences create --file examples/audience-refine-crosspurchase.json
 
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
-| `--name` | any string | — |
+| `--name` | any string | - |
 | `--source-audience-id` | the seed; see below | `audiences list` |
-| `--target-size` | device count, capped at 4,000,000 | — |
+| `--target-size` | device count, capped at 4,000,000 | - |
 | `--signal` | data family, repeatable | fixed list, below |
 | `--country` | ISO-3 code, repeatable, required | `reference common countries` |
 | `--state` | state code, repeatable | `reference common states --countries USA` |
-| `--exclude-seed-devices` `--expand-eids` | booleans, default false, always sent | — |
+| `--exclude-seed-devices` `--expand-eids` | booleans, default false, always sent | - |
 | `--contrast-audience-id` | Completed, non-lookalike audience | `audiences list` |
-| `--notify` | boolean | — |
-| `--dry-run` | — | — |
+| `--notify` | boolean | - |
+| `--file` | the whole payload as JSON, or `-` for stdin | for fields the flags do not model |
+| `--dry-run` | - | - |
 
 The seed for `--source-audience-id` must be Completed, must not itself be a
 lookalike, and must hold at least 1,000 devices.
+
+Checked before anything is sent: `--name` is not blank, the two audience ids
+are positive, `--target-size` is between 1 and 4,000,000, and no `--signal`,
+`--country` or `--state` is blank. A repeated `--signal` is sent once.
+`--file` takes the whole body instead, forwarded untouched, for anything the
+flags do not model.
 
 `--signal` takes `poi`, `apps`, `demographics`, `transactions` or
 `profile_attributes`. `web` and `ctv` were withdrawn and are rejected.
@@ -340,9 +371,14 @@ intuizi audiences lookalike create \
 | `--audience-id` | Completed audience | `audiences list` |
 | `--endpoint-connection-id` | destination connection | `reference common endpoint-connections` |
 | `--pricing-model-id` | pricing model for the export | `reference common pricing-models` |
-| `--description` | any string | — |
+| `--description` | any string | - |
 | `--project-id` | project id | `projects list` |
-| `--wait` `--timeout` | — | — |
+| `--dry-run` | - | - |
+| `--wait` `--timeout` | - | - |
+
+An activation costs money, so `--dry-run` is worth a habit here: it prints the
+body the flags produce, sends nothing, and needs no token. Not with `--wait` or
+`--file`.
 
 Pricing models are per partner: `reference common pricing-models --partner-id
 <id>`. Endpoint partners come from `reference common endpoint-partners`, their
@@ -362,25 +398,27 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
-| `--name` | any string; ignored for an audience source | — |
-| `--file-uri` | `s3://bucket/path` or `gs://bucket/path` | — |
+| `--name` | any string; rejected for an audience source | - |
+| `--file-uri` | `s3://bucket/path` or `gs://bucket/path` | - |
 | `--upload-reference` | reference from a reserved upload | `uploads reserve`, or `uploads put` |
 | `--audience-id` | Completed audience | `audiences list` |
-| `--file-format` | `csv`, `gzip` or `parquet` | — |
-| `--identifier-type` | one of nine, below | — |
+| `--file-format` | `csv`, `gzip` or `parquet` | - |
+| `--identifier-type` | one of nine, below | - |
 | `--identifier-column` | column name | `cohorts preview` |
 | `--metadata-columns` | column name, repeatable | `cohorts preview` |
-| `--ip-enrichment` | boolean | — |
-| `--device-limit` | device cap | — |
+| `--ip-enrichment` | boolean | - |
+| `--device-limit` | device cap | - |
 | `--project-id` | project id | `projects list` |
-| `--dry-run` | — | — |
+| `--dry-run` | - | - |
 
 `--identifier-type` takes `eid`, `eid_md5`, `maid`, `ip`, `hem_plaintext`,
 `scid`, `hem_md5`, `hem_sha1` or `hem_sha256`.
 
 A `file_uri` ending `.csv`, `.gz` or `.parquet` is read as a single file;
-anything else is read as a folder. An audience makes at most one live cohort,
-and the cohort takes the audience's own name.
+anything else is read as a folder, and whitespace anywhere in it is refused.
+An audience makes at most one live cohort, and the cohort takes the audience's
+own name, so `--name` is rejected alongside `--audience-id` rather than sent
+to be ignored.
 
 ```bash
 # from a cloud file
@@ -423,40 +461,55 @@ express directly as `--audience-id 88 --device-limit 1000`.
 
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
-| `--file-uri` | `s3://bucket/path` or `gs://bucket/path` | — |
+| `--file-uri` | `s3://bucket/path` or `gs://bucket/path` | - |
 | `--upload-reference` | reference from a reserved upload | `uploads reserve`, or `uploads put` |
-| `--file-format` | `csv` or `gzip`; sniffed if omitted | — |
+| `--file-format` | `csv` or `gzip`; sniffed if omitted | - |
 
 Exactly one of `--file-uri` or `--upload-reference`. Parquet cannot be
 previewed. `--quiet` does not apply: a preview returns sample rows, not an id.
 
-Run this before `cohorts create` to confirm `--identifier-column`.
+Run this before `cohorts create` to confirm `--identifier-column`. The output
+is the file's column names as a header row with the sample rows under it, and
+the row count on stderr; `--json` has the same `columns`, `samples` and
+`sample_rows` fields in the raw envelope.
+
+```bash
+$ intuizi cohorts preview --file-uri s3://example-bucket/cohorts/q3.csv
+email_sha256  city         zip
+ab12          New York     10001
+cd34          Los Angeles  90001
+2 sample rows
+```
 
 ### schedules create
 
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
-| `--name` | any string | — |
+| `--name` | any string | - |
 | `--audience-id` | audience to rebuild each cycle | `audiences list` |
-| `--start` | `"YYYY-MM-DD HH:MM:SS"`, read in `--timezone`, must be in the future | — |
-| `--timezone` | IANA name, e.g. `America/New_York` | — |
+| `--project-id` | project id | `projects list` |
+| `--start` | `"YYYY-MM-DD HH:MM:SS"`, read in `--timezone`, must be in the future | - |
+| `--timezone` | IANA name, e.g. `America/New_York` | - |
 | `--frequency` | one of four, case-insensitive | `reference common schedule-frequencies` |
-| `--window` | data window id | `reference common schedule-windows` |
-| `--window-days` | day count, `--window 3` Custom only | — |
+| `--window` | data window id, `1` to `8` | `reference common schedule-windows` |
+| `--window-days` | `1` to `365`, `--window 3` Custom only | - |
 | `--ending` | `1`, `2` or `3`; default `1` | `reference common schedule-endings` |
-| `--after-recurrences` | run count, `--ending 2` only | — |
-| `--end-date` | `YYYY-MM-DD`, `--ending 3` only | — |
-| `--dry-run` | — | — |
+| `--after-recurrences` | run count of `1` or more, `--ending 2` only | - |
+| `--end-date` | `YYYY-MM-DD`, `--ending 3` only | - |
+| `--dry-run` | - | - |
 
 `--frequency` takes `daily`, `weekly`, `bi-weekly` or `monthly`. `--ending` is
 `1` Never, `2` Recurrences or `3` Custom Date.
 
 Each ending rule carries its own field, and a mismatch is rejected here because
-the API ignores the wrong one rather than refusing it.
+the API ignores the wrong one rather than refusing it. `--start` and
+`--timezone` are checked before anything is sent: the zone must be a real IANA
+name, the start must parse in the layout above, and it must still be in the
+future in that zone.
 
 ```bash
 intuizi schedules create --name "Weekly coffee refresh" --audience-id 88 \
-  --start "2026-09-15 06:00:00" --timezone America/New_York \
+  --start "2027-09-15 06:00:00" --timezone America/New_York \
   --frequency weekly --window 2
 ```
 
@@ -470,20 +523,47 @@ intuizi schedules create --file examples/schedule.json
 
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
-| `--name` | any string | — |
+| `--name` | any string | - |
 | `--brand-id` | a first-party brand id | `poi brands list` |
-| `--file` | CSV of locations | — |
-| `--list` | JSON body carrying `locations[]`, or `-` | — |
+| `--file` | a `.csv` or `.txt` of locations | - |
+| `--list` | JSON body carrying `locations[]`, or `-` for stdin | - |
 | `--upload-reference` | reference from a reserved upload | `uploads put` |
-| `--key` | how to match existing POIs, below | — |
-| `--update` `--remove` | booleans | — |
+| `--key` | how to match existing POIs, below | - |
+| `--update` `--remove` | booleans; both need `--key` | - |
+
+Exactly one of `--file`, `--list` and `--upload-reference`. `--file` and
+`--upload-reference` need `--name` and `--brand-id`; `--list` takes both from
+the body unless the flags override them. Only `--list` reads stdin: `--file -`
+is refused and points at `--list -`.
 
 `--key` takes `location-id`, `gps-coordinates`, `store-id`, `master-id` or
-`external-id`.
+`external-id`. It travels on every route, so `--list ... --update --key
+store-id` updates the matched POIs rather than inserting duplicates.
 
 Submission CSVs need `latitude`, `longitude`, and a country column headed
 `country|alpha_2` or `country|alpha_3`. The taxonomy nests segments >
 categories > brands; create the parent first.
+
+#### The rest of poi
+
+| Command | Flags | Notes |
+| --- | --- | --- |
+| `poi segments list` | `--search` | ids come back as `value` |
+| `poi categories list` | `--search` | |
+| `poi categories create` | `--name`, `--segment-id` | parent id from `poi segments list` |
+| `poi brands list` | `--search` | |
+| `poi brands create` | `--name`, `--category-id` | parent id from `poi categories list` |
+| `poi locations list` | `--search`, `--brands`, `--countries`, `--geometry`, `--page`, `--per-page` | `--brands` takes your own brand ids, repeatable or comma-separated; `--countries` repeats; `--geometry` is `polygon` or `coordinates` |
+| `poi locations show <id>` | | |
+| `poi submissions list` | `--search`, `--sort-by`, `--order` | not paginated; `--sort-by` is `name`, `status`, `created_at` or `updated_at`; `--order` is `asc` or `desc` |
+| `poi submissions show <id>` | | where an asynchronous submission is followed |
+| `poi submissions delete <id>` | `--yes` | only a waiting submission can be deleted |
+
+`--search` on `locations list` matches name, address, city, state, zip, DMA,
+external id and placekey; on the taxonomy lists and `submissions list` it
+matches the name. A value outside a flag's set - `--key`, `--geometry`,
+`--sort-by`, `--order`, an empty `--name` or a zero parent id on the creates -
+is refused before anything is sent, exit 2.
 
 ### uploads
 
@@ -493,42 +573,59 @@ categories > brands; create the parent first.
 | | `--filename` | original filename |
 | | `--content-length` | exact byte size of the PUT |
 | | `--content-type` | MIME type, default `text/csv` |
-| `put` | `--purpose` | `poi_submission` or `cohort` |
+| `put <file>` | `--purpose` | `poi_submission` or `cohort` |
 | | `--content-type` | MIME type, default `text/csv` |
 
 `reserve` returns a presigned URL for the caller to PUT to. `put` does both
-steps and prints the `upload_reference`.
+steps and prints the `upload_reference` alone on stdout; with `--json` it prints
+the reservation envelope instead, once the PUT has succeeded, so
+`.data[0].upload_reference` is the same value either way.
+
+```bash
+ref=$(intuizi uploads put customers.csv --purpose cohort)
+intuizi uploads put customers.csv --purpose cohort --json | jq -r '.data[0].upload_reference'
+```
+
+Every header the reservation lists is sent on the PUT, since all of them are
+signed; `--content-type` replaces `Content-Type` alone. An empty file is
+refused before a slot is reserved, a `--purpose` outside the two values before
+anything is sent, and a redirect from the storage host is reported as an error
+rather than followed.
 
 ## Reference catalogs
 
 Every id above has a lookup. All reads are GETs with no side effects, take
 `--search` for a case-insensitive contains match, and honour both output flags:
 `--quiet` for bare values one per line, `--json` for the full envelope when the
-label is needed as well as the value.
+label is needed as well as the value. The one exception is
+`profile-attributes recency-limits`: it takes no parameters, and its rows are
+`{start_limit, end_limit}` with nothing `--quiet` could print, so `--quiet` is
+refused there (exit 2) - read it with `--json`.
 
-- **common** — dataset-types, countries, states, cities, dmas, zipcodes,
+- **common** - dataset-types, countries, states, cities, dmas, zipcodes,
   operators, languages, signal-providers, endpoint-partners,
   endpoint-connections, pricing-models, datastreams, schedule-frequencies,
   schedule-windows, schedule-endings
-- **poi** — segments, categories, brands, locations
-- **apps** — categories, tags, os, bundle-ids, taxonomies
-- **web** — iab-categories, iab-subcategories, domains, ref-domains, browsers,
+- **poi** - segments, categories, brands, locations
+- **apps** - categories, tags, os, bundle-ids, taxonomies
+- **web** - iab-categories, iab-subcategories, domains, ref-domains, browsers,
   device-types, device-makes, device-oses
-- **ctv** — vendors, content-types, content-genres, channel-names,
+- **ctv** - vendors, content-types, content-genres, channel-names,
   device-types, device-makes, device-oses, connection-types, isps, series
-- **transactions** — categories, subcategories, brands, incomes, ages, genders,
+- **transactions** - categories, subcategories, brands, incomes, ages, genders,
   ethnicities
-- **demographics** — genders, ages, marital-statuses, incomes
-- **profile-attributes** — categories, keys, values, recency-limits
-- **deidentified** — fields
-- **cohorts** — list
+- **demographics** - genders, ages, marital-statuses, incomes
+- **profile-attributes** - categories, keys, values, recency-limits
+- **deidentified** - fields
+- **cohorts** - list
 
 The geography catalogs cascade: countries, then states, then cities, then
 zipcodes. Each level takes the level above it. The POI taxonomy cascades the
 same way: segments, then categories, then brands, then locations.
 
 Paginated reads return one page per call; ask for more with `--page` and
-`--per-page`.
+`--per-page`. Both must be 1 or more: the API rejects 0 rather than treating it
+as unset, so the flag refuses it before anything is sent.
 
 ```bash
 intuizi reference common states --countries USA --search california
@@ -564,6 +661,18 @@ intuizi audiences show "$id" --json | jq '.data[0].normalized_payload'
 Commentary always goes to stderr: status changes while `--wait` polls, the
 "page 1 of N" footer, "no results". A pipe therefore sees only data.
 
+On a failure `--json` still prints what the server sent: the error envelope
+goes to stdout, the one-line error goes to stderr as usual, and the exit code
+is 1. A script can therefore read a 422's field errors from the same place it
+reads a success:
+
+```bash
+out=$(intuizi projects create --name "" --json) || jq '.data.errors' <<<"$out"
+```
+
+A failure whose body is not JSON, such as an HTML error page from a proxy,
+prints nothing on stdout; only the stderr line explains it.
+
 ### Envelope shapes
 
 Every response shares the `status`, `code`, `message`, `data` envelope, but what
@@ -572,9 +681,9 @@ path returns nothing.
 
 | Read | Path to the records |
 | --- | --- |
-| `show <id>` | `.data[0]` — an array of one, so the index is required |
+| `show <id>` | `.data[0]` - an array of one, so the index is required |
 | `list` | `.data.items[]`, with `.data.pagination` alongside |
-| `reference`, unpaged catalog | `.data[]` — a bare array |
+| `reference`, unpaged catalog | `.data[]` - a bare array |
 | `reference`, paged catalog | `.data.items[]` |
 
 A script consuming both reference shapes must switch on the type.
