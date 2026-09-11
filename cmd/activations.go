@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -32,9 +33,15 @@ An audience must hold at least 500 devices before it can be activated.`,
 
 // --------------------------------------------------------------------------------- create
 
+// activationFields are the body-building flags, for --file to reject.
+var activationFields = []string{
+	"audience-id", "endpoint-connection-id", "pricing-model-id", "description", "project-id",
+}
+
 func activationsCreateCommand() *cobra.Command {
 	var (
 		file         string
+		dryRun       bool
 		audienceID   int
 		connectionID int
 		pricingModel int
@@ -61,6 +68,9 @@ Add --wait to follow the export to its end, with --timeout to bound it:
 
     intuizi activations create --file activation.json --wait --timeout 90m
 
+An activation costs money, so --dry-run prints the body the flags produce and
+sends nothing; it needs no token.
+
 Collect the ids first: 'intuizi reference common endpoint-connections' and
 'intuizi reference common pricing-models --partner-id <id>'.
 
@@ -81,11 +91,11 @@ duplicate export.`,
 		var body any
 		if file != "" {
 			// Mixing the two would beg the question of which wins.
-			for _, f := range []string{"audience-id", "endpoint-connection-id",
-				"pricing-model-id", "description", "project-id"} {
-				if flags.Changed(f) {
-					return usageErr("--file carries the whole body; drop --" + f)
-				}
+			if err := rejectBodyFlags(flags, activationFields); err != nil {
+				return err
+			}
+			if dryRun {
+				return usageErr("--dry-run builds a body from flags; --file already has one")
 			}
 			payload, err := readPayload(cmd, file)
 			if err != nil {
@@ -93,10 +103,24 @@ duplicate export.`,
 			}
 			body = payload
 		} else {
+			if dryRun && wait {
+				return usageErr("--dry-run sends nothing, so there is nothing to --wait for")
+			}
 			if !flags.Changed("audience-id") || !flags.Changed("endpoint-connection-id") ||
 				!flags.Changed("pricing-model-id") {
 				return usageErr("pass --file, or all of --audience-id, " +
 					"--endpoint-connection-id and --pricing-model-id")
+			}
+			for _, id := range []struct {
+				flag  string
+				value int
+			}{
+				{"audience-id", audienceID}, {"endpoint-connection-id", connectionID},
+				{"pricing-model-id", pricingModel}, {"project-id", projectID},
+			} {
+				if err := positiveID(flags, id.flag, id.value); err != nil {
+					return err
+				}
 			}
 			m := map[string]any{
 				"audience_id":            audienceID,
@@ -108,6 +132,11 @@ duplicate export.`,
 			}
 			if flags.Changed("project-id") {
 				m["project_id"] = projectID
+			}
+			if dryRun {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(m)
 			}
 			body = m
 		}
@@ -123,6 +152,8 @@ duplicate export.`,
 	flags := cmd.Flags()
 	flags.StringVar(&file, "file", "",
 		`Path to a full activation payload, or "-" to read it from stdin`)
+	flags.BoolVar(&dryRun, "dry-run", false,
+		"Print the body the flags produce and send nothing")
 	flags.IntVar(&audienceID, "audience-id", 0, "The completed audience to export")
 	flags.IntVar(&connectionID, "endpoint-connection-id", 0, "The destination endpoint connection")
 	flags.IntVar(&pricingModel, "pricing-model-id", 0, "The pricing model for this export")

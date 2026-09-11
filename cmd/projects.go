@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"strings"
+
 	"github.com/spf13/cobra"
 )
 
@@ -46,13 +48,18 @@ The whole body is a name, so this one takes a flag rather than a file:
     intuizi projects create --name "Retail 2026"`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Checked here, not with MarkFlagRequired: cobra runs that check
+			// after PersistentPreRun, so its error would exit 1, and it lets
+			// an empty string through that the server then refuses.
+			if strings.TrimSpace(name) == "" {
+				return usageErr("a project needs --name")
+			}
 			return createBody(cmd, projectsPrefix+"/create",
 				map[string]any{"name": name}, projectColumns, "")
 		},
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "Project name (max 255 characters)")
-	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
 

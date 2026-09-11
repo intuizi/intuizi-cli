@@ -34,10 +34,15 @@ No cost figures are exposed through the API. Usage requires a permission your
 Account Manager enables; without it the read is rejected.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// A report has no id to print.
+			if quietOutput {
+				return usageErr("--quiet does not apply: usage returns a report, not an id")
+			}
+
 			query := url.Values{}
 			if cmd.Flags().Changed("month") {
 				if !yearMonth.MatchString(month) {
-					return fmt.Errorf("--month %q is not YYYY-MM", month)
+					return usageErr(fmt.Sprintf("--month %q is not YYYY-MM", month))
 				}
 				query.Set("yearmonth", month)
 			}

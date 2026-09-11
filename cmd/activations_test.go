@@ -352,3 +352,93 @@ func TestWaitCompletedWithHealthyDatastreamsSucceeds(t *testing.T) {
 		t.Fatalf("healthy streams should succeed: %v", err)
 	}
 }
+
+// --dry-run is the one place to see what an activation will cost before it
+// costs it: the body the flags produce, nothing sent, no token needed.
+func TestActivationsCreateDryRunPrintsBodyAndSendsNothing(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	out, _, err := run(t, activationsCreateCommand(), srv,
+		append(threeIDs, "--description", "Q1 export", "--project-id", "4", "--dry-run")...)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("dry run must send nothing, got %v", got.paths)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal([]byte(out), &body); err != nil {
+		t.Fatalf("stdout is not the JSON body: %v\n%s", err, out)
+	}
+	for k, want := range map[string]any{
+		"audience_id": 88.0, "endpoint_connection_id": 12.0, "pricing_model_id": 3.0,
+		"description": "Q1 export", "project_id": 4.0,
+	} {
+		if body[k] != want {
+			t.Errorf("%s = %v, want %v", k, body[k], want)
+		}
+	}
+}
+
+func TestActivationsCreateDryRunRejectsWaitAndFile(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	_, _, err := run(t, activationsCreateCommand(), srv, append(threeIDs, "--dry-run", "--wait")...)
+	if err == nil || !strings.Contains(err.Error(), "nothing to --wait for") {
+		t.Errorf("--dry-run --wait: err = %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "a.json")
+	if err := os.WriteFile(path, []byte(`{"audience_id":88}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = run(t, activationsCreateCommand(), srv, "--file", path, "--dry-run")
+	if err == nil || !strings.Contains(err.Error(), "--file already has one") {
+		t.Errorf("--file --dry-run: err = %v", err)
+	}
+
+	var ue usageError
+	if !errors.As(err, &ue) {
+		t.Errorf("err = %v, want a usageError", err)
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
+// A positional id of 0 is refused by parseID; the same id given as a flag
+// must not slip through to a 422.
+func TestActivationsCreateRejectsNonPositiveIDFlags(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	for _, tc := range []struct{ flag, value string }{
+		{"--audience-id", "0"},
+		{"--endpoint-connection-id", "-1"},
+		{"--pricing-model-id", "0"},
+		{"--project-id", "0"},
+	} {
+		args := []string{"--audience-id", "88", "--endpoint-connection-id", "12", "--pricing-model-id", "3"}
+		for i := 0; i < len(args); i += 2 {
+			if args[i] == tc.flag {
+				args[i+1] = tc.value
+			}
+		}
+		if tc.flag == "--project-id" {
+			args = append(args, tc.flag, tc.value)
+		}
+
+		_, _, err := run(t, activationsCreateCommand(), srv, args...)
+		var ue usageError
+		if !errors.As(err, &ue) {
+			t.Errorf("%s %s: err = %v, want a usageError", tc.flag, tc.value, err)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.flag) {
+			t.Errorf("the error should name %s, got %v", tc.flag, err)
+		}
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("a bad id should cost no round trip, got %v", got.paths)
+	}
+}

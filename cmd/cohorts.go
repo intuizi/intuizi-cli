@@ -3,9 +3,15 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
+
+	"github.com/intuizi/intuizi-cli/internal/api"
+	"github.com/intuizi/intuizi-cli/internal/output"
 )
 
 const cohortsPrefix = "/analyses/cohorts"
@@ -46,6 +52,26 @@ var cohortRequired = []string{
 var cohortAudienceOnly = []string{
 	"name", "file-format", "identifier-type", "identifier-column",
 	"metadata-columns", "ip-enrichment",
+}
+
+// The server's accepted sets, checked here so a typo is named with the values
+// it could have been instead of costing a round trip on a 422. Parquet cannot
+// be previewed, so the preview set is shorter.
+var (
+	cohortFileFormats  = []string{"csv", "gzip", "parquet"}
+	previewFileFormats = []string{"csv", "gzip"}
+	identifierTypes    = []string{
+		"eid", "eid_md5", "maid", "ip", "hem_plaintext", "scid",
+		"hem_md5", "hem_sha1", "hem_sha256",
+	}
+)
+
+// oneOf rejects a value outside its set, listing the set.
+func oneOf(flag, value string, allowed []string) error {
+	if slices.Contains(allowed, value) {
+		return nil
+	}
+	return usageErr("unknown --" + flag + " " + value + "; one of " + strings.Join(allowed, ", "))
 }
 
 func cohortsCreateCommand() *cobra.Command {
@@ -90,7 +116,7 @@ for the reference 'intuizi uploads reserve' handed back:
       --identifier-type hem_sha256 --identifier-column email_sha256
 
 From a Completed audience, --audience-id is the only flag needed; the cohort
-takes the audience's own name, so --name is ignored:
+takes the audience's own name, so --name is rejected:
 
     intuizi cohorts create --audience-id 88 --device-limit 1000
 
@@ -150,11 +176,20 @@ duplicate import.`,
 							"; drop it when the source is --audience-id")
 					}
 				}
+				if err := positiveID(flags, "audience-id", audienceID); err != nil {
+					return err
+				}
 				body["source"] = "audience"
 				body["audience_id"] = audienceID
 
 			default:
 				if err := missingFlags(flags, cohortRequired, "a cohort from a file"); err != nil {
+					return err
+				}
+				if err := oneOf("file-format", fileFormat, cohortFileFormats); err != nil {
+					return err
+				}
+				if err := oneOf("identifier-type", idType, identifierTypes); err != nil {
 					return err
 				}
 				body["name"] = name
@@ -179,7 +214,13 @@ duplicate import.`,
 				body["ip_enrichment"] = ipEnrich
 			}
 			if flags.Changed("device-limit") {
+				if deviceLimit < 1 {
+					return usageErr("--device-limit must be at least 1, not " + strconv.Itoa(deviceLimit))
+				}
 				body["device_limit"] = deviceLimit
+			}
+			if err := positiveID(flags, "project-id", projectID); err != nil {
+				return err
 			}
 			if flags.Changed("project-id") {
 				body["project_id"] = projectID
@@ -225,8 +266,10 @@ duplicate import.`,
 }
 
 // validateFileURI checks a cohort source URI before it costs a round trip. The
-// suffix is deliberately not checked: .csv, .gz and .parquet name a single
-// file, anything else names a folder, so an extensionless path is legal.
+// server's rule is ^(s3|gs)://[^/\s]+/\S+$, so whitespace anywhere is
+// refused. The suffix is deliberately not checked: .csv, .gz and .parquet name
+// a single file, anything else names a folder, so an extensionless path is
+// legal.
 func validateFileURI(uri string) error {
 	const shape = "s3://bucket/path or gs://bucket/path"
 
@@ -237,14 +280,17 @@ func validateFileURI(uri string) error {
 	case strings.HasPrefix(uri, "gs://"):
 		rest = strings.TrimPrefix(uri, "gs://")
 	default:
-		return fmt.Errorf("--file-uri must look like %s (got %q)", shape, uri)
+		return usageErr(fmt.Sprintf("--file-uri must look like %s (got %q)", shape, uri))
 	}
 
 	bucket, path, found := strings.Cut(rest, "/")
 	if !found || strings.TrimSpace(bucket) == "" ||
 		strings.TrimSpace(strings.Trim(path, "/")) == "" {
-		return fmt.Errorf("--file-uri must name a bucket and a path under it, "+
-			"like %s (got %q)", shape, uri)
+		return usageErr(fmt.Sprintf("--file-uri must name a bucket and a path under it, "+
+			"like %s (got %q)", shape, uri))
+	}
+	if strings.ContainsFunc(rest, unicode.IsSpace) {
+		return usageErr(fmt.Sprintf("--file-uri must not contain whitespace (got %q)", uri))
 	}
 	return nil
 }
@@ -293,7 +339,11 @@ The whole body still works if you prefer:
 				if err := rejectBodyFlags(flags, previewFields); err != nil {
 					return err
 				}
-				return createFromFile(cmd, cohortsPrefix+"/preview", file, nil, "")
+				payload, err := readPayload(cmd, file)
+				if err != nil {
+					return err
+				}
+				return previewCohort(cmd, payload)
 			}
 
 			sources := 0
@@ -317,10 +367,13 @@ The whole body still works if you prefer:
 				body["file_uri"] = fileURI
 			}
 			if flags.Changed("file-format") {
+				if err := oneOf("file-format", fileFormat, previewFileFormats); err != nil {
+					return err
+				}
 				body["file_format"] = fileFormat
 			}
 
-			return createBody(cmd, cohortsPrefix+"/preview", body, nil, "")
+			return previewCohort(cmd, body)
 		},
 	}
 
@@ -333,8 +386,79 @@ The whole body still works if you prefer:
 		"An upload_reference from 'intuizi uploads reserve', instead of --file-uri")
 	flags.StringVar(&fileFormat, "file-format", "",
 		"How the file is encoded: csv or gzip (parquet cannot be previewed)")
-	cmd.MarkFlagsOneRequired("file", "file-uri", "upload-reference")
 	return cmd
+}
+
+// previewCohort posts the preview request and renders the sample rows. Not
+// createBody: a preview is not a resource, and the generic detail view would
+// show its columns and samples as "[3 items]".
+func previewCohort(cmd *cobra.Command, body any) error {
+	c, err := client()
+	if err != nil {
+		return err
+	}
+	path := cohortsPrefix + "/preview"
+
+	if jsonOutput {
+		raw, err := c.PostRaw(cmd.Context(), path, body)
+		if err != nil {
+			return err
+		}
+		return output.JSON(cmd.OutOrStdout(), raw)
+	}
+
+	rec, err := api.Create[output.Record](cmd.Context(), c, path, body)
+	if err != nil {
+		return err
+	}
+	return renderPreview(cmd, rec)
+}
+
+// renderPreview prints the column names as a header with each sample row
+// under it, so --identifier-column can be read straight off the table. The
+// row count is commentary, so it goes to stderr.
+func renderPreview(cmd *cobra.Command, rec output.Record) error {
+	out := cmd.OutOrStdout()
+
+	cols, _ := rec["columns"].([]any)
+	if len(cols) == 0 {
+		// Not the preview shape; show what came back rather than nothing.
+		return output.Detail(out, flatten(rec), nil)
+	}
+	names := make([]string, len(cols))
+	for i, c := range cols {
+		names[i] = fmt.Sprint(c)
+	}
+
+	samples, _ := rec["samples"].([]any)
+	rows := make([]output.Record, 0, len(samples))
+	for _, s := range samples {
+		cells, _ := s.([]any)
+		row := make(output.Record, len(names))
+		for i, n := range names {
+			if i < len(cells) {
+				row[n] = cells[i]
+			}
+		}
+		rows = append(rows, row)
+	}
+
+	if len(rows) == 0 {
+		// The table writer prints nothing for no rows, but the header is the
+		// point of a preview.
+		if _, err := fmt.Fprintln(out, strings.Join(names, "  ")); err != nil {
+			return err
+		}
+	} else if err := output.TableWith(out, rows, names); err != nil {
+		return err
+	}
+
+	count := strconv.Itoa(len(rows))
+	if n, ok := rec["sample_rows"].(json.Number); ok {
+		count = n.String()
+	}
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s sample rows\n", count)
+	return nil
 }
 
 func cohortsListCommand() *cobra.Command {

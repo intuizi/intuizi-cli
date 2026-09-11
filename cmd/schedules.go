@@ -7,12 +7,21 @@ import (
 	"strings"
 	"time"
 
+	// The static binary must resolve --timezone on hosts with no tz database.
+	_ "time/tzdata"
+
 	"github.com/spf13/cobra"
 )
 
 const schedulesPrefix = "/analyses/schedules"
 
 var scheduleColumns = []string{"id", "name", "status"}
+
+// scheduleDetail leads the single-record views; the index has no project.
+var scheduleDetail = []string{"id", "name", "status", "project"}
+
+// startLayout is the server's date_format for recurrence.start.
+const startLayout = "2006-01-02 15:04:05"
 
 var schedulesCmd = &cobra.Command{
 	Use:   "schedules",
@@ -51,12 +60,13 @@ type scheduleRecurrence struct {
 type scheduleBody struct {
 	Name       string             `json:"name"`
 	AudienceID int                `json:"audience_id"`
+	ProjectID  int                `json:"project_id,omitempty"` // 0 is never valid, so unset is left out
 	Recurrence scheduleRecurrence `json:"recurrence"`
 }
 
 // scheduleFields are the body-building flags, for --file to reject.
 var scheduleFields = []string{
-	"name", "audience-id", "start", "timezone", "frequency",
+	"name", "audience-id", "project-id", "start", "timezone", "frequency",
 	"window", "window-days", "ending", "after-recurrences", "end-date",
 }
 
@@ -74,6 +84,7 @@ func schedulesCreateCommand() *cobra.Command {
 		dryRun     bool
 		name       string
 		audienceID int
+		projectID  int
 		start      string
 		timezone   string
 		frequency  string
@@ -92,7 +103,7 @@ func schedulesCreateCommand() *cobra.Command {
 The recurrence block is one level deep, so it can be built from flags:
 
     intuizi schedules create --name "Weekly coffee refresh" --audience-id 88 \
-      --start "2026-09-15 06:00:00" --timezone America/New_York \
+      --start "2027-09-15 06:00:00" --timezone America/New_York \
       --frequency weekly --window 2
 
 --frequency, --window and --ending take values from the catalogs:
@@ -126,10 +137,16 @@ duplicate schedule.`,
 			if dryRun {
 				return usageErr("--dry-run builds a body from flags; --file already has one")
 			}
-			return createFromFile(cmd, path, file, scheduleColumns, "")
+			return createFromFile(cmd, path, file, scheduleDetail, "")
 		}
 
 		if err := missingFlags(flags, scheduleRequired, "a schedule"); err != nil {
+			return err
+		}
+		if err := positiveID(flags, "audience-id", audienceID); err != nil {
+			return err
+		}
+		if err := positiveID(flags, "project-id", projectID); err != nil {
 			return err
 		}
 
@@ -139,28 +156,50 @@ duplicate schedule.`,
 				"; one of bi-weekly, daily, monthly, weekly")
 		}
 
+		// LoadLocation takes "" and "Local" as this machine's zone; the server
+		// takes neither, and a schedule's zone should not depend on where the
+		// CLI ran.
+		if timezone == "" || timezone == "Local" {
+			return usageErr(fmt.Sprintf("--timezone %q is not an IANA zone; use one like America/New_York", timezone))
+		}
+		loc, err := time.LoadLocation(timezone)
+		if err != nil {
+			return usageErr("unknown --timezone " + timezone + "; use an IANA name like America/New_York")
+		}
+		startAt, err := time.ParseInLocation(startLayout, start, loc)
+		if err != nil {
+			return usageErr(fmt.Sprintf(`--start must be "YYYY-MM-DD HH:MM:SS", not %q`, start))
+		}
+		if !startAt.After(time.Now()) {
+			return usageErr("--start " + start + " must be in the future in " + timezone)
+		}
+
 		// Each rule carries its own field, and sending the wrong one is not
-		// rejected - it is ignored, leaving a schedule that never stops.
+		// rejected - it is ignored, leaving a schedule that never stops. An
+		// explicit 0 is a mistake to name, so these go by Changed, not value.
 		switch ending {
 		case 1:
-			if after != 0 || endDate != "" {
+			if flags.Changed("after-recurrences") || flags.Changed("end-date") {
 				return usageErr("--ending 1 is Never; drop --after-recurrences and --end-date")
 			}
 		case 2:
-			if after == 0 {
+			if !flags.Changed("after-recurrences") {
 				return usageErr("--ending 2 is Recurrences and needs --after-recurrences")
 			}
-			if endDate != "" {
+			if after < 1 {
+				return usageErr("--after-recurrences must be at least 1, not " + strconv.Itoa(after))
+			}
+			if flags.Changed("end-date") {
 				return usageErr("--end-date belongs to --ending 3, not 2")
 			}
 		case 3:
-			if endDate == "" {
+			if !flags.Changed("end-date") {
 				return usageErr("--ending 3 is Custom Date and needs --end-date")
 			}
 			if _, err := time.Parse(dateLayout, endDate); err != nil {
 				return usageErr("--end-date must be YYYY-MM-DD, not " + endDate)
 			}
-			if after != 0 {
+			if flags.Changed("after-recurrences") {
 				return usageErr("--after-recurrences belongs to --ending 2, not 3")
 			}
 		default:
@@ -168,18 +207,27 @@ duplicate schedule.`,
 				"; 1 Never, 2 Recurrences or 3 Custom Date")
 		}
 
-		if window == 3 && windowDays == 0 {
-			return usageErr("--window 3 is Custom and needs --window-days")
+		if window < 1 || window > 8 {
+			return usageErr("--window " + strconv.Itoa(window) +
+				" is not a data window id; 1 to 8, from 'reference common schedule-windows'")
 		}
-		if window != 3 && windowDays != 0 {
+		if window == 3 {
+			if !flags.Changed("window-days") {
+				return usageErr("--window 3 is Custom and needs --window-days")
+			}
+			if windowDays < 1 || windowDays > 365 {
+				return usageErr("--window-days must be 1 to 365, not " + strconv.Itoa(windowDays))
+			}
+		} else if flags.Changed("window-days") {
 			return usageErr("--window-days belongs to --window 3 Custom")
 		}
 
 		body := scheduleBody{
 			Name:       name,
 			AudienceID: audienceID,
+			ProjectID:  projectID,
 			Recurrence: scheduleRecurrence{
-				Start:      start,
+				Start:      startAt.Format(startLayout),
 				Timezone:   timezone,
 				Frequency:  freq,
 				WindowType: window,
@@ -195,7 +243,7 @@ duplicate schedule.`,
 			enc.SetIndent("", "  ")
 			return enc.Encode(body)
 		}
-		return createBody(cmd, path, body, scheduleColumns, "")
+		return createBody(cmd, path, body, scheduleDetail, "")
 	}
 
 	f := cmd.Flags()
@@ -205,6 +253,7 @@ duplicate schedule.`,
 		"Print the body the flags produce and send nothing")
 	f.StringVar(&name, "name", "", "Name for the schedule")
 	f.IntVar(&audienceID, "audience-id", 0, "The audience to rebuild each cycle")
+	f.IntVar(&projectID, "project-id", 0, "Project to file the schedule under")
 	f.StringVar(&start, "start", "",
 		`First run, "YYYY-MM-DD HH:MM:SS", read in --timezone; must be in the future`)
 	f.StringVar(&timezone, "timezone", "", "IANA timezone, e.g. America/New_York")
@@ -217,7 +266,6 @@ duplicate schedule.`,
 		"Stop rule from 'reference common schedule-endings': 1 Never, 2 Recurrences, 3 Custom Date")
 	f.IntVar(&after, "after-recurrences", 0, "Number of runs before stopping (--ending 2)")
 	f.StringVar(&endDate, "end-date", "", "Last run date, YYYY-MM-DD (--ending 3)")
-	cmd.MarkFlagsOneRequired("file", "audience-id")
 	return cmd
 }
 
@@ -266,7 +314,7 @@ func schedulesListCommand() *cobra.Command {
 func init() {
 	schedulesCmd.AddCommand(
 		schedulesListCommand(),
-		showCommand("schedule", schedulesPrefix, scheduleColumns),
+		showCommand("schedule", schedulesPrefix, scheduleDetail),
 		deleteCommand("schedule", schedulesPrefix),
 
 		schedulesCreateCommand(),
