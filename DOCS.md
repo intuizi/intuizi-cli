@@ -132,6 +132,7 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--name` | any string | — |
 | `--start-date` `--end-date` | `YYYY-MM-DD` | — |
 | `--brand` | name or id, POI only, repeatable | `reference poi brands --search <name>` |
+| `--brand-all` | a search, taking every match; POI only | `reference poi brands` |
 | `--category` | name or id, repeatable | one catalog per type, below |
 | `--provider` | id, repeatable | `reference common signal-providers --data-type <type>` |
 | `--country` | ISO-3 code, repeatable | `reference common countries` |
@@ -156,6 +157,22 @@ resolved ids go into a different payload field:
 
 `--brand` is POI only. AffinityTransactions has brands too, in its own
 `brands` field, which no flag writes yet; that filter needs `--file`.
+
+`--brand-all` takes a search and selects every match, where `--brand` insists
+on exactly one. It reports what it selected to stderr, so an expansion is
+visible without polluting a piped payload:
+
+```bash
+intuizi audiences create --type poi --brand-all coffee \
+  --start-date 2026-09-02 --end-date 2026-09-09 --name "Coffee - 1 week" --dry-run
+```
+
+```
+--brand-all "coffee" selected 9 brands
+```
+
+It combines with `--brand`, so an exact brand plus a whole search is one
+command. A search matching nothing is an error.
 
 Omitting `--provider` includes every provider for the dataset type, which is
 almost always right: a provider left out builds an audience that completes with
