@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -32,24 +33,52 @@ type Client struct {
 	BaseURL string
 	Token   string
 	HTTP    *http.Client
+
+	// Warn receives commentary about the Idempotency-Key: that --idempotency-key
+	// had no effect on a route, or which key a create that died in transit was
+	// sent with. Stderr by default; nil silences it.
+	Warn io.Writer
+
+	warnedKey bool // the no-effect warning is said once per client
 }
 
 func New(baseURL, token string) *Client {
 	return &Client{
 		BaseURL: strings.TrimRight(baseURL, "/"),
 		Token:   token,
-		HTTP:    &http.Client{Timeout: 30 * time.Second},
+		Warn:    os.Stderr,
+		HTTP: &http.Client{
+			Timeout: 30 * time.Second,
+			// Never follow a redirect: a same-host hop would forward the bearer
+			// token, and a 301/302/303 turns a create POST into a GET. A 3xx
+			// surfaces as an *Error instead, which almost always means --base-url
+			// is wrong (http for https, or a missing path prefix).
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 
 // envelope is the shape every v2 response shares. Data is RawMessage because
 // its type varies: an object on success, an empty array on the error envelope.
+// Errors is too: it is an object when present, but the framework also emits []
+// and null, and a typed map would sink the whole envelope on those.
 type envelope struct {
 	Status  string          `json:"status"`
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data"`
-	Errors  map[string]any  `json:"errors"`
+	Errors  json.RawMessage `json:"errors"`
+}
+
+// errorMap decodes the errors field leniently: anything but an object is nil.
+func (e *envelope) errorMap() map[string]any {
+	var m map[string]any
+	if json.Unmarshal(e.Errors, &m) != nil {
+		return nil
+	}
+	return m
 }
 
 // Get issues an authenticated GET and unmarshals the envelope's data into out.
@@ -120,6 +149,11 @@ func (c *Client) doRaw(ctx context.Context, method, path string, query url.Value
 	var key string
 	if isIdempotent(path) {
 		key = nextIdempotencyKey()
+	} else if method == http.MethodPost && IdempotencyKey != "" && !c.warnedKey {
+		// The flag's help says "on create commands"; say so when the route is
+		// not one of the seven that read the header, rather than ignoring it.
+		c.warnedKey = true
+		c.warnf("--idempotency-key has no effect on %s", path)
 	}
 
 	target := c.BaseURL + apiPrefix + path
@@ -137,6 +171,12 @@ func (c *Client) doRaw(ctx context.Context, method, path string, query url.Value
 
 		resp, err := c.HTTP.Do(req)
 		if err != nil {
+			if key != "" {
+				// No status came back, so the create may or may not have run.
+				// Only a retry with the same key is safe, and the user never
+				// saw a generated one.
+				c.warnf("Idempotency-Key used: %s; pass --idempotency-key %s to retry safely", key, key)
+			}
 			return nil, nil, fmt.Errorf("calling %s: %w", target, err)
 		}
 
@@ -157,23 +197,41 @@ func (c *Client) doRaw(ctx context.Context, method, path string, query url.Value
 	}
 }
 
-// retryAfter reads the Retry-After header, which the API sends as seconds. An
-// absent or unparseable value falls back to a fixed wait rather than retrying
-// immediately, and an absurd one is capped so the CLI cannot hang for minutes.
+// retryAfter reads the Retry-After header, which the API sends as seconds and
+// a CDN in front of it may send as an HTTP-date. An absent or unparseable value
+// falls back to a fixed wait rather than retrying immediately, and an absurd
+// one is capped so the CLI cannot hang for minutes.
 func retryAfter(header string) time.Duration {
-	sec, err := strconv.Atoi(strings.TrimSpace(header))
-	if err != nil || sec <= 0 {
-		return fallbackRetryIn
+	header = strings.TrimSpace(header)
+	if sec, err := strconv.Atoi(header); err == nil {
+		if sec <= 0 {
+			return fallbackRetryIn
+		}
+		return min(time.Duration(sec)*time.Second, maxRetryIn)
 	}
-	if wait := time.Duration(sec) * time.Second; wait < maxRetryIn {
-		return wait
+	if t, err := http.ParseTime(header); err == nil {
+		// A date already past means retry now, not the fallback.
+		return min(max(time.Until(t), 0), maxRetryIn)
 	}
-	return maxRetryIn
+	return fallbackRetryIn
 }
 
-// sleep waits for d unless the context is cancelled first - time.Sleep would
+// warnf writes one line of commentary to Warn, if there is one.
+func (c *Client) warnf(format string, args ...any) {
+	if c.Warn == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(c.Warn, format+"\n", args...)
+}
+
+// sleep is the retry wait. A variable so tests can record the requested
+// durations instead of spending them: a Retry-After of 1s would otherwise
+// cost every 429 test a real second.
+var sleep = waitFor
+
+// waitFor waits for d unless the context is cancelled first - time.Sleep would
 // swallow a Ctrl-C for up to a minute.
-func sleep(ctx context.Context, d time.Duration) error {
+func waitFor(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
@@ -229,8 +287,9 @@ func readEnvelope(resp *http.Response, target string) ([]byte, json.RawMessage, 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		apiErr := &Error{StatusCode: resp.StatusCode}
 		if parsed {
+			apiErr.Body = raw
 			apiErr.Message = env.Message
-			apiErr.Errors = env.Errors
+			apiErr.Errors = env.errorMap()
 
 			// Validation failures nest under data instead of at the top level.
 			// Data may also be array or absent so ignore failures.
@@ -242,6 +301,10 @@ func readEnvelope(resp *http.Response, target string) ([]byte, json.RawMessage, 
 					apiErr.Errors = nested.Errors
 				}
 			}
+		}
+		// A redirect body is empty or HTML; the Location is the useful part.
+		if apiErr.Message == "" && resp.StatusCode >= 300 && resp.StatusCode <= 399 {
+			apiErr.Message = resp.Header.Get("Location")
 		}
 		return raw, nil, apiErr
 	}

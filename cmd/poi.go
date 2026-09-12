@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -76,6 +78,14 @@ func poiCreateCommand(use, short, path, parentFlag, parentHelp, long string, col
 		Long:  long,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// MarkFlagRequired checks presence, not content; "" and 0 both
+			// pass it and earn a 422.
+			if name == "" {
+				return usageErr("--name must not be empty")
+			}
+			if parentID <= 0 {
+				return usageErr(fmt.Sprintf("--%s must be a positive id, not %d", parentFlag, parentID))
+			}
 			field := "category_id"
 			if parentFlag == "segment-id" {
 				field = "segment_id"
@@ -102,8 +112,8 @@ func poiLocationsCommand() *cobra.Command {
 
 	var (
 		search    string
-		page      int
-		perPage   int
+		page      pageNum // refuses 0 as it parses, like every other index
+		perPage   pageNum
 		brands    []int
 		countries []string
 		geometry  string
@@ -124,10 +134,10 @@ placekey, so a store number finds its location as readily as a name.`,
 				query.Set("search", search)
 			}
 			if flags.Changed("page") {
-				query.Set("page", strconv.Itoa(page))
+				query.Set("page", page.String())
 			}
 			if flags.Changed("per-page") {
-				query.Set("per_page", strconv.Itoa(perPage))
+				query.Set("per_page", perPage.String())
 			}
 			for _, b := range brands {
 				query.Add("brands[]", strconv.Itoa(b))
@@ -137,7 +147,7 @@ placekey, so a store number finds its location as readily as a name.`,
 			}
 			if flags.Changed("geometry") {
 				if geometry != "polygon" && geometry != "coordinates" {
-					return fmt.Errorf("--geometry must be polygon or coordinates, not %q", geometry)
+					return usageErr(fmt.Sprintf("--geometry must be polygon or coordinates, not %q", geometry))
 				}
 				query.Set("type", geometry)
 			}
@@ -149,8 +159,8 @@ placekey, so a store number finds its location as readily as a name.`,
 
 	flags := list.Flags()
 	flags.StringVar(&search, "search", "", "Match on name, address, city, state, zip, DMA, external or placekey id")
-	flags.IntVar(&page, "page", 0, "Page to fetch (default 1)")
-	flags.IntVar(&perPage, "per-page", 0, "Items per page (server default 25, capped at 500)")
+	flags.Var(&page, "page", "Page to fetch (default 1)")
+	flags.Var(&perPage, "per-page", "Items per page (server default 25, capped at 500)")
 	flags.IntSliceVar(&brands, "brands", nil, "Your own brand ids to filter by (repeatable, or comma-separated)")
 	flags.StringArrayVar(&countries, "countries", nil, "Country codes to filter by (repeat the flag for more than one)")
 	flags.StringVar(&geometry, "geometry", "", "Only locations stored as polygon or coordinates")
@@ -221,7 +231,7 @@ is --search, and results can be sorted.`,
 				case "name", "status", "created_at", "updated_at":
 					query.Set("sortBy", sortBy)
 				default:
-					return fmt.Errorf("--sort-by must be name, status, created_at or updated_at, not %q", sortBy)
+					return usageErr(fmt.Sprintf("--sort-by must be name, status, created_at or updated_at, not %q", sortBy))
 				}
 			}
 			if flags.Changed("order") {
@@ -229,7 +239,7 @@ is --search, and results can be sorted.`,
 				case "asc", "desc":
 					query.Set("orderBy", orderBy)
 				default:
-					return fmt.Errorf("--order must be asc or desc, not %q", orderBy)
+					return usageErr(fmt.Sprintf("--order must be asc or desc, not %q", orderBy))
 				}
 			}
 			return renderList(cmd, poiPrefix+"/submissions/index", query,
@@ -332,6 +342,23 @@ Exactly one source:
 			if (update || remove) && key == "" {
 				return usageErr("--update and --remove need --key to match on")
 			}
+			if key != "" && !matchKeys[key] {
+				return usageErr(fmt.Sprintf("--key must be %s, not %q", matchKeyList, key))
+			}
+			if flags.Changed("file") {
+				// Streaming a CSV from stdin into multipart is not worth the
+				// complexity while --list already reads a pipe.
+				if file == "-" {
+					return usageErr("--file does not read stdin - pipe a JSON body to --list - instead")
+				}
+				// Checked before the file is opened: the server accepts .csv
+				// and .txt, and anything else is a 422 after a 50 MB upload.
+				switch strings.ToLower(filepath.Ext(file)) {
+				case ".csv", ".txt":
+				default:
+					return usageErr(fmt.Sprintf("--file must be a .csv or .txt file, not %s", file))
+				}
+			}
 			// Not MarkFlagRequired: cobra applies that to every branch before
 			// RunE, and --list legitimately takes both from the file.
 			if !flags.Changed("list") {
@@ -359,6 +386,8 @@ Exactly one source:
 				if err != nil {
 					return err
 				}
+				// JSON like create-by-upload, so the booleans are real ones.
+				addMatchFields(body, update, remove, key)
 				return createBody(cmd, poiPrefix+"/submissions/create-by-list", body,
 					submissionColumns, "processing - run 'intuizi poi submissions show <id>'")
 
@@ -386,11 +415,18 @@ Exactly one source:
 	flags.StringVar(&list, "list", "", `A JSON body carrying locations[], or "-" for stdin`)
 	flags.BoolVar(&update, "update", false, "Update existing matched POIs")
 	flags.BoolVar(&remove, "remove", false, "Remove existing matched POIs")
-	flags.StringVar(&key, "key", "",
-		"How to match existing POIs: location-id, gps-coordinates, store-id, master-id or external-id")
+	flags.StringVar(&key, "key", "", "How to match existing POIs: "+matchKeyList)
 
 	return cmd
 }
+
+// matchKeys is the closed set --key takes; the server validates it too, but a
+// typo should fail here rather than after the upload.
+var matchKeys = map[string]bool{
+	"location-id": true, "gps-coordinates": true, "store-id": true, "master-id": true, "external-id": true,
+}
+
+const matchKeyList = "location-id, gps-coordinates, store-id, master-id or external-id"
 
 func addMatchFields(body map[string]any, update, remove bool, key string) {
 	if update {
@@ -428,8 +464,9 @@ func mergeSubmissionFields(payload []byte, name string, brandID int, setName, se
 
 func init() {
 	poiCmd.AddCommand(
-		searchList("segments", "List your own POI segments",
-			poiPrefix+"/segments/index", "no segments", []string{"value", "text"}),
+		poiGroup("segments", "Your own POI segments",
+			searchList("list", "List your own POI segments",
+				poiPrefix+"/segments/index", "no segments", []string{"value", "text"})),
 
 		poiGroup("categories", "Your own POI categories",
 			searchList("list", "List your own POI categories",
@@ -438,7 +475,7 @@ func init() {
 				poiPrefix+"/categories/create", "segment-id",
 				"The parent segment id", `Create a POI category under one of your segments.
 
-Read the parent ids first with 'intuizi poi segments'.`, []string{"id", "name"})),
+Read the parent ids first with 'intuizi poi segments list'.`, []string{"id", "name"})),
 
 		poiGroup("brands", "Your own POI brands",
 			searchList("list", "List your own POI brands",
@@ -455,7 +492,7 @@ Read the parent ids first with 'intuizi poi categories list'.`, []string{"id", "
 	rootCmd.AddCommand(poiCmd)
 }
 
-// poiGroup wraps a list/create pair under one noun.
+// poiGroup wraps a noun's subcommands - list, and create where there is one.
 func poiGroup(use, short string, subs ...*cobra.Command) *cobra.Command {
 	g := &cobra.Command{Use: use, Short: short}
 	g.AddCommand(subs...)
@@ -510,6 +547,12 @@ func createSubmissionByFile(cmd *cobra.Command, name string, brandID int, file s
 		raw, err := api.CreateMultipartRaw(cmd.Context(), c,
 			poiPrefix+"/submissions/create-by-file", fields, "locations_file", file)
 		if err != nil {
+			// Same rule as the JSON runners: the error envelope still goes out,
+			// so a script can read the 422 field errors from it.
+			var apiErr *api.Error
+			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
+				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
+			}
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)

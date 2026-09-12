@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,9 +18,23 @@ type Error struct {
 	StatusCode int
 	Message    string         // the envelope's "message"
 	Errors     map[string]any // the envelope's "errors", when present
+
+	// Body is the response verbatim when it parsed as JSON, so --json can
+	// print the error envelope a script expects; empty for HTML from a proxy.
+	Body json.RawMessage
 }
 
 func (e *Error) Error() string {
+	// Redirects are never followed (see New), and Message carries the Location
+	// when the server sent one. The cause is nearly always the flag, not the
+	// server, so say so.
+	if e.StatusCode >= 300 && e.StatusCode <= 399 {
+		if e.Message == "" {
+			return fmt.Sprintf("unexpected redirect (%d) - check --base-url", e.StatusCode)
+		}
+		return fmt.Sprintf("unexpected redirect to %s (%d) - check --base-url", e.Message, e.StatusCode)
+	}
+
 	msg := e.Message
 	if msg == "" {
 		msg = http.StatusText(e.StatusCode)
