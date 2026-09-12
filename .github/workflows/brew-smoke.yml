@@ -1,0 +1,40 @@
+name: brew-smoke
+
+# Manual check that `brew install intuizi/intuizi-cli/intuizi` works on a
+# clean machine, macOS and Linux. It reads the published tap and downloads the
+# release archive from GitHub, so it can only pass once both repositories are
+# public. Run it after each release, and once right after the visibility flip.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version the installed binary must report, e.g. 0.1.0 (blank: only check it runs)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      # Ubuntu images ship Homebrew but leave it off PATH; this puts it on.
+      - uses: Homebrew/actions/setup-homebrew@main
+
+      - run: brew install intuizi/intuizi-cli/intuizi
+
+      - run: intuizi version
+
+      - if: inputs.version != ''
+        env:
+          WANT: ${{ inputs.version }}
+        run: test "$(intuizi version)" = "v${WANT#v}"
+
+      # The formula's own test block, as goreleaser rendered it.
+      - run: brew test intuizi/intuizi-cli/intuizi

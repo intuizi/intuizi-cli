@@ -5,9 +5,9 @@ signal platform. A single-binary client for the Intuizi API v2: manage
 audiences, activations, cohorts, and POI data from your terminal, scripts, or
 CI.
 
-> **Status: pre-release.** Under active development and not yet published. The
-> release pipeline is in place and verified, but no public version exists; the
-> first will be v0.1.0.
+> **Status: pre-release.** Under active development. The release pipeline
+> (GitHub Releases, Homebrew, npm) is in place; the first public version will
+> be v0.1.0, when this repository and the Homebrew tap go public.
 
 ## Why a CLI
 
@@ -16,20 +16,29 @@ REST API v2 for integrations, and an MCP server for AI agents. The CLI
 completes the set for humans working in terminals and for automation in
 scripts and CI pipelines.
 
-## Planned installation
+## Installation
 
 ```bash
 # Homebrew (macOS / Linux)
-brew install intuizi/tap/intuizi
+brew install intuizi/intuizi-cli/intuizi
 
-# npm (any platform with Node)
+# npm (macOS / Linux / Windows, needs Node 18+)
 npm install -g @intuizi/cli
 
-# Or download a binary from GitHub Releases
+# Or download an archive from GitHub Releases and put `intuizi` on your PATH
 ```
 
-No runtime dependencies - the CLI ships as a single static Go binary for
-macOS, Linux, and Windows (amd64 and arm64).
+No runtime dependencies: the CLI ships as a single static Go binary for
+macOS, Linux and Windows, amd64 and arm64. The npm package is a small launcher
+that pulls in the binary for your platform as an optional dependency; nothing
+is downloaded at install time beyond the packages themselves.
+
+Until v0.1.0 the repositories are private, so Homebrew and npm cannot fetch
+anything yet. Build from source in the meantime:
+
+```bash
+go install github.com/intuizi/intuizi-cli@latest   # or: make build
+```
 
 ## Usage
 
@@ -174,22 +183,67 @@ uses them.
 every push to master and every pull request, across ubuntu-latest and
 macos-latest. Lint runs on Ubuntu only, since results do not vary by OS.
 
-The `ci` job aggregates the matrix and is the required status check for merging
+A separate `package` job runs a goreleaser snapshot on every pull request,
+checks that the rendered Homebrew formula parses, builds the npm packages from
+the snapshot, installs the launcher from the tarballs and runs it. Packaging
+breaks on the PR that causes them, not on the release tag.
+
+The `ci` job aggregates the others and is the required status check for merging
 to master. Require that one, not an individual matrix leg, because a leg's name
 changes whenever the matrix does.
 
 ### Releases
 
-`.github/workflows/release.yml` fires on a `v*` tag. It runs the test suite,
-then goreleaser cross-compiles six binaries (darwin, linux and windows, each
-amd64 and arm64), packages them with a checksums file, and publishes a GitHub
-Release. Configuration is in `.goreleaser.yaml`.
+`.github/workflows/release.yml` fires on a `v*` tag and runs three jobs in
+order:
+
+1. **test**: `go vet` and `go test -race`. A tag that fails here publishes
+   nothing.
+2. **release**: goreleaser cross-compiles six binaries (darwin, linux and
+   windows, each amd64 and arm64), packages them with a checksums file,
+   publishes a GitHub Release, and commits the Homebrew formula to
+   [`intuizi/homebrew-intuizi-cli`](https://github.com/intuizi/homebrew-intuizi-cli).
+   The push uses an SSH deploy key stored as the `HOMEBREW_TAP_DEPLOY_KEY`
+   secret; it can write to that one repository and nothing else. A prerelease
+   tag such as `v0.2.0-rc1` gets a GitHub Release but leaves the formula alone.
+3. **npm**: `npm/build.mjs` turns the release binaries into `@intuizi/cli` plus
+   six `@intuizi/cli-<os>-<cpu>` platform packages and publishes them, platform
+   packages first. It needs an npm automation token in the `NPM_TOKEN` secret;
+   without one it builds the packages and stops with a warning. A prerelease
+   version is published under the `next` dist-tag, never `latest`. The job is
+   idempotent, so re-running it after a partial publish finishes the set.
+
+Configuration is in `.goreleaser.yaml` and `npm/`. To cut a release:
+
+```bash
+git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+```
+
+Then run the manual `brew-smoke` workflow, which installs the formula on clean
+macOS and Linux runners and checks the reported version.
 
 Test the packaging locally without publishing anything:
 
 ```bash
-goreleaser release --snapshot --clean
+goreleaser release --snapshot --clean      # binaries, archives, dist/homebrew/Formula/intuizi.rb
+node npm/build.mjs --dist dist --out dist/npm
 ```
+
+`goreleaser check` reports the `brews` stanza as deprecated: goreleaser now
+prefers Homebrew casks, which are macOS-only and need the binary signed and
+notarised or a quarantine workaround. The formula works on Linux too and needs
+neither, so it stays until Apple signing is set up. It keeps working across
+goreleaser v2, which the workflow pins.
+
+#### Before the first public release
+
+- Make this repository and `intuizi/homebrew-intuizi-cli` public. Homebrew
+  downloads release archives anonymously, so a private repository breaks
+  `brew install` for everyone.
+- Create the `intuizi` organisation on npmjs.com, mint a granular automation
+  token with publish rights and store it as the `NPM_TOKEN` repository secret.
+- Add a `LICENSE` file and set the same identifier in `npm/build.mjs`, which
+  publishes `UNLICENSED` until then.
 
 ## Related
 

@@ -48,6 +48,58 @@ jobs:
       # package, which is cheap insurance for the poller and the retry loop.
       - run: go test -race ./...
 
+  # Packaging, on every PR rather than only at tag time: a snapshot release
+  # proves goreleaser still builds all six targets and renders the Homebrew
+  # formula, then the npm launcher is installed from the tarballs it produces
+  # and run. A broken formula template or npm shim fails here, not on the tag.
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean
+
+      - name: Homebrew formula renders and parses
+        run: ruby -c dist/homebrew/Formula/intuizi.rb
+
+      - run: node npm/build.mjs --dist dist --out dist/npm
+
+      - name: npm launcher installs from the tarballs and runs the binary
+        run: |
+          set -euo pipefail
+          for dir in dist/npm/@intuizi/*; do (cd "$dir" && npm pack --silent); done
+
+          prefix="$RUNNER_TEMP/npm-prefix"
+          npm install -g --prefix "$prefix" \
+            dist/npm/@intuizi/cli-linux-x64/*.tgz dist/npm/@intuizi/cli/*.tgz
+
+          want=$(dist/intuizi_linux_amd64_v1/intuizi version)
+          got=$("$prefix/bin/intuizi" version)
+          echo "binary reports $want, via npm $got"
+          test "$got" = "$want"
+
+          # The launcher must pass exit codes through: 2 is the usage contract.
+          set +e
+          "$prefix/bin/intuizi" no-such-command
+          code=$?
+          set -e
+          test "$code" -eq 2
+
   # One stable check name for branch protection: this is the check to make
   # required, not either matrix leg, because it survives a matrix change.
   #
@@ -55,8 +107,10 @@ jobs:
   # so a push superseded by cancel-in-progress above would fail here and paint
   # a red X on a commit whose only fault was being overtaken.
   ci:
-    needs: test
+    needs: [test, package]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.test.result }}" = "success"
+      - run: |
+          test "${{ needs.test.result }}" = "success"
+          test "${{ needs.package.result }}" = "success"

@@ -29,6 +29,12 @@ jobs:
 
       - run: go test -race ./...
 
+  # GitHub Release plus the Homebrew formula. goreleaser cross-compiles six
+  # binaries, packages them with a checksums file, creates the release, then
+  # commits the formula to intuizi/homebrew-intuizi-cli over SSH using the
+  # deploy key in HOMEBREW_TAP_DEPLOY_KEY, which can write to that one repo
+  # and nothing else. A prerelease tag (v0.2.0-rc1) still gets a GitHub
+  # Release, but skip_upload: auto in .goreleaser.yaml leaves the formula alone.
   release:
     needs: test
     runs-on: ubuntu-latest
@@ -45,10 +51,83 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean
         env:
           # Issued automatically to the run; no secret to create or rotate.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+
+      # The npm job builds from these rather than compiling again, so the
+      # binaries on npm are byte for byte the ones in the GitHub Release.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: |
+            dist/artifacts.json
+            dist/metadata.json
+            dist/intuizi_*/intuizi
+            dist/intuizi_*/intuizi.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  # Its own job so a registry failure can be re-run on its own: by then the
+  # GitHub Release and the formula are already out and must not be redone.
+  # Publishing is skipped, not failed, while the NPM_TOKEN secret is missing,
+  # so the GitHub Release and Homebrew keep working before npm is set up.
+  npm:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Mapped through env because a step's `if` cannot read secrets directly.
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      - run: node npm/build.mjs --dist dist --out dist/npm
+
+      - name: Publish to npm
+        if: env.NPM_TOKEN != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./dist/npm/@intuizi/cli/package.json').version")
+
+          # A prerelease must not become what a plain `npm install` resolves to.
+          tag=latest
+          case "$version" in *-*) tag=next ;; esac
+
+          # Idempotent so a re-run after a partial publish finishes the set
+          # instead of failing on the packages that already went out.
+          publish() {
+            local dir=$1 name
+            name=$(node -p "require('./$dir/package.json').name")
+            if [ -n "$(npm view "$name@$version" version 2>/dev/null)" ]; then
+              echo "$name@$version is already on the registry"
+              return
+            fi
+            (cd "$dir" && npm publish --access public --tag "$tag")
+          }
+
+          # Platform packages first, so the launcher's optionalDependencies
+          # resolve the moment @intuizi/cli itself appears on the registry.
+          for dir in dist/npm/@intuizi/cli-*; do publish "$dir"; done
+          publish dist/npm/@intuizi/cli
+
+      - name: Not published
+        if: env.NPM_TOKEN == ''
+        run: echo "::warning::NPM_TOKEN is not configured, so the npm packages were built but not published"

@@ -43,3 +43,36 @@ changelog:
 
 release:
   prerelease: auto
+
+# Homebrew formula, pushed to the tap over SSH with a deploy key scoped to that
+# one repository (secret HOMEBREW_TAP_DEPLOY_KEY on this repo). A formula
+# rather than a cask because casks are macOS-only and the README promises
+# Homebrew on Linux too. goreleaser marks formulas deprecated in favour of casks
+# (a Homebrew policy about pre-built binaries); it still works across v2.
+#
+# envOrDefault so a local snapshot with no key set still renders the formula
+# into dist/homebrew for inspection instead of failing on the template.
+brews:
+  - name: intuizi
+    ids: [intuizi]
+    repository:
+      owner: intuizi
+      name: homebrew-intuizi-cli
+      branch: main
+      git:
+        url: git@github.com:intuizi/homebrew-intuizi-cli.git
+        private_key: '{{ envOrDefault "HOMEBREW_TAP_DEPLOY_KEY" "" }}'
+    directory: Formula
+    commit_author:
+      name: intuizi-release-bot
+      email: noreply@intuizi.com
+    commit_msg_template: "intuizi {{ .Tag }}"
+    homepage: https://intuizi.com
+    description: Official Intuizi CLI, a single-binary client for the Intuizi API v2
+    # auto: a prerelease tag (v0.2.0-rc1) publishes a GitHub Release but does
+    # not move the formula, so brew users only ever get stable versions.
+    skip_upload: auto
+    extra_install: |
+      generate_completions_from_executable(bin/"intuizi", "completion")
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/intuizi version")
