@@ -430,14 +430,22 @@ func renderPreview(cmd *cobra.Command, rec output.Record) error {
 		names[i] = fmt.Sprint(c)
 	}
 
+	// The API keys each sample by column name; the positional form is kept in
+	// case an older console still sends cells as an array.
 	samples, _ := rec["samples"].([]any)
 	rows := make([]output.Record, 0, len(samples))
 	for _, s := range samples {
-		cells, _ := s.([]any)
 		row := make(output.Record, len(names))
-		for i, n := range names {
-			if i < len(cells) {
-				row[n] = cells[i]
+		switch cells := s.(type) {
+		case map[string]any:
+			for _, n := range names {
+				row[n] = cells[n]
+			}
+		case []any:
+			for i, n := range names {
+				if i < len(cells) {
+					row[n] = cells[i]
+				}
 			}
 		}
 		rows = append(rows, row)

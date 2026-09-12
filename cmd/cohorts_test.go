@@ -311,3 +311,38 @@ func TestCohortsPreviewJSONPrintsTheEnvelope(t *testing.T) {
 		}
 	}
 }
+
+// The live API keys each sample row by column name rather than sending cells
+// positionally; the first live run against beta printed a header and two
+// empty rows because the renderer only knew the positional shape.
+const previewObjectEnvelope = `{"status":"success","code":200,"message":"ok","data":[{
+  "columns": ["email_sha256", "tier"],
+  "samples": [
+    {"email_sha256": "08168cd80dfd534ab0f10af10f1303fe", "tier": "gold"},
+    {"email_sha256": "e8f39b3e1382367d6d41ab34dc270d4e", "tier": "silver"}
+  ],
+  "sample_rows": 2
+}]}`
+
+func TestCohortsPreviewRendersObjectSamples(t *testing.T) {
+	srv, _ := stub(t, previewObjectEnvelope)
+
+	out, errb, err := run(t, cohortsPreviewCommand(), srv, "--file-uri", "s3://example-bucket/q3.csv")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("want a header and two sample rows, got %d lines:\n%s", len(lines), out)
+	}
+	if head := strings.Join(strings.Fields(lines[0]), " "); head != "email_sha256 tier" {
+		t.Errorf("header = %q", head)
+	}
+	if !strings.Contains(lines[1], "08168cd80dfd534ab0f10af10f1303fe") || !strings.Contains(lines[1], "gold") ||
+		!strings.Contains(lines[2], "silver") {
+		t.Errorf("object-keyed sample rows not rendered:\n%s", out)
+	}
+	if !strings.Contains(errb, "2 sample rows") {
+		t.Errorf("stderr = %q, want the row count", errb)
+	}
+}
