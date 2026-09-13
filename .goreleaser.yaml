@@ -29,6 +29,8 @@ archives:
     files:
       - README.md
       - DOCS.md
+      - LICENSE
+      - THIRD_PARTY_NOTICES
 
 checksum:
   name_template: checksums.txt

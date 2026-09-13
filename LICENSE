@@ -1,0 +1,56 @@
+Intuizi CLI License
+
+Copyright (c) 2026 Intuizi. All rights reserved.
+
+This software, including its source code, documentation and any binaries
+built from it (the "Software"), is the property of Intuizi and is protected
+by copyright and other intellectual property laws. The source code is
+published for transparency and review. It is not open source.
+
+1. License grant. Subject to your compliance with this license and with the
+   Intuizi Terms of Service, Intuizi grants you a limited, non-exclusive,
+   non-transferable, non-sublicensable, revocable license to download,
+   install and run unmodified copies of the Software solely to access Intuizi
+   services through an Intuizi account that you are authorized to use.
+
+2. Restrictions. Except as expressly permitted in section 1, you may not, and
+   may not allow anyone else to:
+   (a) copy, modify, translate, adapt or create derivative works of the
+       Software;
+   (b) distribute, publish, sublicense, rent, lease, lend, sell or otherwise
+       make the Software or any part of it available to any third party;
+   (c) use the Software, or any part of it, to build, offer, market or
+       operate any product or service, whether or not for a fee;
+   (d) remove, obscure or alter any copyright, trademark or other
+       proprietary notice in the Software;
+   (e) use the Intuizi name, logo or trademarks, including to name, describe
+       or promote any modified or redistributed version of the Software; or
+   (f) use the Software to access Intuizi services other than through a valid
+       account and in accordance with the Intuizi Terms of Service.
+
+3. Ownership. Intuizi retains all right, title and interest in and to the
+   Software. No rights are granted by implication, estoppel or otherwise
+   except as expressly stated in this license.
+
+4. Contributions. If you submit any code, documentation or other material to
+   Intuizi in connection with the Software, you assign all rights in it to
+   Intuizi, and Intuizi may use it without restriction or obligation to you.
+
+5. Termination. This license terminates automatically if you breach any of
+   its terms or when your Intuizi account ends. On termination you must stop
+   using the Software and delete all copies in your possession or control.
+
+6. Third-party components. The Software incorporates open-source components
+   that remain subject to their own licenses, reproduced in the accompanying
+   THIRD_PARTY_NOTICES file. Nothing in this license restricts the rights
+   those licenses grant in those components.
+
+7. Disclaimer of warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY
+   OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+   WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+   NON-INFRINGEMENT.
+
+8. Limitation of liability. TO THE FULLEST EXTENT PERMITTED BY LAW, INTUIZI
+   SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+   AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+   CONNECTION WITH THE SOFTWARE OR ITS USE.
