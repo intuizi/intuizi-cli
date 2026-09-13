@@ -65,7 +65,7 @@ const shared = {
   homepage: `${repo}#readme`,
   repository: { type: "git", url: `git+${repo}.git` },
   bugs: `${repo}/issues`,
-  license: "UNLICENSED",
+  license: "SEE LICENSE IN LICENSE",
   publishConfig: { access: "public" },
 };
 
@@ -88,13 +88,14 @@ for (const b of binaries) {
   copyFileSync(src, join(dir, "bin", exe));
   chmodSync(join(dir, "bin", exe), 0o755);
 
+  copyLicenses(dir);
   writePackage(dir, {
     name,
     description: `Intuizi CLI binary for ${os} ${cpu}. Install @intuizi/cli, not this package.`,
     ...shared,
     os: [os],
     cpu: [cpu],
-    files: ["bin/"],
+    files: ["bin/", "LICENSE", "THIRD_PARTY_NOTICES"],
   });
   platformPackages[name] = version;
   console.log(`${name}  <-  ${b.path}`);
@@ -106,13 +107,14 @@ mkdirSync(join(main, "bin"), { recursive: true });
 copyFileSync(join(here, "cli/bin/intuizi.js"), join(main, "bin/intuizi.js"));
 chmodSync(join(main, "bin/intuizi.js"), 0o755);
 copyFileSync(join(here, "cli/README.md"), join(main, "README.md"));
+copyLicenses(main);
 writePackage(main, {
   name: "@intuizi/cli",
   description: "Official Intuizi CLI: a single-binary client for the Intuizi API v2",
   keywords: ["intuizi", "cli", "audiences", "activations", "geo-signals"],
   ...shared,
   bin: { intuizi: "bin/intuizi.js" },
-  files: ["bin/"],
+  files: ["bin/", "LICENSE", "THIRD_PARTY_NOTICES"],
   engines: { node: ">=18" },
   optionalDependencies: sortKeys(platformPackages),
 });
@@ -120,6 +122,14 @@ console.log(`@intuizi/cli  ${version}  with ${Object.keys(platformPackages).leng
 console.log(`packages written under ${out}`);
 
 // ----------------------------------------------------------------- helpers
+
+// The license is proprietary and the binary links open-source libraries, so
+// both notices travel inside every package, not only in the repository.
+function copyLicenses(dir) {
+  for (const f of ["LICENSE", "THIRD_PARTY_NOTICES"]) {
+    copyFileSync(join(here, "..", f), join(dir, f));
+  }
+}
 
 function writePackage(dir, pkg) {
   writeFileSync(join(dir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");

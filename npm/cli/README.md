@@ -18,3 +18,6 @@ proxies and in offline mirrors.
 Documentation, examples and the source live at
 <https://github.com/intuizi/intuizi-cli>. Binaries for other install methods
 are on the [releases page](https://github.com/intuizi/intuizi-cli/releases).
+
+Proprietary software, see the LICENSE file in this package. Use requires an
+Intuizi account and is subject to the Intuizi Terms of Service.

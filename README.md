@@ -244,8 +244,16 @@ goreleaser v2, which the workflow pins.
   `brew install` for everyone.
 - Create the `intuizi` organisation on npmjs.com, mint a granular automation
   token with publish rights and store it as the `NPM_TOKEN` repository secret.
-- Add a `LICENSE` file and set the same identifier in `npm/build.mjs`, which
-  publishes `UNLICENSED` until then.
+- Have counsel read `LICENSE` once; it is proprietary and was drafted in-house.
+
+## License
+
+Proprietary. The source is published so you can read what the tool does, not
+as open source: you may install and run unmodified copies to access Intuizi
+services through your own account, and nothing more. Using the CLI requires an
+Intuizi account and is subject to the Intuizi Terms of Service. See
+[LICENSE](LICENSE); the open-source libraries compiled into the binary keep
+their own licenses, reproduced in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
 
 ## Related
 
