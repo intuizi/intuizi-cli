@@ -66,6 +66,7 @@ const shared = {
   repository: { type: "git", url: `git+${repo}.git` },
   bugs: `${repo}/issues`,
   license: "SEE LICENSE IN LICENSE",
+  author: "Intuizi Inc",
   publishConfig: { access: "public" },
 };
 

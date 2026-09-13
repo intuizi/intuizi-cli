@@ -248,8 +248,8 @@ goreleaser v2, which the workflow pins.
 
 ## License
 
-Proprietary. The source is published so you can read what the tool does, not
-as open source: you may install and run unmodified copies to access Intuizi
+Proprietary, copyright Intuizi Inc. The source is published so you can read what
+the tool does, not as open source: you may install and run unmodified copies to access Intuizi
 services through your own account, and nothing more. Using the CLI requires an
 Intuizi account and is subject to the Intuizi Terms of Service. See
 [LICENSE](LICENSE); the open-source libraries compiled into the binary keep
