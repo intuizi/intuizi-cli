@@ -172,6 +172,13 @@ the README there for what is captured and how to refresh it. Short bodies, and
 any body whose exact values a test asserts on, stay inline in the test that
 uses them.
 
+`scripts/live-test.sh <base-url>` is the exception: it runs the CLI against a
+real test console with the token you are logged in with, exercising every
+command group end to end, creating and then deleting a project, audiences,
+cohorts, an upload, a schedule and POI submissions, and keeping activations to
+`--dry-run`. It writes `results.md` with every command's exit code and output.
+Point it only at a test environment.
+
 ### CI
 
 `.github/workflows/ci.yml` runs `go vet`, golangci-lint and `go test -race` on
