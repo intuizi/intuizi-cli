@@ -43,9 +43,10 @@ go install github.com/intuizi/intuizi-cli@latest   # or: make build
 ## Usage
 
 Every command runs from flags. Names are resolved against the reference
-catalogs, so you pass "starbucks" rather than an id you had to look up first,
-and a name matching nothing or several things is an error that lists what it
-found.
+catalogs, so "starbucks" works in place of an id looked up beforehand, and a
+name matching nothing or several things is an error listing what it found.
+`--brand-all` takes every match for a search instead, for the deliberate "all
+the coffee brands" case.
 
 ```bash
 # Authenticate once; stores a bearer token in ~/.config/intuizi/
