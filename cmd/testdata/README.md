@@ -57,7 +57,11 @@ Keep as captured: ids, status codes and their names, field names and nesting,
 counts, totals, timestamps, and datastream error text. Those are the parts the
 tests exercise.
 
-`TestFixturesAreWellFormedEnvelopes` guards this. It checks every file in
+`TestFixturesAreWellFormedEnvelopes` guards this, and
+`TestRepositoryNamesNothingInternal` in `cmd/repo_scrub_test.go` guards the
+same rule across every file in the repository, fixtures or not. The first
+real leak was a bucket path inside an inline test body, which the fixture
+guard could never have seen. It checks every file in
 `responses/` is valid JSON, is a whole envelope carrying `status`, `code` and
 `data`, and contains no bearer token or internal address. It reads each file
 through `fixture()`, so it covers the helper as well.

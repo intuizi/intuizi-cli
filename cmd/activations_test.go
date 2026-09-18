@@ -345,7 +345,7 @@ func TestWaitCompletedWithHealthyDatastreamsSucceeds(t *testing.T) {
 	fast(t)
 	srv, _ := stubSeq(t, reply{body: `{"status":"success","code":200,"data":[
 	 {"id":625,"status":{"id":104,"name":"Completed"},
-	  "datastreams":[{"name":"marketing_audience","status":"success","results":{"uri":"s3://intuizi-development/martin/x.csv.gz"}},
+	  "datastreams":[{"name":"marketing_audience","status":"success","results":{"uri":"s3://example-bucket/exports/x.csv.gz"}},
 	                 {"name":"legacy","status":"unknown","results":{}}]}]}`})
 
 	if _, _, err := run(t, activationsShowCommand(), srv, "625", "--wait"); err != nil {
