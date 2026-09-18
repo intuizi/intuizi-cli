@@ -168,7 +168,7 @@ duplicate.`,
 			flag   string
 			values []string
 		}{
-			{"brand", brands}, {"category", categories}, {"provider", providers},
+			{"brand", brands}, {"brand-all", brandAll}, {"category", categories}, {"provider", providers},
 			{"country", countries}, {"state", states}, {"city", cities}, {"zipcode", zipcodes},
 		} {
 			if err := nonEmpty(r.flag, r.values...); err != nil {

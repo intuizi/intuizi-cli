@@ -149,6 +149,7 @@ func TestAudiencesCreateRejectsEmptyValues(t *testing.T) {
 		{"--country", swap(poiFlags, "--country", "")},
 		{"--provider", append(append([]string(nil), poiFlags...), "--provider", "")},
 		{"--brand", append(append([]string(nil), poiFlags...), "--brand", "")},
+		{"--brand-all", append(append([]string(nil), poiFlags...), "--brand-all", "")},
 		{"--category", append(append([]string(nil), poiFlags...), "--category", "")},
 		{"--state", append(append([]string(nil), poiFlags...), "--state", "")},
 		{"--city", append(append([]string(nil), poiFlags...), "--city", "  ")},
