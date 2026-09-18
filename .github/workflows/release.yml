@@ -81,9 +81,13 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      # Mapped through env because a step's `if` cannot read secrets directly.
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    # No npm credential lives here. Each package names this workflow file as
+    # its trusted publisher, so npm accepts a short-lived OIDC token minted for
+    # this run and nothing else: a leaked secret cannot publish, and there is
+    # no token to rotate. id-token: write is what lets the runner mint it.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 
@@ -91,6 +95,9 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+
+      # Node 22 ships npm 10, which predates trusted publishing.
+      - run: npm install -g npm@^11
 
       - uses: actions/download-artifact@v8
         with:
@@ -100,9 +107,6 @@ jobs:
       - run: node npm/build.mjs --dist dist --out dist/npm
 
       - name: Publish to npm
-        if: env.NPM_TOKEN != ''
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           version=$(node -p "require('./dist/npm/@intuizi/cli/package.json').version")
@@ -132,14 +136,10 @@ jobs:
               echo "$name@$version is already on the registry"
               return
             fi
-            (cd "$dir" && npm publish --access public --tag "$tag")
+            (cd "$dir" && npm publish --access public --tag "$tag" --provenance)
           }
 
           # Platform packages first, so the launcher's optionalDependencies
           # resolve the moment @intuizi/cli itself appears on the registry.
           for dir in dist/npm/@intuizi/cli-*; do publish "$dir"; done
           publish dist/npm/@intuizi/cli
-
-      - name: Not published
-        if: env.NPM_TOKEN == ''
-        run: echo "::warning::NPM_TOKEN is not configured, so the npm packages were built but not published"

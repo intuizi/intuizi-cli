@@ -31,8 +31,10 @@ func TestRepositoryNamesNothingInternal(t *testing.T) {
 		{"an AWS key id", regexp.MustCompile(`AKIA[0-9A-Z]{16}`)},
 	}
 
-	// The release bot's commit identity is meant to be in .goreleaser.yaml.
-	allowed := regexp.MustCompile(`(?i)noreply@intuizi\.com`)
+	// Two addresses are published on purpose: the release bot's commit identity
+	// in .goreleaser.yaml, and the security contact. Everything else at the
+	// company domain is a person, and people do not belong in a public repo.
+	allowed := regexp.MustCompile(`(?i)(noreply|security)@intuizi\.com`)
 
 	skipDir := map[string]bool{".git": true, "bin": true, "dist": true, "node_modules": true}
 
