@@ -5,10 +5,6 @@ signal platform. A single-binary client for the Intuizi API v2: manage
 audiences, activations, cohorts, and POI data from your terminal, scripts, or
 CI.
 
-> **Status: pre-release.** Under active development. The release pipeline
-> (GitHub Releases, Homebrew, npm) is in place; the first public version will
-> be v0.1.0, when this repository and the Homebrew tap go public.
-
 ## Why a CLI
 
 Intuizi already has three surfaces: the web Console for browser users, the
@@ -33,8 +29,7 @@ macOS, Linux and Windows, amd64 and arm64. The npm package is a small launcher
 that pulls in the binary for your platform as an optional dependency; nothing
 is downloaded at install time beyond the packages themselves.
 
-Until v0.1.0 the repositories are private, so Homebrew and npm cannot fetch
-anything yet. Build from source in the meantime:
+Or build from source, which needs the Go toolchain:
 
 ```bash
 go install github.com/intuizi/intuizi-cli@latest   # or: make build
@@ -240,14 +235,14 @@ notarised or a quarantine workaround. The formula works on Linux too and needs
 neither, so it stays until Apple signing is set up. It keeps working across
 goreleaser v2, which the workflow pins.
 
-#### Before the first public release
+#### Publishing credentials
 
-- Make this repository and `intuizi/homebrew-intuizi-cli` public. Homebrew
-  downloads release archives anonymously, so a private repository breaks
-  `brew install` for everyone.
-- Create the `intuizi` organisation on npmjs.com, mint a granular automation
-  token with publish rights and store it as the `NPM_TOKEN` repository secret.
-- Have counsel read `LICENSE` once; it is proprietary and was drafted in-house.
+The npm job authenticates with a granular access token in the `NPM_TOKEN`
+secret, scoped to the `@intuizi` packages and nothing else. That token is a
+stopgap: npm withdraws direct publishing from tokens that bypass two-factor
+authentication in January 2027. Once the packages exist on the registry, each
+one should name this workflow as its trusted publisher, after which the token
+and its secret can be deleted.
 
 ## License
 
