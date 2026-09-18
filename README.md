@@ -5,6 +5,10 @@ signal platform. A single-binary client for the Intuizi API v2: manage
 audiences, activations, cohorts, and POI data from your terminal, scripts, or
 CI.
 
+It talks to your Intuizi account, so you need one to use it. The source is
+published so you can read what the tool does before you run it. It is not open
+source; see [License](#license).
+
 ## Why a CLI
 
 Intuizi already has three surfaces: the web Console for browser users, the
@@ -34,6 +38,18 @@ Or build from source, which needs the Go toolchain:
 ```bash
 go install github.com/intuizi/intuizi-cli@latest   # or: make build
 ```
+
+## Quickstart
+
+```bash
+intuizi auth login                  # stores a token in ~/.config/intuizi/
+intuizi reference poi brands --search starbucks
+intuizi audiences list
+```
+
+`auth login` asks for the email and password of your Intuizi account. In CI,
+set `INTUIZI_API_TOKEN` to a token minted in the console under My Account then
+API Tokens, and skip the login.
 
 ## Usage
 
@@ -145,6 +161,20 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 The signal codes follow the shell's `128 + signal` convention, so a script can
 tell a cancelled run from a failed one.
 
+## Support, issues and contributions
+
+Bug reports and feature requests are welcome as
+[issues](https://github.com/intuizi/intuizi-cli/issues). Include the command
+you ran, what you expected, and what happened. For anything account-specific,
+contact Intuizi support rather than opening a public issue.
+
+Pull requests from outside Intuizi are not accepted. The license does not grant
+the right to create derivative works, and any contribution would assign its
+rights to Intuizi, so an issue is the useful way to get something changed.
+
+Security problems go to security@intuizi.com, not to the issue tracker. See
+[SECURITY.md](SECURITY.md).
+
 ## Development
 
 Requires Go 1.25+, matching the `go` directive in `go.mod`. Lint with
@@ -235,14 +265,14 @@ notarised or a quarantine workaround. The formula works on Linux too and needs
 neither, so it stays until Apple signing is set up. It keeps working across
 goreleaser v2, which the workflow pins.
 
-#### Publishing credentials
+#### How npm publishing is authorised
 
-The npm job authenticates with a granular access token in the `NPM_TOKEN`
-secret, scoped to the `@intuizi` packages and nothing else. That token is a
-stopgap: npm withdraws direct publishing from tokens that bypass two-factor
-authentication in January 2027. Once the packages exist on the registry, each
-one should name this workflow as its trusted publisher, after which the token
-and its secret can be deleted.
+No npm credential is stored anywhere. Each of the seven packages names
+`.github/workflows/release.yml` in this repository as its trusted publisher, so
+npm accepts an OpenID Connect token minted for that single workflow run. There
+is no secret to leak and none to rotate. Re-register with `npm trust github
+<package> --file release.yml --repo intuizi/intuizi-cli --allow-publish` if a
+new package joins the set.
 
 ## License
 
@@ -255,6 +285,10 @@ their own licenses, reproduced in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
 
 ## Related
 
-- Intuizi API v2 reference - the source of truth for every endpoint this CLI
-  wraps (see the developer docs published from the `intuizi-console` repo).
-- Intuizi MCP server - the AI-agent surface built on the same API.
+- [DOCS.md](DOCS.md) - every flag, the catalog behind each value, and the
+  response shapes a script has to parse.
+- [examples/](examples) - ready-made payloads for the creates that take
+  `--file`.
+- The Intuizi API v2 reference is the source of truth for every endpoint this
+  CLI wraps, and the Intuizi MCP server is the agent-facing surface on the same
+  API. Both are reachable from the console.
