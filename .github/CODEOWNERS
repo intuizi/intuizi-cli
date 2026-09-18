@@ -1,0 +1,10 @@
+# Every change needs a review from someone who owns this CLI. The release
+# workflow and the packaging scripts are what publish signed artefacts to three
+# registries, so they are called out separately rather than left to the catch-all.
+*                       @alexlavrendev @OliverkC232
+
+/.github/workflows/     @alexlavrendev
+/.goreleaser.yaml       @alexlavrendev
+/npm/                   @alexlavrendev
+/LICENSE                @alexlavrendev
+/SECURITY.md            @alexlavrendev

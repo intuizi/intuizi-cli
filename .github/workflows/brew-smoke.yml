@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 20
     steps:
       # Ubuntu images ship Homebrew but leave it off PATH; this puts it on.
-      - uses: Homebrew/actions/setup-homebrew@main
+      - uses: Homebrew/actions/setup-homebrew@1e34f2e2acaa766b7efacb8c26352e6abbb023f9 # 2026.09.13.1
 
       - run: brew install intuizi/intuizi-cli/intuizi
 

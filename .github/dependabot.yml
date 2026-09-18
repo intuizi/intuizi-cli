@@ -1,0 +1,20 @@
+# Two ecosystems, both security-relevant: a pinned action can only be updated
+# by a bot that knows the new commit, and a Go dependency that ships a fix is
+# worth hearing about the week it lands rather than at the next release.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
