@@ -107,6 +107,18 @@ jobs:
           set -euo pipefail
           version=$(node -p "require('./dist/npm/@intuizi/cli/package.json').version")
 
+          # Nothing below 0.1.0 reaches the registry. The 0.0.x tags exist to
+          # exercise this pipeline while both repositories are private, and a
+          # package published from one would carry a README whose every link
+          # 404s, on a version number npm will never let us reuse. v0.1.0 is
+          # the first public release, so this guard falls away on its own.
+          case "$version" in
+            0.0.*)
+              echo "::warning::$version is below 0.1.0, so the npm packages were built but not published"
+              exit 0
+              ;;
+          esac
+
           # A prerelease must not become what a plain `npm install` resolves to.
           tag=latest
           case "$version" in *-*) tag=next ;; esac
