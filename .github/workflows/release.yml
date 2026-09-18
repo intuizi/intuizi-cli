@@ -91,13 +91,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # No registry-url here, deliberately. setup-node writes
+      # //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN} into .npmrc when it
+      # is set, which with no token in the environment expands to an empty
+      # value. npm then believes authentication is already configured, skips
+      # the OIDC exchange entirely, and the publish fails with a 404 that reads
+      # like the package does not exist. registry.npmjs.org is the default
+      # registry anyway, so nothing is lost by leaving it out.
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
 
       # Node 22 ships npm 10, which predates trusted publishing.
       - run: npm install -g npm@^11
+
+      # Belt and braces: fail loudly if anything ever puts an auth line back.
+      - name: No stored npm credential may shadow OIDC
+        run: |
+          if [ -f ~/.npmrc ] && grep -q "_authToken" ~/.npmrc; then
+            echo "::error::~/.npmrc carries an _authToken line, which blocks the OIDC exchange"
+            exit 1
+          fi
 
       - uses: actions/download-artifact@v8
         with:
