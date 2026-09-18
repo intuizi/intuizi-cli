@@ -1,0 +1,59 @@
+name: oidc-probe
+
+# Temporary diagnostic: asks GitHub for an OIDC token and exchanges it with the
+# npm registry, printing only status codes. It publishes nothing. Delete once
+# trusted publishing is proven.
+on:
+  workflow_dispatch:
+  push:
+    branches: [harden-supply-chain]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - run: npm install -g npm@^11
+
+      - name: Environment
+        run: |
+          echo "npm:  $(npm --version) at $(command -v npm)"
+          echo "node: $(node --version)"
+          echo "registry: $(npm config get registry)"
+          echo "id-token url set: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}${ACTIONS_ID_TOKEN_REQUEST_URL:-no}"
+          echo "npmrc present: $([ -f ~/.npmrc ] && echo yes || echo no)"
+
+      - name: Exchange an OIDC token with the registry
+        run: |
+          set -uo pipefail
+          for aud in "npm:registry.npmjs.org" "npm" ""; do
+            if [ -n "$aud" ]; then
+              url="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=$(printf %s "$aud" | jq -sRr @uri)"
+            else
+              url="${ACTIONS_ID_TOKEN_REQUEST_URL}"
+            fi
+            tok=$(curl -sf -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "$url" | jq -r .value)
+            if [ -z "$tok" ] || [ "$tok" = null ]; then echo "audience '${aud:-default}': could not mint"; continue; fi
+            claims=$(printf %s "$tok" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | jq -c '{sub, aud, job_workflow_ref, repository, ref}' 2>/dev/null)
+            echo "audience '${aud:-default}': minted, claims $claims"
+            code=$(curl -s -o /tmp/resp.json -w '%{http_code}' -X POST \
+              -H "Content-Type: application/json" \
+              -d "{\"idToken\":\"$tok\"}" \
+              https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@intuizi%2Fcli)
+            echo "  exchange HTTP $code"
+            head -c 300 /tmp/resp.json | sed 's/[A-Za-z0-9_-]\{30,\}/<redacted>/g'; echo
+          done
