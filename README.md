@@ -211,7 +211,9 @@ order:
    tag such as `v0.2.0-rc1` gets a GitHub Release but leaves the formula alone.
 3. **npm**: `npm/build.mjs` turns the release binaries into `@intuizi/cli` plus
    six `@intuizi/cli-<os>-<cpu>` platform packages and publishes them, platform
-   packages first. It needs an npm automation token in the `NPM_TOKEN` secret;
+   packages first. A version below 0.1.0 is built but not published, so the
+   0.0.x tags that exercise this pipeline cannot put a package on the registry
+   before the repositories are public. It needs an npm automation token in the `NPM_TOKEN` secret;
    without one it builds the packages and stops with a warning. A prerelease
    version is published under the `next` dist-tag, never `latest`. The job is
    idempotent, so re-running it after a partial publish finishes the set.
