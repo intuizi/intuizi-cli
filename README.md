@@ -216,6 +216,11 @@ checks that the rendered Homebrew formula parses, builds the npm packages from
 the snapshot, installs the launcher from the tarballs and runs it. Packaging
 breaks on the PR that causes them, not on the release tag.
 
+`.github/workflows/codeql.yml` runs CodeQL over the Go code on every pull
+request and weekly. Every action in every workflow is pinned to a commit rather
+than a tag, so a compromised or re-pointed tag cannot change what runs here;
+Dependabot proposes the updates.
+
 The `ci` job aggregates the others and is the required status check for merging
 to master. Require that one, not an individual matrix leg, because a leg's name
 changes whenever the matrix does.
@@ -229,7 +234,9 @@ order:
    nothing.
 2. **release**: goreleaser cross-compiles six binaries (darwin, linux and
    windows, each amd64 and arm64), packages them with a checksums file,
-   publishes a GitHub Release, and commits the Homebrew formula to
+   attaches signed build provenance to every archive (verify a download with
+   `gh attestation verify <file> --repo intuizi/intuizi-cli`), publishes a
+   GitHub Release, and commits the Homebrew formula to
    [`intuizi/homebrew-intuizi-cli`](https://github.com/intuizi/homebrew-intuizi-cli).
    The push uses an SSH deploy key stored as the `HOMEBREW_TAP_DEPLOY_KEY`
    secret; it can write to that one repository and nothing else. A prerelease
