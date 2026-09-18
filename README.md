@@ -274,12 +274,19 @@ goreleaser v2, which the workflow pins.
 
 #### How npm publishing is authorised
 
-No npm credential is stored anywhere. Each of the seven packages names
-`.github/workflows/release.yml` in this repository as its trusted publisher, so
-npm accepts an OpenID Connect token minted for that single workflow run. There
-is no secret to leak and none to rotate. Re-register with `npm trust github
-<package> --file release.yml --repo intuizi/intuizi-cli --allow-publish` if a
-new package joins the set.
+Today, with a granular access token in the `NPM_TOKEN` secret, scoped to the
+`@intuizi` packages and nothing else. Every publish also carries provenance, so
+a tarball on the registry can be traced back to the commit and the run that
+built it.
+
+That token is meant to be temporary. All seven packages are already registered
+to trust this repository's release workflow, which would remove the secret
+entirely, but the exchange fails for this repository: GitHub mints OIDC tokens
+with an immutable subject claim for repositories created after 15 July 2026,
+and the npm registry cannot yet validate that format, so it answers "package
+not found" ([npm/cli#9969](https://github.com/npm/cli/issues/9969)). The claim
+cannot be disabled. When npm fixes it, drop `registry-url` and `NODE_AUTH_TOKEN`
+from the release workflow, then revoke the token and delete the secret.
 
 ## License
 
