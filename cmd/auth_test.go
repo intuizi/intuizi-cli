@@ -27,6 +27,7 @@ func authEnv(t *testing.T, base string) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
 	t.Setenv(config.EnvToken, "")
 
 	prevBase, prevTTY := baseURLFlag, stdinIsTerminal
