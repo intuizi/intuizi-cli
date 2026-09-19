@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -145,12 +146,14 @@ func TestLoginStoresTokenBaseAndExpiry(t *testing.T) {
 	if cfg.Token != "fresh-token" || cfg.BaseURL != srv.URL || cfg.ExpiresAt != "2099-01-01T00:00:00+00:00" {
 		t.Errorf("stored config = %+v", cfg)
 	}
-	fi, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := fi.Mode().Perm(); perm != 0600 {
-		t.Errorf("config perms = %v, want 0600", perm)
+	if runtime.GOOS != "windows" { // owner-only bits are a Unix guarantee
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := fi.Mode().Perm(); perm != 0600 {
+			t.Errorf("config perms = %v, want 0600", perm)
+		}
 	}
 
 	// Login prints commentary only, and on stderr: stdout is for data.
@@ -316,6 +319,9 @@ func TestLoginFailsBeforeMintingOnCorruptConfig(t *testing.T) {
 }
 
 func TestLoginFailsBeforeMintingOnUnwritableConfigDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod does not restrict directory creation on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
