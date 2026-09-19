@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,7 @@ func isolate(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
 	t.Setenv(EnvToken, "")
 	return dir
 }
@@ -85,6 +87,9 @@ func TestLoadNamesTheFileOnReadError(t *testing.T) {
 // Login needs the directory writable before it spends one of the account's
 // ten token slots; EnsureDir is what it checks with.
 func TestEnsureDirCreatesOwnerOnlyDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("owner-only permission bits are a Unix guarantee; Windows uses ACLs")
+	}
 	isolate(t)
 
 	if err := EnsureDir(); err != nil {
@@ -104,6 +109,9 @@ func TestEnsureDirCreatesOwnerOnlyDir(t *testing.T) {
 }
 
 func TestEnsureDirReportsUnwritableParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod does not restrict directory creation on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
@@ -119,6 +127,9 @@ func TestEnsureDirReportsUnwritableParent(t *testing.T) {
 }
 
 func TestSaveCreatesFileWithOwnerOnlyPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("owner-only permission bits are a Unix guarantee; Windows uses ACLs")
+	}
 	isolate(t)
 
 	if err := Save(&Config{BaseURL: "https://example.com", Token: "secret"}); err != nil {
@@ -139,6 +150,9 @@ func TestSaveCreatesFileWithOwnerOnlyPermissions(t *testing.T) {
 // that already exists. os.WriteFile's perm argument applies only on create, so
 // a plain write would leave a pre-existing 0644 file world-readable.
 func TestSaveTightensPermissionsOnExistingFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("owner-only permission bits are a Unix guarantee; Windows uses ACLs")
+	}
 	isolate(t)
 
 	path, _ := Path()
