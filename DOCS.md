@@ -53,6 +53,29 @@ leaves the terminal as it found it.
 | `--quiet` | Print only ids on stdout, one per line, for shell scripts. Not with `--json` |
 | `--base-url` | Console base URL (default: the stored value, then production) |
 | `--idempotency-key` | Reuse one Idempotency-Key to retry a create whose outcome is unknown |
+| `--debug` | Print every HTTP request and response on stderr, with credentials redacted |
+
+### `--debug`
+
+One line per request and one per response on stderr: method and URL, the
+headers, the status, how long it took, and how many bytes came back. Stdout is
+untouched, so `--debug` composes with `--json` and `--quiet`.
+
+Credentials are redacted: the `Authorization` and `Idempotency-Key` headers,
+cookies, every `x-amz-*` header, any userinfo in a URL, and the signature
+parameters in a presigned upload URL, which carries no `Authorization` header
+because the signature in its query string is the credential.
+
+**Bodies are never printed.** `--json` already shows the response envelope,
+including on a failure, and `--dry-run` shows the body a create would send, so
+a body dump here would be a third route to the same information carrying risk
+the other two do not: the auth route sends your password and receives a token
+good for a year, and a reservation response carries a presigned URL. Printing
+no body also means `--debug` never reads one, so it cannot change what a
+command does.
+
+A transcript is still safe to read before sending it on: it names the host, the
+path and any search terms you passed.
 
 ## Commands
 

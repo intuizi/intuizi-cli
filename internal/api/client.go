@@ -49,6 +49,8 @@ func New(baseURL, token string) *Client {
 		Warn:    os.Stderr,
 		HTTP: &http.Client{
 			Timeout: 30 * time.Second,
+			// Installed always; it is a pass-through until --debug is set.
+			Transport: newDebugTransport(),
 			// Never follow a redirect: a same-host hop would forward the bearer
 			// token, and a 301/302/303 turns a create POST into a GET. A 3xx
 			// surfaces as an *Error instead, which almost always means --base-url
