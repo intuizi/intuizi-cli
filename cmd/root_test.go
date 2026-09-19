@@ -91,7 +91,9 @@ func resetRoot(t *testing.T) {
 	reset := func() {
 		jsonOutput, quietOutput, flagsParsed = false, false, false
 		baseURLFlag, idempotencyKeyFlag = "", ""
+		debugFlag = false
 		api.IdempotencyKey = ""
+		api.Debug, api.DebugOut = false, os.Stderr
 		rootCmd.SilenceUsage = false
 		resetFlags(rootCmd)
 	}
@@ -354,5 +356,43 @@ func TestPlainHTTPBaseURLWarns(t *testing.T) {
 				t.Errorf("warned = %v, want %v; stderr: %q", got, c.warn, res.stderr)
 			}
 		})
+	}
+}
+
+// --debug is wired in PersistentPreRunE, which most tests in this package never
+// reach: they execute constructor-built commands with no root. Without a run
+// through rootCmd, --debug could be declared, bound to its global, and silently
+// never pushed into internal/api.
+func TestDebugFlagReachesTheAPIPackage(t *testing.T) {
+	srv, _ := stub(t, `{"status":"success","code":200,"data":[]}`)
+
+	isolate(t)
+	res := rootRun(t, "--base-url", srv.URL, "--debug", "audiences", "list")
+	if res.err != nil {
+		t.Fatalf("run: %v", res.err)
+	}
+	for _, want := range []string{"> GET ", "Authorization: <redacted>", "< 200 OK in "} {
+		if !strings.Contains(res.stderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, res.stderr)
+		}
+	}
+	// The transcript is commentary, so it belongs on stderr: stdout is the data
+	// that composes in a pipeline.
+	if strings.Contains(res.stdout, "> GET ") {
+		t.Errorf("transcript reached stdout:\n%s", res.stdout)
+	}
+}
+
+// Off unless asked for: the same run without the flag prints no transcript.
+func TestWithoutDebugNothingIsPrinted(t *testing.T) {
+	srv, _ := stub(t, `{"status":"success","code":200,"data":[]}`)
+
+	isolate(t)
+	res := rootRun(t, "--base-url", srv.URL, "audiences", "list")
+	if res.err != nil {
+		t.Fatalf("run: %v", res.err)
+	}
+	if strings.Contains(res.stderr, "> GET ") {
+		t.Errorf("transcript printed without --debug:\n%s", res.stderr)
 	}
 }
