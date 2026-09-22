@@ -346,3 +346,47 @@ func TestCohortsPreviewRendersObjectSamples(t *testing.T) {
 		t.Errorf("stderr = %q, want the row count", errb)
 	}
 }
+
+// The server rejects these column names; catching them here costs no round trip.
+func TestCohortsCreateChecksTheIdentifierColumn(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	for _, tc := range []struct {
+		name, value string
+		ok          bool
+	}{
+		{"letters digits underscore dash", "email_sha256-2", true},
+		{"space", "email address", false},
+		{"dot", "user.email", false},
+		{"bracket", "email[0]", false},
+		{"empty", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := run(t, cohortsCreateCommand(), srv,
+				"--name", "Q3 customers",
+				"--file-uri", "s3://example-bucket/customers.csv",
+				"--file-format", "csv",
+				"--identifier-type", "hem_sha256",
+				"--identifier-column", tc.value,
+				"--dry-run")
+			if tc.ok {
+				if err != nil {
+					t.Fatalf("rejected a valid column: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("accepted a column the server would reject")
+			}
+			if !strings.Contains(err.Error(), "--identifier-column") {
+				t.Errorf("error does not name the flag: %v", err)
+			}
+			if code := exitCode(err, nil, true); code != 2 {
+				t.Errorf("exit = %d, want 2", code)
+			}
+		})
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}

@@ -85,8 +85,12 @@ Two habits make this safe:
   reads the catalogs to resolve names, so it needs a token and counts against
   the read budget; it cannot be combined with `--wait`.
 - **Names resolve, ids do not.** A name is looked up and must match exactly one
-  entry; zero or several is an error listing what was found, with ids to copy
-  from. A numeric value is taken as the id and passed through unchecked, so a
+  entry. The lookup matches substrings, so when several come back and exactly
+  one is labelled with the name itself, ignoring case, that one is taken:
+  `Example Coffee` resolves even though `Example Coffee Reserve` also matches.
+  Otherwise zero or several is an error listing what was found, with ids to
+  copy from, and so is an exact label on a result too long to arrive in one
+  page. A numeric value is taken as the id and passed through unchecked, so a
   wrong number is not caught.
 
 The global output flags work on creates as well as reads. `--json` prints the
@@ -424,7 +428,7 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 | `--audience-id` | Completed audience | `audiences list` |
 | `--file-format` | `csv`, `gzip` or `parquet` | - |
 | `--identifier-type` | one of nine, below | - |
-| `--identifier-column` | column name | `cohorts preview` |
+| `--identifier-column` | column name: letters, digits, `_` and `-` | `cohorts preview` |
 | `--metadata-columns` | column name, repeatable | `cohorts preview` |
 | `--ip-enrichment` | boolean | - |
 | `--device-limit` | device cap | - |
@@ -505,7 +509,7 @@ cd34          Los Angeles  90001
 
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
-| `--name` | any string | - |
+| `--name` | letters, digits, spaces, `_` and `-` | - |
 | `--audience-id` | audience to rebuild each cycle | `audiences list` |
 | `--project-id` | project id | `projects list` |
 | `--start` | `"YYYY-MM-DD HH:MM:SS"`, read in `--timezone`, must be in the future | - |
@@ -784,7 +788,9 @@ to load. If `intuizi aud<TAB>` does nothing, add to `~/.zshrc`:
 autoload -U compinit && compinit
 ```
 
-Completion covers commands and flag names. Flag values do not complete yet.
+Completion covers commands, flag names, and the values of flags that take a
+fixed set: `--type`, `--signal`, `--file-format`, `--identifier-type`,
+`--frequency` and `--purpose`.
 
 ## Typical workflows
 
