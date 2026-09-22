@@ -235,8 +235,9 @@ order:
 2. **release**: goreleaser cross-compiles six binaries (darwin, linux and
    windows, each amd64 and arm64), packages them with a checksums file,
    attaches signed build provenance to every archive (verify a download with
-   `gh attestation verify <file> --repo intuizi/intuizi-cli`), publishes a
-   GitHub Release, and commits the Homebrew formula to
+   `gh attestation verify <file> --repo intuizi/intuizi-cli`) and an SPDX
+   SBOM, `<archive>.sbom.json`, publishes a GitHub Release, and commits the
+   Homebrew formula to
    [`intuizi/homebrew-intuizi-cli`](https://github.com/intuizi/homebrew-intuizi-cli).
    The push uses an SSH deploy key stored as the `HOMEBREW_TAP_DEPLOY_KEY`
    secret; it can write to that one repository and nothing else. A prerelease
@@ -259,7 +260,8 @@ git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
 Then run the manual `brew-smoke` workflow, which installs the formula on clean
 macOS and Linux runners and checks the reported version.
 
-Test the packaging locally without publishing anything:
+Test the packaging locally without publishing anything. Needs syft on PATH,
+which the snapshot shells out to for the SBOMs (`brew install syft`):
 
 ```bash
 goreleaser release --snapshot --clean      # binaries, archives, dist/homebrew/Formula/intuizi.rb
