@@ -251,6 +251,25 @@ order:
    version is published under the `next` dist-tag, never `latest`. The job is
    idempotent, so re-running it after a partial publish finishes the set.
 
+#### Before tagging
+
+Run the live test against a test console. It is a manual gate: an unattended
+job would need a credential in CI, and a test console carries whatever branch
+is deployed to it, so a schedule would fail on other people's half-finished
+work rather than on real API drift.
+
+```bash
+make build
+./bin/intuizi --base-url https://TEST-CONSOLE auth login
+scripts/live-test.sh https://TEST-CONSOLE
+```
+
+It exercises every command group end to end and cleans up after itself, writing
+a pass/fail summary to `live-results/results.md` (gitignored — real API
+responses). Activations stay at `--dry-run`, so `activations show`/`delete` are
+not covered. A non-zero exit means do not tag. You need an account on the
+environment you test against; each has its own database.
+
 Configuration is in `.goreleaser.yaml` and `npm/`. To cut a release:
 
 ```bash

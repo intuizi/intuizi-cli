@@ -174,7 +174,10 @@ PROJECT=$(first); [ -n "$PROJECT" ] && PROJECTS+=("$PROJECT")
 step 0 "projects show" I projects show "$PROJECT"
 
 # One brand, one city, one day: a small scan.
-START=$(date -u -d '10 days ago' +%F); END=$(date -u -d '9 days ago' +%F)
+START=$(date -u -v-10d +%F 2>/dev/null || date -u -d '10 days ago' +%F)
+END=$(date -u -v-9d +%F 2>/dev/null || date -u -d '9 days ago' +%F)
+SCHED_START=$(date -u -v+2d '+%F 06:00:00' 2>/dev/null || date -u -d '+2 days' '+%F 06:00:00')
+[ -n "$START" ] && [ -n "$END" ] && [ -n "$SCHED_START" ] || { echo "date arithmetic failed" >&2; exit 2; }
 AUDFLAGS=(--type poi --brand "$SBUX" --country USA --state CA --city "San Francisco" --start-date "$START" --end-date "$END")
 step 0 "audiences create --dry-run" I audiences create "${AUDFLAGS[@]}" --name "cli-live-test $STAMP" --dry-run
 step 0 "audiences create --wait --quiet" I audiences create "${AUDFLAGS[@]}" --name "cli-live-test $STAMP" --wait --timeout "$WAIT_TIMEOUT" --quiet
@@ -191,7 +194,7 @@ step 0 "cohorts show" I cohorts show "$COH"
 
 CSV="$OUT/members.csv"
 printf 'email_sha256,tier\n%s,gold\n%s,silver\n' "$(printf a@example.com | sha256sum | cut -d' ' -f1)" "$(printf b@example.com | sha256sum | cut -d' ' -f1)" > "$CSV"
-step 0 "uploads reserve" I uploads reserve --purpose cohort --filename members.csv --content-length "$(stat -c %s "$CSV")" --json
+step 0 "uploads reserve" I uploads reserve --purpose cohort --filename members.csv --content-length "$(wc -c < "$CSV" | tr -d ' ')" --json
 step 0 "uploads put" I uploads put "$CSV" --purpose cohort
 REF=$(first)
 step 0 "cohorts preview --upload-reference" I cohorts preview --upload-reference "$REF"
@@ -199,7 +202,6 @@ step 0 "cohorts preview --json" I cohorts preview --upload-reference "$REF" --js
 step 0 "cohorts create --upload-reference" I cohorts create --name "cli-live-upload $STAMP" --upload-reference "$REF" --file-format csv --identifier-type hem_sha256 --identifier-column email_sha256 --metadata-columns tier --quiet
 COH2=$(first); [ -n "$COH2" ] && COHORTS+=("$COH2")
 
-SCHED_START=$(date -u -d '+2 days' '+%F 06:00:00')
 step 0 "schedules create --dry-run" I schedules create --name "cli-live-sched $STAMP" --audience-id "$AUD" --start "$SCHED_START" --timezone America/New_York --frequency weekly --window 2 --project-id "$PROJECT" --dry-run
 step 0 "schedules create" I schedules create --name "cli-live-sched $STAMP" --audience-id "$AUD" --start "$SCHED_START" --timezone America/New_York --frequency weekly --window 2 --project-id "$PROJECT" --quiet
 SCH=$(first); [ -n "$SCH" ] && SCHEDULES+=("$SCH")
