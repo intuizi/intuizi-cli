@@ -49,16 +49,17 @@ changelog:
       - "^docs:"
       - "^test:"
   # Subjects without a prefix fall into Other, so the notes stay complete
-  # while the convention is adopted.
+  # while the convention is adopted. The match is against the bare subject,
+  # like the filters above, so the prefix is anchored: "prefix: ..." is not a fix.
   groups:
     - title: Features
-      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      regexp: '^feat(\(.+\))?!?:.+$'
       order: 0
     - title: Fixes
-      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      regexp: '^fix(\(.+\))?!?:.+$'
       order: 1
     - title: Dependencies
-      regexp: '^.*?deps(\(.+\))??!?:.+$'
+      regexp: '^deps(\(.+\))?!?:.+$'
       order: 2
     - title: Other
       order: 999

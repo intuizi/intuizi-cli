@@ -2,8 +2,10 @@
 
 ## Reporting a vulnerability
 
-Email **security@intuizi.com** with what you found, how to reproduce it, and
-what an attacker could do with it. Please do not open a public issue for a
+Report it privately through
+[GitHub's advisory form](https://github.com/intuizi/intuizi-cli/security/advisories/new),
+or email **security@intuizi.com**, with what you found, how to reproduce it,
+and what an attacker could do with it. Please do not open a public issue for a
 security problem, and please give us a chance to fix it before writing about
 it publicly.
 

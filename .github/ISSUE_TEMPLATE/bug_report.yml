@@ -23,7 +23,9 @@ body:
     id: command
     attributes:
       label: Command
-      description: What you ran. Redact ids and names you would rather not publish.
+      description: >-
+        What you ran. Redact ids and names you would rather not publish, and
+        never paste a token or your config file: this tracker is public.
       render: shell
     validations:
       required: true
