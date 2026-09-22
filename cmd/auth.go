@@ -107,7 +107,9 @@ func login(cmd *cobra.Command, email, password string) error {
 
 	// Accounts cap at 10 active tokens and logout doesn't revoke, so don't
 	// mint another when a working one is already stored for this console.
-	if storedTokenUsable(ctx, cfg, base) {
+	stored, from := config.StoredToken(cfg)
+	if storedTokenUsable(ctx, cfg, stored, base) {
+		config.MigrateToken(cfg, from)
 		_, _ = fmt.Fprintf(stderr, "Already logged in to %s\n", base)
 		_, _ = fmt.Fprintln(stderr, "Run 'intuizi auth logout' first if you need a new token.")
 		warnEnvToken(stderr, "is set and takes precedence over the stored token")
@@ -147,8 +149,10 @@ func login(cmd *cobra.Command, email, password string) error {
 
 // storedTokenUsable reports whether cfg holds a token the API at base still
 // accepts. Expiry is checked locally first to avoid a pointless request.
-func storedTokenUsable(ctx context.Context, cfg *config.Config, base string) bool {
-	if cfg.Token == "" {
+func storedTokenUsable(ctx context.Context, cfg *config.Config, token, base string) bool {
+	// Passed in: the store may hold it, leaving cfg.Token empty, and minting
+	// a replacement costs one of ten slots.
+	if token == "" {
 		return false
 	}
 	// A token is bound to the console that minted it. Checking it against a
@@ -164,7 +168,7 @@ func storedTokenUsable(ctx context.Context, cfg *config.Config, base string) boo
 	}
 
 	// Not expired is not enough - it may have been revoked in the console.
-	err := api.New(base, cfg.Token).Get(ctx, verifyPath, nil, nil)
+	err := api.New(base, token).Get(ctx, verifyPath, nil, nil)
 	if err == nil {
 		return true
 	}
@@ -337,11 +341,18 @@ func status(cmd *cobra.Command, verify bool) error {
 	switch source {
 	case config.SourceEnv:
 		_, _ = fmt.Fprintf(stdout, "Token:    present (from %s)\n", config.EnvToken)
+	case config.SourceKeyring:
+		_, _ = fmt.Fprintf(stdout, "Token:    present (in the OS credential store)\n")
+		if exp := formatExpiry(cfg.ExpiresAt); exp != "" {
+			_, _ = fmt.Fprintf(stdout, "Expires:  %s\n", exp)
+		}
+		warnNearExpiry(cmd.ErrOrStderr(), cfg.ExpiresAt)
 	case config.SourceConfig:
 		_, _ = fmt.Fprintf(stdout, "Token:    present (from %s)\n", path)
 		if exp := formatExpiry(cfg.ExpiresAt); exp != "" {
 			_, _ = fmt.Fprintf(stdout, "Expires:  %s\n", exp)
 		}
+		warnNearExpiry(cmd.ErrOrStderr(), cfg.ExpiresAt)
 	default:
 		_, _ = fmt.Fprintln(stdout, "Token:    none")
 		return errors.New("not logged in - run 'intuizi auth login'")
@@ -380,7 +391,8 @@ func logout(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	had := cfg.Token != ""
+	token, _ := config.StoredToken(cfg)
+	had := token != ""
 
 	if err := config.ClearToken(); err != nil {
 		return err
@@ -398,6 +410,28 @@ func logout(cmd *cobra.Command, _ []string) error {
 }
 
 // --------------------------------------------------------------------------------- helpers
+
+// A month is enough notice before a scheduled job starts failing at 401.
+const expiryWarning = 30 * 24 * time.Hour
+
+// Stderr, while the Expires: line stays on stdout: stdout is what scripts read.
+func warnNearExpiry(w io.Writer, iso string) {
+	if iso == "" {
+		return
+	}
+	t, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		return
+	}
+	switch left := time.Until(t); {
+	case left <= 0:
+		_, _ = fmt.Fprintf(w, "\nWarning: this token expired on %s. Run 'intuizi auth login'.\n",
+			t.Format("2006-01-02"))
+	case left < expiryWarning:
+		_, _ = fmt.Fprintf(w, "\nWarning: this token expires in %d days. Run 'intuizi auth login' to mint a new one.\n",
+			int(left.Hours()/24))
+	}
+}
 
 // formatExpiry renders an ISO 8601 timestamp as a date plus days remaining.
 // Returns "" when there is no expiry or it cannot be parsed.
