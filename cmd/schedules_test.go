@@ -235,3 +235,45 @@ func TestSchedulesCreateDetailLeadsWithProject(t *testing.T) {
 		t.Errorf("project should lead, not sort in with the rest:\n%s", out)
 	}
 }
+
+// The server rejects these names; catching them here costs no round trip.
+func TestSchedulesCreateChecksTheNameCharacters(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	for _, tc := range []struct {
+		name, value string
+		ok          bool
+	}{
+		{"letters digits space dash underscore", "Weekly refresh_2 - EU", true},
+		{"comma", "Weekly, refresh", false},
+		{"slash", "weekly/refresh", false},
+		{"colon", "weekly:refresh", false},
+		{"accented", "refréshe", false},
+		{"empty", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := []string{"--name", tc.value, "--audience-id", "88", "--frequency", "weekly",
+				"--window", "2", "--start", futureStart(t, "UTC"), "--timezone", "UTC", "--dry-run"}
+			out, _, err := run(t, schedulesCreateCommand(), srv, args...)
+			if tc.ok {
+				if err != nil {
+					t.Fatalf("rejected a valid name: %v", err)
+				}
+				return
+			}
+			var ue usageError
+			if !errors.As(err, &ue) {
+				t.Fatalf("err = %v, want a usageError", err)
+			}
+			if !strings.Contains(err.Error(), "--name") {
+				t.Errorf("error does not name the flag: %v", err)
+			}
+			if out != "" {
+				t.Errorf("a rejected dry run must print no body, got %q", out)
+			}
+		})
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
