@@ -179,6 +179,47 @@ func TestPutPresignedReportsRejection(t *testing.T) {
 	}
 }
 
+// A failed PUT must not print the presigned URL: http.Client.Do and url.Parse
+// both quote it whole, its query string is the credential until it expires,
+// and its path is the object key, which carries the customer's file name.
+func TestPutPresignedErrorsCarryNoCredential(t *testing.T) {
+	fp := tempFile(t, "x")
+
+	// Closed before use, so the dial is refused.
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	base := srv.URL
+	srv.Close()
+	host := strings.TrimPrefix(base, "http://")
+
+	const query = "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=cred-secret&X-Amz-Signature=sig-secret"
+	for _, tc := range []struct {
+		name, url string
+		wantHost  bool
+	}{
+		{"transport", base + "/c0-0/api/cohort/customer-file.csv" + query, true},
+		{"unparseable", base + "/customer-file%zz.csv" + query, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := PutPresigned(context.Background(), tc.url, nil, fp)
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			for _, banned := range []string{"sig-secret", "cred-secret", "customer-file"} {
+				if strings.Contains(err.Error(), banned) {
+					t.Errorf("error leaked %q: %v", banned, err)
+				}
+			}
+			if !strings.Contains(err.Error(), "locations.csv") {
+				t.Errorf("error does not name the file: %v", err)
+			}
+			// The host is what a DNS or dial failure is about.
+			if tc.wantHost && !strings.Contains(err.Error(), host) {
+				t.Errorf("error lost the host %s: %v", host, err)
+			}
+		})
+	}
+}
+
 // A hit deadline must name the file rather than surfacing the transport's bare
 // "context deadline exceeded", which reads like a server fault. The parent
 // deadline stands in for the shipped ceiling: WithTimeout takes the earlier of
