@@ -642,15 +642,16 @@ func TestPoiTaxonomyCreatesRejectEmptyNameAndZeroParent(t *testing.T) {
 	}
 }
 
-// The three taxonomy nouns read the same way: 'poi segments list' used to be
-// the odd one out, a leaf where categories and brands were groups.
+// 'poi segments list' used to be a leaf where categories and brands were
+// groups. Checked by subcommands, not Runnable: prepareRoot gives groups a
+// RunE, so Runnable flips once any test has built the root.
 func TestPoiTaxonomyNounsAllHaveList(t *testing.T) {
 	for _, noun := range []string{"segments", "categories", "brands"} {
 		group, _, err := poiCmd.Find([]string{noun})
 		if err != nil || group.Name() != noun {
 			t.Fatalf("poi %s: %v", noun, err)
 		}
-		if group.Runnable() {
+		if !group.HasSubCommands() {
 			t.Errorf("poi %s is a leaf; want a group holding list", noun)
 		}
 		list, _, err := poiCmd.Find([]string{noun, "list"})
