@@ -115,7 +115,8 @@ func client() (*api.Client, error) {
 		}
 		return nil, err
 	}
-	if cfg.Token == "" {
+	token, _ := config.StoredToken(cfg)
+	if token == "" {
 		return nil, errors.New("not logged in - run 'intuizi auth login', or set " +
 			config.EnvToken + " for CI")
 	}
@@ -123,7 +124,7 @@ func client() (*api.Client, error) {
 		return nil, fmt.Errorf("the stored token belongs to %s, not %s - run "+
 			"'intuizi auth login --base-url %s' or set %s", stored, base, base, config.EnvToken)
 	}
-	return api.New(base, cfg.Token), nil
+	return api.New(base, token), nil
 }
 
 // trimURL makes two spellings of one host compare equal.
