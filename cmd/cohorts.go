@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -65,6 +66,9 @@ var (
 		"hem_md5", "hem_sha1", "hem_sha256",
 	}
 )
+
+// Mirrors the server rule, so a bad column costs no round trip.
+var identifierColumn = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // oneOf rejects a value outside its set, listing the set.
 func oneOf(flag, value string, allowed []string) error {
@@ -195,6 +199,10 @@ duplicate import.`,
 				body["name"] = name
 				body["file_format"] = fileFormat
 				body["identifier_type"] = idType
+				if !identifierColumn.MatchString(idColumn) {
+					return usageErr(fmt.Sprintf(
+						"--identifier-column %q may use only letters, digits, _ and -", idColumn))
+				}
 				body["identifier_column"] = idColumn
 				if flags.Changed("upload-reference") {
 					body["upload_reference"] = uploadRef
@@ -261,6 +269,9 @@ duplicate import.`,
 		"Cap the devices imported")
 	flags.IntVar(&projectID, "project-id", 0,
 		"The project to create the cohort in")
+
+	completeValues(cmd, "file-format", cohortFileFormats)
+	completeValues(cmd, "identifier-type", identifierTypes)
 
 	return cmd
 }
@@ -386,6 +397,7 @@ The whole body still works if you prefer:
 		"An upload_reference from 'intuizi uploads reserve', instead of --file-uri")
 	flags.StringVar(&fileFormat, "file-format", "",
 		"How the file is encoded: csv or gzip (parquet cannot be previewed)")
+	completeValues(cmd, "file-format", previewFileFormats)
 	return cmd
 }
 
