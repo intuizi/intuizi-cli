@@ -68,6 +68,11 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 	case 0:
 		return nil, usageErr(fmt.Sprintf("no %s match %q", what, search))
 	default:
+		// The search is a substring match, so "Example Coffee" also returns
+		// "Example Coffee Reserve". One exact label is the one that was meant.
+		if exact := exactMatches(items, search); len(exact) == 1 {
+			return catalogValue(exact[0], path)
+		}
 		// Ids too: the fix is usually to pass one.
 		var b strings.Builder
 		if pg != nil && pg.Total > len(items) {
@@ -83,6 +88,20 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 		}
 		return nil, usageErr(b.String())
 	}
+}
+
+// exactMatches returns rows whose label equals the search, ignoring case and
+// space. Duplicates return all hits, so the caller still lists them.
+func exactMatches(items []output.Record, search string) []output.Record {
+	want := strings.ToLower(strings.TrimSpace(search))
+	var hits []output.Record
+	for _, it := range items {
+		if label, ok := catalogLabel(it).(string); ok &&
+			strings.ToLower(strings.TrimSpace(label)) == want {
+			hits = append(hits, it)
+		}
+	}
+	return hits
 }
 
 // catalogID is catalogValue for a listing, where a row with no id is still
