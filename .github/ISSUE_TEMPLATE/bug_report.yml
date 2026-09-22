@@ -1,0 +1,46 @@
+name: Bug report
+description: Something the CLI did that it should not have
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `intuizi version`
+      placeholder: v0.1.3
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS 15 arm64, or Ubuntu 24.04 x86_64
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: >-
+        What you ran. Redact ids and names you would rather not publish, and
+        never paste a token or your config file: this tracker is public.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected, and what happened instead
+      description: Include the exit code if it was not 0.
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        Anything account-specific - a failing audience, a delivery that did not
+        arrive - goes to Intuizi support rather than here. This tracker is
+        public.
