@@ -449,3 +449,43 @@ func TestAudienceBodyMarshalling(t *testing.T) {
 		}
 	}
 }
+
+// The search is a substring match, so "Example Coffee" also returns "Example
+// Coffee Reserve". One exact label is the one that was meant.
+func TestResolveOnePrefersAnExactLabel(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":208,"text":"Example Coffee"},{"value":777,"text":"Example Coffee Reserve"}]}`)
+
+	got, err := resolveOne(context.Background(), c, brandsPath, "example coffee", "brands")
+	if err != nil {
+		t.Fatalf("resolveOne: %v", err)
+	}
+	raw, _ := json.Marshal(got)
+	if string(raw) != "208" {
+		t.Fatalf("resolved %s, want 208 (the exact label, not the longer one)", raw)
+	}
+}
+
+// Two rows with the same label is a catalog problem, not something to guess at.
+func TestResolveOneStillRejectsDuplicateExactLabels(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":1,"text":"Example Fuel"},{"value":2,"text":"Example Fuel"}]}`)
+
+	if _, err := resolveOne(context.Background(), c, brandsPath, "example fuel", "brands"); err == nil {
+		t.Fatal("resolveOne picked one of two identically named rows")
+	}
+}
+
+// No exact label leaves the ambiguity error intact.
+func TestResolveOneKeepsAmbiguityWithoutAnExactLabel(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":929,"text":"Example Coffee North"},{"value":921,"text":"Example Coffee South"}]}`)
+
+	_, err := resolveOne(context.Background(), c, brandsPath, "coffee", "brands")
+	if err == nil {
+		t.Fatal("resolveOne picked one of several partial matches")
+	}
+	if !strings.Contains(err.Error(), "narrow the search") {
+		t.Errorf("error changed shape: %v", err)
+	}
+}
