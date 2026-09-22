@@ -48,6 +48,20 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+  # Subjects without a prefix fall into Other, so the notes stay complete
+  # while the convention is adopted.
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Dependencies
+      regexp: '^.*?deps(\(.+\))??!?:.+$'
+      order: 2
+    - title: Other
+      order: 999
 
 release:
   prerelease: auto
