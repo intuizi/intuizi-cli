@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/intuizi/intuizi-cli/internal/api"
+	"github.com/intuizi/intuizi-cli/internal/config"
 )
 
 // The other test files build commands from their constructors, which never
@@ -68,6 +69,7 @@ func rootRun(t *testing.T, args ...string) rootResult {
 func isolate(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(config.EnvNoKeyring, "1")
 	t.Setenv("INTUIZI_API_TOKEN", "tok")
 }
 
@@ -77,6 +79,7 @@ func writeConfig(t *testing.T, body string) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv(config.EnvNoKeyring, "1")
 	t.Setenv("INTUIZI_API_TOKEN", "")
 	if err := os.MkdirAll(filepath.Join(dir, "intuizi"), 0o700); err != nil {
 		t.Fatal(err)
