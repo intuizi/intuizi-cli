@@ -250,6 +250,7 @@ func TestSchedulesCreateChecksTheNameCharacters(t *testing.T) {
 		{"colon", "weekly:refresh", false},
 		{"accented", "refréshe", false},
 		{"empty", "", false},
+		{"only spaces", "   ", false}, // passes the regex; the server's required rule trims it
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := []string{"--name", tc.value, "--audience-id", "88", "--frequency", "weekly",

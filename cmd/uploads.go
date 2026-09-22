@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -40,14 +42,17 @@ Caps are per purpose: 50 MB for poi_submission, 1 GB for cohort. A reservation
 that is never used simply expires.`,
 }
 
+// uploadPurposes is what --purpose accepts. Validation, help text and
+// completion all read it, so they cannot drift.
+var uploadPurposes = []string{"poi_submission", "cohort"}
+
 // checkPurpose fails a typo here rather than as a 422: the purpose also picks
 // the size cap, so the server cannot guess it.
 func checkPurpose(purpose string) error {
-	switch purpose {
-	case "poi_submission", "cohort":
+	if slices.Contains(uploadPurposes, purpose) {
 		return nil
 	}
-	return usageErr(fmt.Sprintf("--purpose must be poi_submission or cohort, not %q", purpose))
+	return usageErr(fmt.Sprintf("--purpose must be %s, not %q", strings.Join(uploadPurposes, " or "), purpose))
 }
 
 // reserveBody is step one, shared by 'reserve' and 'put'.
@@ -94,7 +99,7 @@ content_length must be the exact byte size of the file you will send.`,
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&purpose, "purpose", "", "What the upload is for: poi_submission or cohort")
+	flags.StringVar(&purpose, "purpose", "", "What the upload is for: "+strings.Join(uploadPurposes, " or "))
 	completeValues(cmd, "purpose", uploadPurposes)
 	flags.StringVar(&filename, "filename", "", "Original filename, used to name the stored object")
 	flags.StringVar(&contentType, "content-type", "", "MIME type the PUT will send (default text/csv)")
@@ -180,7 +185,7 @@ authorises it.`,
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&purpose, "purpose", "", "What the upload is for: poi_submission or cohort")
+	flags.StringVar(&purpose, "purpose", "", "What the upload is for: "+strings.Join(uploadPurposes, " or "))
 	completeValues(cmd, "purpose", uploadPurposes)
 	flags.StringVar(&contentType, "content-type", "", "MIME type to send (default text/csv)")
 	_ = cmd.MarkFlagRequired("purpose")

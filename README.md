@@ -54,8 +54,9 @@ API Tokens, and skip the login.
 ## Usage
 
 Every command runs from flags. Names are resolved against the reference
-catalogs, so "starbucks" works in place of an id looked up beforehand, and a
-name matching nothing or several things is an error listing what it found.
+catalogs, so "starbucks" works in place of an id looked up beforehand. A name
+that matches several things resolves when exactly one of them carries that
+exact name; otherwise nothing or several is an error listing what it found.
 `--brand-all` takes every match for a search instead, for the deliberate "all
 the coffee brands" case.
 

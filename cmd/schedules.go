@@ -154,6 +154,10 @@ duplicate schedule.`,
 			return err
 		}
 
+		// Spaces alone pass the regex, but the server's required rule trims them.
+		if err := nonEmpty("name", name); err != nil {
+			return err
+		}
 		if !scheduleName.MatchString(name) {
 			return usageErr(fmt.Sprintf(
 				"--name %q may use only letters, digits, spaces, _ and -", name))

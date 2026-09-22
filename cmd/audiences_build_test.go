@@ -476,6 +476,40 @@ func TestResolveOneStillRejectsDuplicateExactLabels(t *testing.T) {
 	}
 }
 
+// An exact label settles it only when every match came back: on one page of
+// several, its twin may be on the next.
+func TestResolveOneTrustsAnExactLabelOnlyOnACompleteResult(t *testing.T) {
+	page := func(total, lastPage int) string {
+		return `{"status":"success","code":200,"message":"ok","data":{"items":[` +
+			`{"value":1,"text":"Games"},{"value":2,"text":"Games Extra"}],` +
+			`"pagination":{"current_page":1,"per_page":2,"total":` + strconv.Itoa(total) +
+			`,"last_page":` + strconv.Itoa(lastPage) + `}}}`
+	}
+	appsCategories := referencePrefix + "apps/categories"
+
+	t.Run("partial page lists", func(t *testing.T) {
+		c, _ := catalogServer(t, page(3, 2))
+		_, err := resolveOne(context.Background(), c, appsCategories, "games", "categories")
+		if err == nil {
+			t.Fatal("resolveOne took an exact label from a partial page")
+		}
+		if !strings.Contains(err.Error(), "showing 2 of 3") {
+			t.Errorf("error does not say more matches exist: %v", err)
+		}
+	})
+
+	t.Run("complete page resolves", func(t *testing.T) {
+		c, _ := catalogServer(t, page(2, 1))
+		got, err := resolveOne(context.Background(), c, appsCategories, "games", "categories")
+		if err != nil {
+			t.Fatalf("resolveOne: %v", err)
+		}
+		if raw, _ := json.Marshal(got); string(raw) != "1" {
+			t.Fatalf("resolved %s, want 1 (the exact label)", raw)
+		}
+	})
+}
+
 // No exact label leaves the ambiguity error intact.
 func TestResolveOneKeepsAmbiguityWithoutAnExactLabel(t *testing.T) {
 	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+

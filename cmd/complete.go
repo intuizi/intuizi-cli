@@ -24,6 +24,3 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(out)
 	return out
 }
-
-// uploadPurposes matches checkPurpose.
-var uploadPurposes = []string{"cohort", "poi_submission"}
