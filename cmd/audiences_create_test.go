@@ -79,8 +79,10 @@ func firstDataset(t *testing.T, body map[string]any) map[string]any {
 // before the client is built. run cannot: it sets INTUIZI_API_TOKEN.
 func runLoggedOut(t *testing.T, cmd *cobra.Command, args ...string) error {
 	t.Helper()
+	dir := t.TempDir()
 	t.Setenv("INTUIZI_API_TOKEN", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
 	cmd.SilenceUsage = true
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
