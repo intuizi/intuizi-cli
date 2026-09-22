@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,14 +22,16 @@ const EnvToken = "INTUIZI_API_TOKEN"
 
 // Token sources, as reported by TokenSource
 const (
-	SourceNone   = ""
-	SourceEnv    = "env"
-	SourceConfig = "config"
+	SourceNone    = ""
+	SourceEnv     = "env"
+	SourceKeyring = "keyring"
+	SourceConfig  = "config"
 )
 
 type Config struct {
-	BaseURL   string `json:"base_url"`
-	Token     string `json:"token"`
+	BaseURL string `json:"base_url"`
+	// Empty when the store holds the secret: read via StoredToken.
+	Token     string `json:"token,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
@@ -63,18 +66,25 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(path)
+	// Opened, not read whole: the mode checked must be the file we read.
+	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return &Config{}, nil
 	}
 	if err != nil {
-		// The user has to find the file to fix it, so name it - once: the
-		// PathError already carries the path.
-		var pe *os.PathError
-		if errors.As(err, &pe) {
-			err = pe.Err
+		return nil, readErr(path, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if fi, serr := f.Stat(); serr == nil && fi.Mode().IsRegular() {
+		if perr := checkPerms(path, fi.Mode()); perr != nil {
+			return nil, perr
 		}
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, readErr(path, err)
 	}
 
 	var cfg Config
@@ -82,6 +92,28 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("%s is not valid JSON: %w", path, err)
 	}
 	return &cfg, nil
+}
+
+// Names the file once: the PathError already carries the path.
+func readErr(path string, err error) error {
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		err = pe.Err
+	}
+	return fmt.Errorf("reading %s: %w", path, err)
+}
+
+// Save always writes 0600, so a looser mode means something else changed it,
+// and nothing else would say so. ssh refuses a private key likewise.
+func checkPerms(path string, mode os.FileMode) error {
+	if runtime.GOOS == "windows" {
+		// No POSIX bits; the user profile's NTFS ACLs do this job.
+		return nil
+	}
+	if perm := mode.Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("%s is %04o and holds a bearer token; run: chmod 600 %s", path, perm, path)
+	}
+	return nil
 }
 
 // EnsureDir creates the config directory, owner-only. Login calls it before
@@ -103,6 +135,15 @@ func EnsureDir() error {
 // os.WriteFile's perm argument only applies when it creates the file, so it
 // cannot tighten an existing one.
 func Save(cfg *Config) error {
+	// Only the secret moves; without a store nothing changes.
+	out := *cfg
+	// Must match the key StoredToken reads, or the secret is unreachable.
+	if key := keyringKey(out.BaseURL); key != "" && out.Token != "" && keyringEnabled() &&
+		keyring.Set(keyringService, key, out.Token) == nil {
+		out.Token = ""
+	}
+	cfg = &out
+
 	path, err := Path()
 	if err != nil {
 		return err
@@ -190,6 +231,32 @@ func ValidateBaseURL(raw string) error {
 	return nil
 }
 
+// StoredToken prefers the credential store, then the file.
+func StoredToken(cfg *Config) (string, string) {
+	if cfg == nil {
+		return "", SourceNone
+	}
+	if key := keyringKey(cfg.BaseURL); key != "" && keyringEnabled() {
+		if t, err := keyring.Get(keyringService, key); err == nil && t != "" {
+			return t, SourceKeyring
+		}
+	}
+	if cfg.Token != "" {
+		return cfg.Token, SourceConfig
+	}
+	return "", SourceNone
+}
+
+// MigrateToken moves a file-held token into the credential store. Login
+// returns before Save when it reuses a token, so otherwise one never moves.
+// Best-effort: on failure it stays in the file, which still works.
+func MigrateToken(cfg *Config, from string) {
+	if cfg == nil || from != SourceConfig {
+		return
+	}
+	_ = Save(cfg)
+}
+
 // TokenSource returns the active token and where it came from, so `auth status`
 // can report the source without printing the secret. An unreadable config file
 // is reported as no token rather than an error, so every command meets one
@@ -201,10 +268,10 @@ func TokenSource() (string, string) {
 	}
 
 	cfg, err := Load()
-	if err != nil || cfg.Token == "" {
+	if err != nil {
 		return "", SourceNone
 	}
-	return cfg.Token, SourceConfig
+	return StoredToken(cfg)
 }
 
 // Token returns the active bearer token, or "" if there is none.
@@ -227,6 +294,11 @@ func ClearToken() error {
 	if err != nil {
 		return err
 	}
+	// Scoped to this console, like login: the store has no enumeration API.
+	if key := keyringKey(cfg.BaseURL); key != "" && keyringEnabled() {
+		_ = keyring.Delete(keyringService, key)
+	}
+
 	if cfg.Token == "" && cfg.ExpiresAt == "" {
 		return nil
 	}
