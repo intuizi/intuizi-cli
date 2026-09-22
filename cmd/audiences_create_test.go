@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/intuizi/intuizi-cli/internal/config"
 )
 
 // The flag-built audience, as opposed to the --file one the other tests send.
@@ -81,6 +83,7 @@ func runLoggedOut(t *testing.T, cmd *cobra.Command, args ...string) error {
 	t.Helper()
 	t.Setenv("INTUIZI_API_TOKEN", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv(config.EnvNoKeyring, "1")
 	cmd.SilenceUsage = true
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
