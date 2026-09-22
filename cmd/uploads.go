@@ -95,6 +95,7 @@ content_length must be the exact byte size of the file you will send.`,
 
 	flags := cmd.Flags()
 	flags.StringVar(&purpose, "purpose", "", "What the upload is for: poi_submission or cohort")
+	completeValues(cmd, "purpose", uploadPurposes)
 	flags.StringVar(&filename, "filename", "", "Original filename, used to name the stored object")
 	flags.StringVar(&contentType, "content-type", "", "MIME type the PUT will send (default text/csv)")
 	flags.Int64Var(&size, "content-length", 0, "Exact byte size of the file you will PUT")
@@ -180,6 +181,7 @@ authorises it.`,
 
 	flags := cmd.Flags()
 	flags.StringVar(&purpose, "purpose", "", "What the upload is for: poi_submission or cohort")
+	completeValues(cmd, "purpose", uploadPurposes)
 	flags.StringVar(&contentType, "content-type", "", "MIME type to send (default text/csv)")
 	_ = cmd.MarkFlagRequired("purpose")
 
