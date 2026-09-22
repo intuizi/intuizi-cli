@@ -54,6 +54,32 @@ leaves the terminal as it found it.
 | `--base-url` | Console base URL (default: the stored value, then production) |
 | `--idempotency-key` | Reuse one Idempotency-Key to retry a create whose outcome is unknown |
 
+### Where the token is stored
+
+`auth login` puts the token in the OS credential store when there is one: the
+macOS Keychain, Windows Credential Manager, or the Linux secret service. The
+config file keeps the base URL and the expiry either way, so `auth status` can
+still tell you when the token runs out.
+
+Containers, CI runners and SSH sessions have no credential store. There the
+token falls back to the config file, written owner-only. `auth status` says
+which of the two is in use.
+
+Entries are keyed by console, so a token minted against one base URL is never
+sent to another, and `auth logout` clears the entry for the console you are
+logged in to. To clear another, log out against it:
+
+```bash
+intuizi --base-url https://other-console auth logout
+```
+
+Set `INTUIZI_NO_KEYRING=1` to skip the credential store and keep the token in
+the config file. `INTUIZI_API_TOKEN` still takes precedence over both.
+
+The config file is refused if its permissions are looser than 0600: it holds a
+bearer token, and `auth login` always writes it owner-only, so a wider mode
+means something else changed it.
+
 ## Commands
 
 | Command | What it does |
