@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,6 +34,23 @@ var uploadHTTP = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	},
+}
+
+// withoutPresignedURL masks the path and query of the URL that http.Client.Do
+// and url.Parse quote in their errors. A presigned URL's query string is its
+// credential until it expires, and its path is the object key, which carries
+// the customer's file name. The host stays: it is what a DNS or dial failure
+// is about.
+func withoutPresignedURL(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	masked := "REDACTED"
+	if u, perr := url.Parse(ue.URL); perr == nil && u.Host != "" {
+		masked = u.Scheme + "://" + u.Host + "/REDACTED"
+	}
+	return &url.Error{Op: ue.Op, URL: masked, Err: ue.Err}
 }
 
 // "context deadline exceeded" alone reads like a server fault.
@@ -199,7 +217,7 @@ func PutPresigned(ctx context.Context, url string, headers map[string]string, fi
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, f)
 	if err != nil {
-		return err
+		return fmt.Errorf("uploading %s: %w", filepath.Base(filePath), withoutPresignedURL(err))
 	}
 	// Ours first, so a signed header of the same name would still win.
 	req.Header.Set("User-Agent", UserAgent)
@@ -215,7 +233,7 @@ func PutPresigned(ctx context.Context, url string, headers map[string]string, fi
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return timeoutErr(filePath, presignedTimeout)
 		}
-		return fmt.Errorf("uploading %s: %w", filepath.Base(filePath), err)
+		return fmt.Errorf("uploading %s: %w", filepath.Base(filePath), withoutPresignedURL(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
