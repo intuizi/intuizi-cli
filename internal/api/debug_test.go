@@ -399,6 +399,8 @@ func TestMaskedHostKeepsThePathStyleProvider(t *testing.T) {
 		{"https://storage.googleapis.com/example-bucket/k", "storage.googleapis.com"},
 		{"https://example-bucket.storage.googleapis.com/k", "REDACTED.storage.googleapis.com"},
 		{"https://127.0.0.1:8080/k", "127.0.0.1:8080"},
+		{"https://[::1]:8080/k", "[::1]:8080"},
+		{"https://example-bucket.s3.amazonaws.com:8443/k", "REDACTED.s3.amazonaws.com:8443"},
 	} {
 		u, err := url.Parse(tc.raw)
 		if err != nil {
