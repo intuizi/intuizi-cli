@@ -26,6 +26,9 @@ const (
 	SourceEnv     = "env"
 	SourceKeyring = "keyring"
 	SourceConfig  = "config"
+	// The store did not answer, unlike SourceNone which means nothing is
+	// stored. Login must not mint on a timeout.
+	SourceUnavailable = "unavailable"
 )
 
 type Config struct {
@@ -231,18 +234,30 @@ func ValidateBaseURL(raw string) error {
 	return nil
 }
 
-// StoredToken prefers the credential store, then the file.
+// StoredToken prefers the credential store, then the file. A timed-out store
+// gives SourceUnavailable, not SourceNone, or login mints a replacement for a
+// token it merely could not read.
 func StoredToken(cfg *Config) (string, string) {
 	if cfg == nil {
 		return "", SourceNone
 	}
+	timedOut := false
 	if key := keyringKey(cfg.BaseURL); key != "" && keyringEnabled() {
-		if t, err := keyring.Get(keyringService, key); err == nil && t != "" {
+		t, err := keyring.Get(keyringService, key)
+		switch {
+		case err == nil && t != "":
 			return t, SourceKeyring
+		case errors.Is(err, errKeyringTimeout):
+			// A locked keychain, not an empty one. Reported after the file,
+			// which needs no store.
+			timedOut = true
 		}
 	}
 	if cfg.Token != "" {
 		return cfg.Token, SourceConfig
+	}
+	if timedOut {
+		return "", SourceUnavailable
 	}
 	return "", SourceNone
 }
@@ -280,7 +295,9 @@ func Token() string {
 	return t
 }
 
-// ClearToken removes the stored token but keeps the file, which also holds the
+// ClearToken removes one console's token: its store entry, and the file's
+// token when the file holds that console. It reports whether there was one,
+// being the only place that looks in both, and keeps the file, which holds the
 // base URL. It does not affect EnvToken - the caller should warn when that is
 // set, since logout cannot unset the caller's environment.
 //
@@ -289,20 +306,42 @@ func Token() string {
 // may be using. Do not call it from logout. The token cleared here stays valid
 // server-side until it expires or is revoked individually at My Account > API
 // Tokens.
-func ClearToken() error {
+func ClearToken(base string) (bool, error) {
 	cfg, err := Load()
 	if err != nil {
-		return err
-	}
-	// Scoped to this console, like login: the store has no enumeration API.
-	if key := keyringKey(cfg.BaseURL); key != "" && keyringEnabled() {
-		_ = keyring.Delete(keyringService, key)
+		return false, err
 	}
 
+	had := false
+	// Scoped to one console, like login: the store has no enumeration API.
+	if key := keyringKey(base); key != "" && keyringEnabled() {
+		t, gerr := keyring.Get(keyringService, key)
+		switch {
+		case gerr == nil && t != "":
+			had = true
+		case errors.Is(gerr, errKeyringTimeout):
+			// Nothing can be removed from a store that will not answer.
+			return false, fmt.Errorf("the credential store did not answer: %w", gerr)
+		}
+		// Only when there was one: otherwise the error is noise, but after a
+		// successful read it means the token is still there.
+		if derr := keyring.Delete(keyringService, key); derr != nil && had {
+			return had, fmt.Errorf("removing the stored token: %w", derr)
+		}
+	}
+
+	// Another console's token is not ours. An empty base URL predates
+	// per-console scoping, so that one is the token being cleared.
+	if cfg.BaseURL != "" && keyringKey(cfg.BaseURL) != keyringKey(base) {
+		return had, nil
+	}
+	if cfg.Token != "" {
+		had = true
+	}
 	if cfg.Token == "" && cfg.ExpiresAt == "" {
-		return nil
+		return had, nil
 	}
 	cfg.Token = ""
 	cfg.ExpiresAt = ""
-	return Save(cfg)
+	return had, Save(cfg)
 }
