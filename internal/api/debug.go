@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Debug prints a transcript of every exchange to DebugOut, for a user to hand
@@ -35,9 +36,13 @@ var redactedHeaders = map[string]bool{
 }
 
 // By shape, not exact name: S3, Google and Azure spell these differently, and
-// an unseen spelling must not be what leaks.
+// an unseen spelling must not be what leaks. Azure's "sig" is exact: as a
+// substring it would catch ordinary names.
 func secretish(name string) bool {
 	n := strings.ToLower(name)
+	if n == "sig" {
+		return true
+	}
 	for _, s := range []string{"signature", "credential", "api-key", "apikey", "accesskey", "security-token"} {
 		if strings.Contains(n, s) {
 			return true
@@ -82,12 +87,17 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := base.RoundTrip(req)
 	took := time.Since(start).Round(time.Millisecond)
 	if err != nil {
-		// DNS, TLS, a proxy refusing: no status ever arrives.
-		_, _ = fmt.Fprintf(out, "< transport error after %s: %s\n", took, escapeDebug(err.Error()))
+		// No status ever arrives. The error names the host, which for
+		// storage is the bucket.
+		msg := err.Error()
+		if storage {
+			msg = maskStorageHost(msg, req.URL)
+		}
+		_, _ = fmt.Fprintf(out, "< transport error after %s: %s\n", took, escapeDebug(msg))
 		return resp, err
 	}
 
-	_, _ = fmt.Fprintf(out, "< %s in %s\n", resp.Status, took)
+	_, _ = fmt.Fprintf(out, "< %s in %s\n", escapeDebug(resp.Status), took)
 	writeHeaders(out, "<", resp.Header, storage)
 
 	// Counted as the caller reads: nothing buffered, and right when gzipped,
@@ -173,6 +183,44 @@ func isStorage(req *http.Request) bool {
 	return v
 }
 
+// Path-style leads with the service, not a bucket. The bucket sits in the
+// path, which is masked anyway.
+var serviceLabels = map[string]bool{"s3": true, "storage": true}
+
+// maskedHost masks the bucket: the leftmost label of a virtual-hosted host.
+// An address has none, and masking an octet prints nonsense.
+func maskedHost(u *url.URL) string {
+	host := u.Hostname()
+	if net.ParseIP(host) != nil {
+		return u.Host
+	}
+	first, rest, ok := strings.Cut(host, ".")
+	if !ok || serviceLabels[first] {
+		return u.Host
+	}
+	if port := u.Port(); port != "" {
+		return "REDACTED." + rest + ":" + port
+	}
+	return "REDACTED." + rest
+}
+
+// maskStorageHost masks the host wherever a transport error names it: DNS
+// prints the hostname, a dial the host and port.
+func maskStorageHost(msg string, u *url.URL) string {
+	if u == nil {
+		return msg
+	}
+	masked := maskedHost(u)
+	// Host first: the longer match when a port is present.
+	if u.Host != "" {
+		msg = strings.ReplaceAll(msg, u.Host, masked)
+	}
+	if h := u.Hostname(); h != "" && h != u.Host {
+		msg = strings.ReplaceAll(msg, h, strings.TrimSuffix(masked, ":"+u.Port()))
+	}
+	return msg
+}
+
 // Masks the leftmost host label (the bucket) and the path. Provider and region
 // stay: the line must still say who answered.
 func redactStorageURL(u *url.URL) string {
@@ -183,15 +231,7 @@ func redactStorageURL(u *url.URL) string {
 	if c.User != nil {
 		c.User = url.User("REDACTED")
 	}
-	// An address has no bucket label, and masking an octet prints nonsense.
-	if host := c.Hostname(); net.ParseIP(host) == nil {
-		if _, rest, ok := strings.Cut(host, "."); ok {
-			c.Host = "REDACTED." + rest
-			if port := c.Port(); port != "" {
-				c.Host += ":" + port
-			}
-		}
-	}
+	c.Host = maskedHost(u)
 	c.Path, c.RawPath = "/REDACTED", ""
 	c.RawQuery = redactRawQuery(c.RawQuery)
 	return escapeDebug(c.String())
@@ -237,7 +277,12 @@ func clip(s string) string {
 	if len(s) <= maxValue {
 		return s
 	}
-	return s[:maxValue] + fmt.Sprintf("... (%d chars)", len(s))
+	// To a rune boundary, or a split rune prints as mojibake.
+	cut := maxValue
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + fmt.Sprintf("... (%d bytes)", len(s))
 }
 
 // Bytes that would move a terminal cursor. The far end sends what it likes,
