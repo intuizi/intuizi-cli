@@ -26,6 +26,7 @@ brew install intuizi/intuizi-cli/intuizi
 npm install -g @intuizi/cli
 
 # Or download an archive from GitHub Releases and put `intuizi` on your PATH
+# (macOS: xattr -d com.apple.quarantine intuizi, or use brew/npm instead)
 ```
 
 No runtime dependencies: the CLI ships as a single static Go binary for
@@ -307,8 +308,11 @@ entirely, but the exchange fails for this repository: GitHub mints OIDC tokens
 with an immutable subject claim for repositories created after 15 July 2026,
 and the npm registry cannot yet validate that format, so it answers "package
 not found" ([npm/cli#9969](https://github.com/npm/cli/issues/9969)). The claim
-cannot be disabled. When npm fixes it, drop `registry-url` and `NODE_AUTH_TOKEN`
-from the release workflow, then revoke the token and delete the secret.
+cannot be disabled. When npm fixes it, prove the exchange first with a
+throwaway workflow running `npm publish --loglevel verbose` against an
+already-published version — two releases failed by removing the token first.
+Only then drop `registry-url` and `NODE_AUTH_TOKEN`, revoke the token and
+delete the secret.
 
 ## License
 
