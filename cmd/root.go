@@ -29,6 +29,9 @@ var jsonOutput bool
 // quietOutput is the global --quiet: ids only on stdout, one per line.
 var quietOutput bool
 
+// debugFlag is the global --debug: an HTTP transcript on stderr for support.
+var debugFlag bool
+
 // flagsParsed goes true in PersistentPreRun, which cobra reaches only once
 // flags parse: an error before that is a bad invocation, after it a real one.
 var flagsParsed bool
@@ -77,6 +80,9 @@ var rootCmd = &cobra.Command{
 			warnPlainHTTP(cmd.ErrOrStderr(), baseURLFlag)
 		}
 		api.IdempotencyKey = idempotencyKeyFlag
+		// Stderr through the command, so a test can capture the transcript.
+		api.Debug = debugFlag
+		api.DebugOut = cmd.ErrOrStderr()
 		flagsParsed = true
 		return outputFlagsConflict()
 	},
@@ -248,6 +254,11 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&idempotencyKeyFlag, "idempotency-key", "",
 		"Reuse this Idempotency-Key on create commands, to retry a create whose "+
 			"outcome is unknown (default: a fresh key per create)")
+
+	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false,
+		"Print every HTTP request and response on stderr, with credentials "+
+			"redacted. Bodies are not printed: use --json for the response "+
+			"envelope and --dry-run for the body a create would send")
 
 	rootCmd.AddCommand(versionCmd)
 }

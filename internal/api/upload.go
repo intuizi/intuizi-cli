@@ -31,6 +31,8 @@ const (
 // body, and to a cross-host Location it would hand the file to whoever answers
 // there. It surfaces as a rejection carrying its status instead.
 var uploadHTTP = &http.Client{
+	// Installed always; it is a pass-through until --debug is set.
+	Transport: newDebugTransport(),
 	CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	},
@@ -123,6 +125,8 @@ func (c *Client) newMultipartRequest(ctx context.Context, target string, fields 
 		return nil, err
 	}
 
+	debugUpload(filePath)
+
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
 
@@ -201,7 +205,7 @@ func CreateWithEnvelope[T any](ctx context.Context, c *Client, path string, body
 // headers is the set the reservation listed. Every one of them is part of the
 // signature, so all are sent; Content-Type alone defaults when absent.
 func PutPresigned(ctx context.Context, url string, headers map[string]string, filePath string) error {
-	ctx, cancel := context.WithTimeout(ctx, presignedTimeout)
+	ctx, cancel := context.WithTimeout(markStorage(ctx), presignedTimeout)
 	defer cancel()
 
 	f, err := os.Open(filePath)
@@ -214,6 +218,8 @@ func PutPresigned(ctx context.Context, url string, headers map[string]string, fi
 	if err != nil {
 		return fmt.Errorf("sizing %s: %w", filePath, err)
 	}
+
+	debugUpload(filePath)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, f)
 	if err != nil {
