@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // debugTo turns the transcript on for one test and restores the package globals
@@ -52,10 +54,9 @@ func TestDebugRedactsTheTokenAndPrintsNoBody(t *testing.T) {
 	}
 }
 
-// A presigned PUT carries no Authorization: the signature in the query string
-// is the only credential, so redacting headers alone would publish it. What
-// must NOT be redacted is everything else - S3 answers with X-Amz-Request-Id
-// and X-Amz-Id-2, which are the first thing AWS support asks for.
+// A presigned PUT carries no Authorization: the query signature is the only
+// credential, so redacting headers alone would publish it. Every x-amz-* value
+// goes too, but the names stay, so the line still says what was sent.
 func TestDebugRedactsAPresignedSignature(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Amz-Request-Id", "REQ123")
@@ -104,7 +105,7 @@ func TestDebugRedactsAPresignedSignature(t *testing.T) {
 	if !strings.Contains(got, "/REDACTED?") {
 		t.Errorf("object key not masked:\n%s", got)
 	}
-	if strings.Contains(got, "/c0-0/") {
+	if strings.Contains(got, "/obj") {
 		t.Errorf("object key survived:\n%s", got)
 	}
 }
@@ -307,7 +308,7 @@ func TestDebugClipsALongHeaderValue(t *testing.T) {
 	if strings.Contains(got, long) {
 		t.Errorf("a 900-character header was printed whole")
 	}
-	if !strings.Contains(got, "... (900 chars)") {
+	if !strings.Contains(got, "... (900 bytes)") {
 		t.Errorf("no truncation marker:\n%s", got)
 	}
 	// A short value is untouched, so a reader can tell the two apart.
@@ -355,5 +356,77 @@ func TestDebugRedactsEveryAmzHeaderValue(t *testing.T) {
 		if strings.Contains(got, banned) {
 			t.Errorf("printed %q:\n%s", banned, got)
 		}
+	}
+}
+
+// A DNS or dial failure names the host, which for storage is the bucket. The
+// other storage test uses an address, which has no label to leak.
+func TestDebugMasksTheBucketInATransportError(t *testing.T) {
+	buf := debugTo(t)
+
+	tr := &debugTransport{base: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("dial tcp: lookup %s: no such host", r.URL.Hostname())
+	})}
+	req, err := http.NewRequestWithContext(markStorage(context.Background()), http.MethodPut,
+		"https://example-bucket.s3.us-west-2.amazonaws.com/customers.csv", nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if _, err := tr.RoundTrip(req); err == nil {
+		t.Fatal("want a transport error")
+	}
+
+	got := buf.String()
+	if strings.Contains(got, "example-bucket") {
+		t.Errorf("transport error leaked the bucket:\n%s", got)
+	}
+	if !strings.Contains(got, "REDACTED.s3.us-west-2.amazonaws.com") {
+		t.Errorf("masked host missing:\n%s", got)
+	}
+}
+
+// Forces a transport failure without a real network.
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// Masking a path-style host would drop the provider the line needs to name.
+// The bucket sits in the path either way.
+func TestMaskedHostKeepsThePathStyleProvider(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"https://example-bucket.s3.us-west-2.amazonaws.com/k", "REDACTED.s3.us-west-2.amazonaws.com"},
+		{"https://s3.us-west-2.amazonaws.com/example-bucket/k", "s3.us-west-2.amazonaws.com"},
+		{"https://storage.googleapis.com/example-bucket/k", "storage.googleapis.com"},
+		{"https://example-bucket.storage.googleapis.com/k", "REDACTED.storage.googleapis.com"},
+		{"https://127.0.0.1:8080/k", "127.0.0.1:8080"},
+	} {
+		u, err := url.Parse(tc.raw)
+		if err != nil {
+			t.Fatalf("parse %s: %v", tc.raw, err)
+		}
+		if got := maskedHost(u); got != tc.want {
+			t.Errorf("maskedHost(%s) = %s, want %s", u.Host, got, tc.want)
+		}
+	}
+}
+
+// Azure spells its SAS signature "sig", which no shape matched.
+func TestSecretishCoversTheAzureSpelling(t *testing.T) {
+	if !secretish("sig") {
+		t.Error("an Azure SAS signature would reach the transcript")
+	}
+	if secretish("design") {
+		t.Error("sig matched as a substring, which would redact ordinary names")
+	}
+}
+
+// Truncating at a byte offset split runes, printing mojibake into a ticket.
+func TestClipCutsOnARuneBoundary(t *testing.T) {
+	got := clip(strings.Repeat("\u20ac", 100)) // 3 bytes each, so 200 is mid-rune
+	if !utf8.ValidString(got) {
+		t.Errorf("clip split a rune: %q", got)
+	}
+	if !strings.Contains(got, "(300 bytes)") {
+		t.Errorf("want the byte count, got %q", got)
 	}
 }
