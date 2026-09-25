@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/intuizi/intuizi-cli/internal/config"
 )
 
 // jsonRunner is one of the four shared runners that honour --json, wrapped in
@@ -48,6 +50,7 @@ func TestJSONPrintsTheErrorEnvelopeOnFailure(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("XDG_CONFIG_HOME", dir)
 			t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
+			t.Setenv(config.EnvNoKeyring, "1")
 			srv, _ := stubSeq(t, reply{status: 422, body: valEnvelope})
 
 			out, _, err := runJSON(t, r.cmd, srv)
@@ -83,6 +86,7 @@ func TestJSONPrintsNothingForANonJSONFailure(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("XDG_CONFIG_HOME", dir)
 			t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
+			t.Setenv(config.EnvNoKeyring, "1")
 			srv, _ := stubSeq(t, reply{status: 502, body: "<html>502 Bad Gateway</html>"})
 
 			out, _, err := runJSON(t, r.cmd, srv)

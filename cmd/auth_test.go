@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -29,6 +30,7 @@ func authEnv(t *testing.T, base string) string {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
+	t.Setenv(config.EnvNoKeyring, "1")
 	t.Setenv(config.EnvToken, "")
 
 	prevBase, prevTTY := baseURLFlag, stdinIsTerminal
@@ -672,5 +674,48 @@ func TestLogoutWarnsWhenEnvTokenRemains(t *testing.T) {
 	}
 	if !strings.Contains(errb, config.EnvToken) || !strings.Contains(errb, "still set") {
 		t.Errorf("stderr = %q, want a warning that %s is still set", errb, config.EnvToken)
+	}
+}
+
+// The warning belongs on stderr: stdout is what a script reads.
+func TestAuthStatusWarnsNearExpiry(t *testing.T) {
+	for _, tc := range []struct {
+		name, expires string
+		wantStderr    string
+	}{
+		// An hour of slack: int(hours/24) truncates to 9 otherwise. formatExpiry
+		// truncates the same way, so the two lines agree.
+		{"expiring soon", time.Now().Add(10*24*time.Hour + time.Hour).Format(time.RFC3339), "expires in 10 days"},
+		{"already expired", time.Now().Add(-24 * time.Hour).Format(time.RFC3339), "expired on"},
+		{"plenty of time", time.Now().Add(100 * 24 * time.Hour).Format(time.RFC3339), ""},
+		{"no expiry recorded", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := fakeConsole(t, "tok", 200)
+			path := authEnv(t, srv.URL)
+			cfg := `{"base_url":"` + srv.URL + `","token":"stored"`
+			if tc.expires != "" {
+				cfg += `,"expires_at":"` + tc.expires + `"`
+			}
+			storeAuthConfigBytes(t, path, cfg+"}")
+
+			out, errb, err := runAuth(t, authStatusCommand(), "")
+			if err != nil {
+				t.Fatalf("status: %v", err)
+			}
+			if tc.wantStderr == "" {
+				if strings.Contains(errb, "Warning: this token") {
+					t.Errorf("warned when it should not:\n%s", errb)
+				}
+				return
+			}
+			if !strings.Contains(errb, tc.wantStderr) {
+				t.Errorf("stderr missing %q:\n%s", tc.wantStderr, errb)
+			}
+			// Never stdout, or --quiet and --json stop composing.
+			if strings.Contains(out, "Warning") {
+				t.Errorf("warning reached stdout:\n%s", out)
+			}
+		})
 	}
 }

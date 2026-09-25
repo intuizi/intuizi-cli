@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,14 +22,19 @@ const EnvToken = "INTUIZI_API_TOKEN"
 
 // Token sources, as reported by TokenSource
 const (
-	SourceNone   = ""
-	SourceEnv    = "env"
-	SourceConfig = "config"
+	SourceNone    = ""
+	SourceEnv     = "env"
+	SourceKeyring = "keyring"
+	SourceConfig  = "config"
+	// The store did not answer, unlike SourceNone which means nothing is
+	// stored. Login must not mint on a timeout.
+	SourceUnavailable = "unavailable"
 )
 
 type Config struct {
-	BaseURL   string `json:"base_url"`
-	Token     string `json:"token"`
+	BaseURL string `json:"base_url"`
+	// Empty when the store holds the secret: read via StoredToken.
+	Token     string `json:"token,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
@@ -63,18 +69,25 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(path)
+	// Opened, not read whole: the mode checked must be the file we read.
+	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return &Config{}, nil
 	}
 	if err != nil {
-		// The user has to find the file to fix it, so name it - once: the
-		// PathError already carries the path.
-		var pe *os.PathError
-		if errors.As(err, &pe) {
-			err = pe.Err
+		return nil, readErr(path, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if fi, serr := f.Stat(); serr == nil && fi.Mode().IsRegular() {
+		if perr := checkPerms(path, fi.Mode()); perr != nil {
+			return nil, perr
 		}
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, readErr(path, err)
 	}
 
 	var cfg Config
@@ -82,6 +95,28 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("%s is not valid JSON: %w", path, err)
 	}
 	return &cfg, nil
+}
+
+// Names the file once: the PathError already carries the path.
+func readErr(path string, err error) error {
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		err = pe.Err
+	}
+	return fmt.Errorf("reading %s: %w", path, err)
+}
+
+// Save always writes 0600, so a looser mode means something else changed it,
+// and nothing else would say so. ssh refuses a private key likewise.
+func checkPerms(path string, mode os.FileMode) error {
+	if runtime.GOOS == "windows" {
+		// No POSIX bits; the user profile's NTFS ACLs do this job.
+		return nil
+	}
+	if perm := mode.Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("%s is %04o and holds a bearer token; run: chmod 600 %s", path, perm, path)
+	}
+	return nil
 }
 
 // EnsureDir creates the config directory, owner-only. Login calls it before
@@ -103,6 +138,15 @@ func EnsureDir() error {
 // os.WriteFile's perm argument only applies when it creates the file, so it
 // cannot tighten an existing one.
 func Save(cfg *Config) error {
+	// Only the secret moves; without a store nothing changes.
+	out := *cfg
+	// Must match the key StoredToken reads, or the secret is unreachable.
+	if key := keyringKey(out.BaseURL); key != "" && out.Token != "" && keyringEnabled() &&
+		keyring.Set(keyringService, key, out.Token) == nil {
+		out.Token = ""
+	}
+	cfg = &out
+
 	path, err := Path()
 	if err != nil {
 		return err
@@ -190,6 +234,44 @@ func ValidateBaseURL(raw string) error {
 	return nil
 }
 
+// StoredToken prefers the credential store, then the file. A timed-out store
+// gives SourceUnavailable, not SourceNone, or login mints a replacement for a
+// token it merely could not read.
+func StoredToken(cfg *Config) (string, string) {
+	if cfg == nil {
+		return "", SourceNone
+	}
+	timedOut := false
+	if key := keyringKey(cfg.BaseURL); key != "" && keyringEnabled() {
+		t, err := keyring.Get(keyringService, key)
+		switch {
+		case err == nil && t != "":
+			return t, SourceKeyring
+		case errors.Is(err, errKeyringTimeout):
+			// A locked keychain, not an empty one. Reported after the file,
+			// which needs no store.
+			timedOut = true
+		}
+	}
+	if cfg.Token != "" {
+		return cfg.Token, SourceConfig
+	}
+	if timedOut {
+		return "", SourceUnavailable
+	}
+	return "", SourceNone
+}
+
+// MigrateToken moves a file-held token into the credential store. Login
+// returns before Save when it reuses a token, so otherwise one never moves.
+// Best-effort: on failure it stays in the file, which still works.
+func MigrateToken(cfg *Config, from string) {
+	if cfg == nil || from != SourceConfig {
+		return
+	}
+	_ = Save(cfg)
+}
+
 // TokenSource returns the active token and where it came from, so `auth status`
 // can report the source without printing the secret. An unreadable config file
 // is reported as no token rather than an error, so every command meets one
@@ -201,10 +283,10 @@ func TokenSource() (string, string) {
 	}
 
 	cfg, err := Load()
-	if err != nil || cfg.Token == "" {
+	if err != nil {
 		return "", SourceNone
 	}
-	return cfg.Token, SourceConfig
+	return StoredToken(cfg)
 }
 
 // Token returns the active bearer token, or "" if there is none.
@@ -213,7 +295,9 @@ func Token() string {
 	return t
 }
 
-// ClearToken removes the stored token but keeps the file, which also holds the
+// ClearToken removes one console's token: its store entry, and the file's
+// token when the file holds that console. It reports whether there was one,
+// being the only place that looks in both, and keeps the file, which holds the
 // base URL. It does not affect EnvToken - the caller should warn when that is
 // set, since logout cannot unset the caller's environment.
 //
@@ -222,15 +306,42 @@ func Token() string {
 // may be using. Do not call it from logout. The token cleared here stays valid
 // server-side until it expires or is revoked individually at My Account > API
 // Tokens.
-func ClearToken() error {
+func ClearToken(base string) (bool, error) {
 	cfg, err := Load()
 	if err != nil {
-		return err
+		return false, err
+	}
+
+	had := false
+	// Scoped to one console, like login: the store has no enumeration API.
+	if key := keyringKey(base); key != "" && keyringEnabled() {
+		t, gerr := keyring.Get(keyringService, key)
+		switch {
+		case gerr == nil && t != "":
+			had = true
+		case errors.Is(gerr, errKeyringTimeout):
+			// Nothing can be removed from a store that will not answer.
+			return false, fmt.Errorf("the credential store did not answer: %w", gerr)
+		}
+		// Only when there was one: otherwise the error is noise, but after a
+		// successful read it means the token is still there.
+		if derr := keyring.Delete(keyringService, key); derr != nil && had {
+			return had, fmt.Errorf("removing the stored token: %w", derr)
+		}
+	}
+
+	// Another console's token is not ours. An empty base URL predates
+	// per-console scoping, so that one is the token being cleared.
+	if cfg.BaseURL != "" && keyringKey(cfg.BaseURL) != keyringKey(base) {
+		return had, nil
+	}
+	if cfg.Token != "" {
+		had = true
 	}
 	if cfg.Token == "" && cfg.ExpiresAt == "" {
-		return nil
+		return had, nil
 	}
 	cfg.Token = ""
 	cfg.ExpiresAt = ""
-	return Save(cfg)
+	return had, Save(cfg)
 }
