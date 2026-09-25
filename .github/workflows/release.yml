@@ -112,8 +112,9 @@ jobs:
     # GitHub's immutable subject claim, which the npm registry cannot validate,
     # so the exchange is refused with "package not found" (npm/cli#9969). This
     # repository was created on 20 July 2026 and the claim cannot be turned
-    # off. Until npm fixes it, publishing uses the NPM_TOKEN secret. Delete the
-    # token, the secret and this paragraph once the exchange succeeds.
+    # off. Until npm fixes it, publishing uses the NPM_TOKEN secret, which
+    # expires on 17 December 2026. Delete the token, the secret and this
+    # paragraph once the exchange succeeds.
     permissions:
       contents: read
       id-token: write
