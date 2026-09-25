@@ -211,11 +211,14 @@ func maskStorageHost(msg string, u *url.URL) string {
 		return msg
 	}
 	masked := maskedHost(u)
-	// Host first: the longer match when a port is present.
-	if u.Host != "" {
-		msg = strings.ReplaceAll(msg, u.Host, masked)
+	if masked == u.Host {
+		// An address, or path-style: nothing to mask, and an IPv6 host
+		// would gain a second pair of brackets.
+		return msg
 	}
-	if h := u.Hostname(); h != "" && h != u.Host {
+	// Host first: the longer match when a port is present.
+	msg = strings.ReplaceAll(msg, u.Host, masked)
+	if h := u.Hostname(); h != u.Host {
 		msg = strings.ReplaceAll(msg, h, strings.TrimSuffix(masked, ":"+u.Port()))
 	}
 	return msg
@@ -231,7 +234,7 @@ func redactStorageURL(u *url.URL) string {
 	if c.User != nil {
 		c.User = url.User("REDACTED")
 	}
-	c.Host = maskedHost(u)
+	c.Host = maskedHost(&c)
 	c.Path, c.RawPath = "/REDACTED", ""
 	c.RawQuery = redactRawQuery(c.RawQuery)
 	return escapeDebug(c.String())
