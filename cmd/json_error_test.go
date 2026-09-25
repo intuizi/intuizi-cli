@@ -47,7 +47,9 @@ func jsonRunners() []jsonRunner {
 func TestJSONPrintsTheErrorEnvelopeOnFailure(t *testing.T) {
 	for _, r := range jsonRunners() {
 		t.Run(r.name, func(t *testing.T) {
-			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			dir := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", dir)
+			t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
 			t.Setenv(config.EnvNoKeyring, "1")
 			srv, _ := stubSeq(t, reply{status: 422, body: valEnvelope})
 
@@ -81,7 +83,9 @@ func TestJSONPrintsTheErrorEnvelopeOnFailure(t *testing.T) {
 func TestJSONPrintsNothingForANonJSONFailure(t *testing.T) {
 	for _, r := range jsonRunners() {
 		t.Run(r.name, func(t *testing.T) {
-			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			dir := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", dir)
+			t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
 			t.Setenv(config.EnvNoKeyring, "1")
 			srv, _ := stubSeq(t, reply{status: 502, body: "<html>502 Bad Gateway</html>"})
 

@@ -54,8 +54,9 @@ API Tokens, and skip the login.
 ## Usage
 
 Every command runs from flags. Names are resolved against the reference
-catalogs, so "starbucks" works in place of an id looked up beforehand, and a
-name matching nothing or several things is an error listing what it found.
+catalogs, so "starbucks" works in place of an id looked up beforehand. A name
+that matches several things resolves when exactly one of them carries that
+exact name; otherwise nothing or several is an error listing what it found.
 `--brand-all` takes every match for a search instead, for the deliberate "all
 the coffee brands" case.
 
@@ -235,8 +236,9 @@ order:
 2. **release**: goreleaser cross-compiles six binaries (darwin, linux and
    windows, each amd64 and arm64), packages them with a checksums file,
    attaches signed build provenance to every archive (verify a download with
-   `gh attestation verify <file> --repo intuizi/intuizi-cli`), publishes a
-   GitHub Release, and commits the Homebrew formula to
+   `gh attestation verify <file> --repo intuizi/intuizi-cli`) and an SPDX
+   SBOM, `<archive>.sbom.json`, publishes a GitHub Release, and commits the
+   Homebrew formula to
    [`intuizi/homebrew-intuizi-cli`](https://github.com/intuizi/homebrew-intuizi-cli).
    The push uses an SSH deploy key stored as the `HOMEBREW_TAP_DEPLOY_KEY`
    secret; it can write to that one repository and nothing else. A prerelease
@@ -250,6 +252,25 @@ order:
    version is published under the `next` dist-tag, never `latest`. The job is
    idempotent, so re-running it after a partial publish finishes the set.
 
+#### Before tagging
+
+Run the live test against a test console. It is a manual gate: an unattended
+job would need a credential in CI, and a test console carries whatever branch
+is deployed to it, so a schedule would fail on other people's half-finished
+work rather than on real API drift.
+
+```bash
+make build
+./bin/intuizi --base-url https://TEST-CONSOLE auth login
+scripts/live-test.sh https://TEST-CONSOLE
+```
+
+It exercises every command group end to end and cleans up after itself, writing
+a pass/fail summary to `live-results/results.md` (gitignored — real API
+responses). Activations stay at `--dry-run`, so `activations show`/`delete` are
+not covered. A non-zero exit means do not tag. You need an account on the
+environment you test against; each has its own database.
+
 Configuration is in `.goreleaser.yaml` and `npm/`. To cut a release:
 
 ```bash
@@ -259,7 +280,8 @@ git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
 Then run the manual `brew-smoke` workflow, which installs the formula on clean
 macOS and Linux runners and checks the reported version.
 
-Test the packaging locally without publishing anything:
+Test the packaging locally without publishing anything. Needs syft on PATH,
+which the snapshot shells out to for the SBOMs (`brew install syft`):
 
 ```bash
 goreleaser release --snapshot --clean      # binaries, archives, dist/homebrew/Formula/intuizi.rb
