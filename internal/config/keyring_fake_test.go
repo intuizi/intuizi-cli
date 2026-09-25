@@ -5,9 +5,11 @@ import "sync"
 // Stands in for the OS store: the real one would prompt on macOS and write
 // into the CI runner's.
 type fakeKeyring struct {
-	mu   sync.Mutex
-	data map[string]string
-	fail bool // simulates a machine with no credential store
+	mu         sync.Mutex
+	data       map[string]string
+	fail       bool  // simulates a machine with no credential store
+	failDelete bool  // simulates a store that reads but will not delete
+	getErr     error // Get returns this, for the timeout the fake cannot reach
 }
 
 func newFakeKeyring() *fakeKeyring { return &fakeKeyring{data: map[string]string{}} }
@@ -15,6 +17,9 @@ func newFakeKeyring() *fakeKeyring { return &fakeKeyring{data: map[string]string
 func (f *fakeKeyring) Get(service, key string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.getErr != nil {
+		return "", f.getErr
+	}
 	if f.fail {
 		return "", errNoStore
 	}
@@ -38,6 +43,9 @@ func (f *fakeKeyring) Set(service, key, secret string) error {
 func (f *fakeKeyring) Delete(service, key string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.fail || f.failDelete {
+		return errNoStore
+	}
 	delete(f.data, service+"\x00"+key)
 	return nil
 }
