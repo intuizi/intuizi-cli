@@ -345,7 +345,7 @@ func TestClearTokenKeepsBaseURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken("https://staging.example.com"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -368,16 +368,16 @@ func TestClearTokenKeepsBaseURL(t *testing.T) {
 func TestClearTokenIsIdempotent(t *testing.T) {
 	isolate(t)
 
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken(""); err != nil {
 		t.Fatalf("clearing with no config at all: %v", err)
 	}
 	if err := Save(&Config{Token: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken(""); err != nil {
 		t.Fatalf("first clear: %v", err)
 	}
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken(""); err != nil {
 		t.Fatalf("second clear: %v", err)
 	}
 }
@@ -391,7 +391,7 @@ func TestClearTokenDoesNotContactTheServer(t *testing.T) {
 	if err := Save(&Config{BaseURL: "https://unreachable.invalid", Token: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken("https://unreachable.invalid"); err != nil {
 		t.Fatalf("logout must work without network access: %v", err)
 	}
 }
@@ -566,7 +566,7 @@ func TestClearTokenEmptiesTheStoreToo(t *testing.T) {
 		t.Fatal("setup: nothing stored")
 	}
 
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken("https://example.com"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -649,5 +649,188 @@ func TestMigrateTokenIsANoOpFromTheStore(t *testing.T) {
 
 	if after := readStoredJSON(t); len(after) != len(before) {
 		t.Fatalf("file changed: %v -> %v", before, after)
+	}
+}
+
+// The bug: ClearToken keyed off the file's base URL, so logging out of A
+// deleted B's entry and reported success.
+func TestClearTokenScopedToTheRequestedConsole(t *testing.T) {
+	isolate(t)
+	const a, b = "https://a.example.com", "https://b.example.com"
+
+	if err := Save(&Config{BaseURL: a, Token: "token-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(&Config{BaseURL: b, Token: "token-b"}); err != nil {
+		t.Fatal(err)
+	}
+
+	had, err := ClearToken(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !had {
+		t.Error("reported nothing to remove, but A had a token")
+	}
+
+	if tok, _ := StoredToken(&Config{BaseURL: a}); tok != "" {
+		t.Errorf("A survived logout: %q", tok)
+	}
+	if tok, _ := StoredToken(&Config{BaseURL: b}); tok != "token-b" {
+		t.Errorf("B was cleared by logging out of A: %q", tok)
+	}
+}
+
+// The file holds B; logging out of A must not blank it.
+func TestClearTokenLeavesAnotherConsolesFileToken(t *testing.T) {
+	isolate(t)
+	t.Setenv(EnvNoKeyring, "1") // no store, so the token stays in the file
+	if err := Save(&Config{BaseURL: "https://b.example.com", Token: "token-b"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ClearToken("https://a.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "token-b" {
+		t.Errorf("file token cleared by another console's logout: %q", cfg.Token)
+	}
+}
+
+// A file with no base URL predates per-console scoping; logout must still work.
+func TestClearTokenClearsALegacyFile(t *testing.T) {
+	isolate(t)
+	if err := Save(&Config{Token: "legacy"}); err != nil {
+		t.Fatal(err)
+	}
+	had, err := ClearToken(DefaultBaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !had {
+		t.Error("reported nothing to remove")
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "" {
+		t.Errorf("legacy token not cleared: %q", cfg.Token)
+	}
+}
+
+// A delete that fails leaves the token in the store, so logout must not report
+// success. With nothing stored, a delete error is noise and is ignored.
+func TestClearTokenReportsAFailedDelete(t *testing.T) {
+	const base = "https://a.example.com"
+
+	t.Run("token present", func(t *testing.T) {
+		isolate(t)
+		if err := Save(&Config{BaseURL: base, Token: "tok"}); err != nil {
+			t.Fatal(err)
+		}
+		fakeKeyringFor(t).failDelete = true // the read still works
+
+		if _, err := ClearToken(base); err == nil {
+			t.Error("a failed delete was reported as a successful logout")
+		}
+	})
+
+	t.Run("nothing stored", func(t *testing.T) {
+		isolate(t)
+		fakeKeyringFor(t).fail = true
+
+		had, err := ClearToken(base)
+		if err != nil {
+			t.Errorf("no store is not a logout failure: %v", err)
+		}
+		if had {
+			t.Error("reported a removal with nothing stored")
+		}
+	})
+}
+
+// A failed store delete must not blank the file too: partial cleanup loses one
+// token and leaves the other.
+func TestClearTokenLeavesTheFileOnAFailedDelete(t *testing.T) {
+	const base = "https://a.example.com"
+	isolate(t)
+	f := fakeKeyringFor(t)
+	if err := Save(&Config{BaseURL: base, Token: "in-store"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvNoKeyring, "1")
+	if err := Save(&Config{BaseURL: base, Token: "in-file"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvNoKeyring, "")
+	f.failDelete = true
+
+	if _, err := ClearToken(base); err == nil {
+		t.Fatal("a failed delete was reported as success")
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "in-file" {
+		t.Errorf("file token changed despite the failure: %q", cfg.Token)
+	}
+}
+
+// A locked keychain is not an empty one. Reported as SourceNone, login mints a
+// replacement and spends one of the ten slots.
+func TestStoredTokenReportsAStoreTimeout(t *testing.T) {
+	const base = "https://a.example.com"
+	isolate(t)
+	if err := Save(&Config{BaseURL: base, Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	fakeKeyringFor(t).getErr = errKeyringTimeout
+
+	tok, src := StoredToken(&Config{BaseURL: base})
+	if tok != "" {
+		t.Errorf("token = %q, want empty", tok)
+	}
+	if src != SourceUnavailable {
+		t.Errorf("source = %q, want %q", src, SourceUnavailable)
+	}
+}
+
+// The file needs no store, so a timeout must not hide a usable token.
+func TestStoredTokenPrefersTheFileOverATimeout(t *testing.T) {
+	const base = "https://a.example.com"
+	isolate(t)
+	t.Setenv(EnvNoKeyring, "1")
+	if err := Save(&Config{BaseURL: base, Token: "from-file"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvNoKeyring, "")
+	fakeKeyringFor(t).getErr = errKeyringTimeout
+
+	tok, src := StoredToken(&Config{BaseURL: base, Token: "from-file"})
+	if tok != "from-file" || src != SourceConfig {
+		t.Errorf("got (%q, %q), want (from-file, %q)", tok, src, SourceConfig)
+	}
+}
+
+// Nothing can be removed from a store that will not answer.
+func TestClearTokenReportsAStoreTimeout(t *testing.T) {
+	const base = "https://a.example.com"
+	isolate(t)
+	if err := Save(&Config{BaseURL: base, Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	fakeKeyringFor(t).getErr = errKeyringTimeout
+
+	had, err := ClearToken(base)
+	if err == nil {
+		t.Error("a timed-out store was reported as a successful logout")
+	}
+	if had {
+		t.Error("claimed to have removed a token it could not read")
 	}
 }
