@@ -38,9 +38,10 @@ base URL alongside it. `auth login` reuses a stored token that still works for
 the same console, since accounts are capped at 10 active tokens; logging in
 with a different `--base-url` mints a new token there and replaces the stored
 base URL and token together. The file and its directory are checked before
-anything is minted, so a corrupt file or an unwritable directory fails without
-spending a token slot, and `auth login`, `auth status` and `auth logout` all
-name the file when it cannot be read. `auth status --verify` makes one request
+anything is minted, so a corrupt file, an unwritable directory or a credential
+store that does not answer fails without spending a token slot, and `auth
+login`, `auth status` and `auth logout` all name the file when it cannot be
+read. `auth status --verify` makes one request
 to confirm the token is still accepted. Login and logout print commentary on
 stderr; only `auth status` writes to stdout. Ctrl-C at a prompt exits 130 and
 leaves the terminal as it found it.
