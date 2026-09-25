@@ -362,3 +362,22 @@ func TestPlainHTTPBaseURLWarns(t *testing.T) {
 		})
 	}
 }
+
+// login, client and status all treat a silent store the same way: a locked
+// keychain is not a missing token, and minting on one costs a slot.
+func TestStoreUnavailable(t *testing.T) {
+	for _, src := range []string{config.SourceNone, config.SourceEnv, config.SourceKeyring, config.SourceConfig} {
+		if err := storeUnavailable(src); err != nil {
+			t.Errorf("source %q: unexpected error %v", src, err)
+		}
+	}
+	err := storeUnavailable(config.SourceUnavailable)
+	if err == nil {
+		t.Fatal("a silent store was not reported")
+	}
+	for _, want := range []string{"did not answer", "unlock it", config.EnvNoKeyring} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message omits %q: %v", want, err)
+		}
+	}
+}
