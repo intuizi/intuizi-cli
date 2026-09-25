@@ -108,6 +108,11 @@ func login(cmd *cobra.Command, email, password string) error {
 	// Accounts cap at 10 active tokens and logout doesn't revoke, so don't
 	// mint another when a working one is already stored for this console.
 	stored, from := config.StoredToken(cfg)
+	// Not "no token": minting on a locked keychain spends one of the ten
+	// slots, and logout cannot give it back.
+	if err := storeUnavailable(from); err != nil {
+		return err
+	}
 	if storedTokenUsable(ctx, cfg, stored, base) {
 		config.MigrateToken(cfg, from)
 		_, _ = fmt.Fprintf(stderr, "Already logged in to %s\n", base)
@@ -353,6 +358,9 @@ func status(cmd *cobra.Command, verify bool) error {
 			_, _ = fmt.Fprintf(stdout, "Expires:  %s\n", exp)
 		}
 		warnNearExpiry(cmd.ErrOrStderr(), cfg.ExpiresAt)
+	case config.SourceUnavailable:
+		_, _ = fmt.Fprintln(stdout, "Token:    unknown (the credential store did not answer)")
+		return storeUnavailable(source)
 	default:
 		_, _ = fmt.Fprintln(stdout, "Token:    none")
 		return errors.New("not logged in - run 'intuizi auth login'")
@@ -387,14 +395,9 @@ func authLogoutCommand() *cobra.Command {
 func logout(cmd *cobra.Command, _ []string) error {
 	stderr := cmd.ErrOrStderr()
 
-	cfg, err := config.Load()
+	// The console asked for, not whichever the file happens to hold.
+	had, err := config.ClearToken(config.BaseURL(baseURLFlag))
 	if err != nil {
-		return err
-	}
-	token, _ := config.StoredToken(cfg)
-	had := token != ""
-
-	if err := config.ClearToken(); err != nil {
 		return err
 	}
 
