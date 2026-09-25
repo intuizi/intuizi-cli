@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/intuizi/intuizi-cli/internal/config"
 )
 
 // The flag-built audience, as opposed to the --file one the other tests send.
@@ -79,8 +81,11 @@ func firstDataset(t *testing.T, body map[string]any) map[string]any {
 // before the client is built. run cannot: it sets INTUIZI_API_TOKEN.
 func runLoggedOut(t *testing.T, cmd *cobra.Command, args ...string) error {
 	t.Helper()
+	dir := t.TempDir()
 	t.Setenv("INTUIZI_API_TOKEN", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
+	t.Setenv(config.EnvNoKeyring, "1")
 	cmd.SilenceUsage = true
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)

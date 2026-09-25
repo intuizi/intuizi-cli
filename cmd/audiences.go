@@ -264,6 +264,7 @@ duplicate.`,
 		"Dataset type, case-insensitive: poi, apps, webdomain, ctv, cohorts,\n"+
 			"affinitytransactions, demographics, deidentified or profileattributes")
 	f.StringVar(&name, "name", "", "Name for the audience")
+	completeValues(cmd, "type", sortedKeys(datasetTypes))
 	f.StringVar(&startDate, "start-date", "", "First day of the window, YYYY-MM-DD")
 	f.StringVar(&endDate, "end-date", "", "Last day of the window, YYYY-MM-DD")
 	// StringArray, not StringSlice: a city name may contain a comma.
@@ -551,6 +552,7 @@ Requires the Lookalike capability; a 403 means it is not enabled.`,
 		"Device count to aim for (capped at 4,000,000)")
 	f.StringArrayVar(&signals, "signal", nil,
 		"Data family to learn from (repeat the flag for more than one)")
+	completeValues(cmd, "signal", sortedKeys(lookalikeSignals))
 	f.StringArrayVar(&countries, "country", nil,
 		"Country code, ISO-3 (repeat the flag for more than one)")
 	f.StringArrayVar(&states, "state", nil,

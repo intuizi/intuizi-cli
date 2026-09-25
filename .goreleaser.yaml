@@ -35,6 +35,12 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# One SPDX document per archive. Provenance says who built the binary; this
+# says what is in it, so a CVE question needs no unpacking.
+sboms:
+  - id: archive
+    artifacts: archive
+
 changelog:
   use: github
   sort: asc
@@ -42,6 +48,21 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+  # Subjects without a prefix fall into Other, so the notes stay complete
+  # while the convention is adopted. The match is against the bare subject,
+  # like the filters above, so the prefix is anchored: "prefix: ..." is not a fix.
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:.+$'
+      order: 1
+    - title: Dependencies
+      regexp: '^deps(\(.+\))?!?:.+$'
+      order: 2
+    - title: Other
+      order: 999
 
 release:
   prerelease: auto

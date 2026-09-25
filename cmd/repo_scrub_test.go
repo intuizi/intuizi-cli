@@ -36,7 +36,7 @@ func TestRepositoryNamesNothingInternal(t *testing.T) {
 	// company domain is a person, and people do not belong in a public repo.
 	allowed := regexp.MustCompile(`(?i)(noreply|security)@intuizi\.com`)
 
-	skipDir := map[string]bool{".git": true, "bin": true, "dist": true, "node_modules": true}
+	skipDir := map[string]bool{".git": true, "bin": true, "dist": true, "node_modules": true, "live-results": true}
 
 	root := ".." // tests run in the package directory
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {

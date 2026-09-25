@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -71,6 +72,9 @@ var scheduleFields = []string{
 }
 
 var scheduleRequired = []string{"name", "audience-id", "start", "timezone", "frequency", "window"}
+
+// Mirrors the server rule, so a rejected name costs no round trip.
+var scheduleName = regexp.MustCompile(`^[a-zA-Z0-9_\- ]+$`)
 
 // scheduleFrequencies are the catalog's values: lowercase, unlike the labels
 // the console shows.
@@ -148,6 +152,15 @@ duplicate schedule.`,
 		}
 		if err := positiveID(flags, "project-id", projectID); err != nil {
 			return err
+		}
+
+		// Spaces alone pass the regex, but the server's required rule trims them.
+		if err := nonEmpty("name", name); err != nil {
+			return err
+		}
+		if !scheduleName.MatchString(name) {
+			return usageErr(fmt.Sprintf(
+				"--name %q may use only letters, digits, spaces, _ and -", name))
 		}
 
 		freq, ok := scheduleFrequencies[strings.ToLower(frequency)]
@@ -265,6 +278,8 @@ duplicate schedule.`,
 	f.IntVar(&ending, "ending", 1,
 		"Stop rule from 'reference common schedule-endings': 1 Never, 2 Recurrences, 3 Custom Date")
 	f.IntVar(&after, "after-recurrences", 0, "Number of runs before stopping (--ending 2)")
+
+	completeValues(cmd, "frequency", sortedKeys(scheduleFrequencies))
 	f.StringVar(&endDate, "end-date", "", "Last run date, YYYY-MM-DD (--ending 3)")
 	return cmd
 }

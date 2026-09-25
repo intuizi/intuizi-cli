@@ -38,9 +38,10 @@ base URL alongside it. `auth login` reuses a stored token that still works for
 the same console, since accounts are capped at 10 active tokens; logging in
 with a different `--base-url` mints a new token there and replaces the stored
 base URL and token together. The file and its directory are checked before
-anything is minted, so a corrupt file or an unwritable directory fails without
-spending a token slot, and `auth login`, `auth status` and `auth logout` all
-name the file when it cannot be read. `auth status --verify` makes one request
+anything is minted, so a corrupt file, an unwritable directory or a credential
+store that does not answer fails without spending a token slot, and `auth
+login`, `auth status` and `auth logout` all name the file when it cannot be
+read. `auth status --verify` makes one request
 to confirm the token is still accepted. Login and logout print commentary on
 stderr; only `auth status` writes to stdout. Ctrl-C at a prompt exits 130 and
 leaves the terminal as it found it.
@@ -77,6 +78,32 @@ command does.
 A transcript is still safe to read before sending it on: it names the host, the
 path and any search terms you passed.
 
+### Where the token is stored
+
+`auth login` puts the token in the OS credential store when there is one: the
+macOS Keychain, Windows Credential Manager, or the Linux secret service. The
+config file keeps the base URL and the expiry either way, so `auth status` can
+still tell you when the token runs out.
+
+Containers, CI runners and SSH sessions have no credential store. There the
+token falls back to the config file, written owner-only. `auth status` says
+which of the two is in use.
+
+Entries are keyed by console, so a token minted against one base URL is never
+sent to another, and `auth logout` clears the entry for the console you are
+logged in to. To clear another, log out against it:
+
+```bash
+intuizi --base-url https://other-console auth logout
+```
+
+Set `INTUIZI_NO_KEYRING=1` to skip the credential store and keep the token in
+the config file. `INTUIZI_API_TOKEN` still takes precedence over both.
+
+The config file is refused if its permissions are looser than 0600: it holds a
+bearer token, and `auth login` always writes it owner-only, so a wider mode
+means something else changed it.
+
 ## Commands
 
 | Command | What it does |
@@ -108,8 +135,12 @@ Two habits make this safe:
   reads the catalogs to resolve names, so it needs a token and counts against
   the read budget; it cannot be combined with `--wait`.
 - **Names resolve, ids do not.** A name is looked up and must match exactly one
-  entry; zero or several is an error listing what was found, with ids to copy
-  from. A numeric value is taken as the id and passed through unchecked, so a
+  entry. The lookup matches substrings, so when several come back and exactly
+  one is labelled with the name itself, ignoring case, that one is taken:
+  `Example Coffee` resolves even though `Example Coffee Reserve` also matches.
+  Otherwise zero or several is an error listing what was found, with ids to
+  copy from, and so is an exact label on a result too long to arrive in one
+  page. A numeric value is taken as the id and passed through unchecked, so a
   wrong number is not caught.
 
 The global output flags work on creates as well as reads. `--json` prints the
@@ -447,7 +478,7 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 | `--audience-id` | Completed audience | `audiences list` |
 | `--file-format` | `csv`, `gzip` or `parquet` | - |
 | `--identifier-type` | one of nine, below | - |
-| `--identifier-column` | column name | `cohorts preview` |
+| `--identifier-column` | column name: letters, digits, `_` and `-` | `cohorts preview` |
 | `--metadata-columns` | column name, repeatable | `cohorts preview` |
 | `--ip-enrichment` | boolean | - |
 | `--device-limit` | device cap | - |
@@ -528,7 +559,7 @@ cd34          Los Angeles  90001
 
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
-| `--name` | any string | - |
+| `--name` | letters, digits, spaces, `_` and `-` | - |
 | `--audience-id` | audience to rebuild each cycle | `audiences list` |
 | `--project-id` | project id | `projects list` |
 | `--start` | `"YYYY-MM-DD HH:MM:SS"`, read in `--timezone`, must be in the future | - |
@@ -807,7 +838,9 @@ to load. If `intuizi aud<TAB>` does nothing, add to `~/.zshrc`:
 autoload -U compinit && compinit
 ```
 
-Completion covers commands and flag names. Flag values do not complete yet.
+Completion covers commands, flag names, and the values of flags that take a
+fixed set: `--type`, `--signal`, `--file-format`, `--identifier-type`,
+`--frequency` and `--purpose`.
 
 ## Typical workflows
 

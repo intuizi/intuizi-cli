@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,9 @@ func isolate(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
 	t.Setenv(EnvToken, "")
+	swapKeyring(t)
 	return dir
 }
 
@@ -85,6 +88,9 @@ func TestLoadNamesTheFileOnReadError(t *testing.T) {
 // Login needs the directory writable before it spends one of the account's
 // ten token slots; EnsureDir is what it checks with.
 func TestEnsureDirCreatesOwnerOnlyDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("owner-only permission bits are a Unix guarantee; Windows uses ACLs")
+	}
 	isolate(t)
 
 	if err := EnsureDir(); err != nil {
@@ -104,6 +110,9 @@ func TestEnsureDirCreatesOwnerOnlyDir(t *testing.T) {
 }
 
 func TestEnsureDirReportsUnwritableParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod does not restrict directory creation on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
@@ -119,6 +128,9 @@ func TestEnsureDirReportsUnwritableParent(t *testing.T) {
 }
 
 func TestSaveCreatesFileWithOwnerOnlyPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("owner-only permission bits are a Unix guarantee; Windows uses ACLs")
+	}
 	isolate(t)
 
 	if err := Save(&Config{BaseURL: "https://example.com", Token: "secret"}); err != nil {
@@ -139,6 +151,9 @@ func TestSaveCreatesFileWithOwnerOnlyPermissions(t *testing.T) {
 // that already exists. os.WriteFile's perm argument applies only on create, so
 // a plain write would leave a pre-existing 0644 file world-readable.
 func TestSaveTightensPermissionsOnExistingFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("owner-only permission bits are a Unix guarantee; Windows uses ACLs")
+	}
 	isolate(t)
 
 	path, _ := Path()
@@ -219,8 +234,13 @@ func TestSaveRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *got != *want {
+	// The file keeps everything but the secret, which comes back through the
+	// credential store.
+	if got.BaseURL != want.BaseURL || got.ExpiresAt != want.ExpiresAt {
 		t.Fatalf("round trip: got %+v, want %+v", got, want)
+	}
+	if tok, src := StoredToken(got); tok != "secret" || src != SourceKeyring {
+		t.Fatalf("StoredToken = (%q, %q), want (\"secret\", SourceKeyring)", tok, src)
 	}
 }
 
@@ -325,7 +345,7 @@ func TestClearTokenKeepsBaseURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken("https://staging.example.com"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -348,16 +368,16 @@ func TestClearTokenKeepsBaseURL(t *testing.T) {
 func TestClearTokenIsIdempotent(t *testing.T) {
 	isolate(t)
 
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken(""); err != nil {
 		t.Fatalf("clearing with no config at all: %v", err)
 	}
 	if err := Save(&Config{Token: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken(""); err != nil {
 		t.Fatalf("first clear: %v", err)
 	}
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken(""); err != nil {
 		t.Fatalf("second clear: %v", err)
 	}
 }
@@ -371,7 +391,7 @@ func TestClearTokenDoesNotContactTheServer(t *testing.T) {
 	if err := Save(&Config{BaseURL: "https://unreachable.invalid", Token: "secret"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ClearToken(); err != nil {
+	if _, err := ClearToken("https://unreachable.invalid"); err != nil {
 		t.Fatalf("logout must work without network access: %v", err)
 	}
 }
@@ -379,23 +399,40 @@ func TestClearTokenDoesNotContactTheServer(t *testing.T) {
 func TestStoredFileIsValidJSON(t *testing.T) {
 	isolate(t)
 
+	// With a credential store the file carries base_url but not the secret.
 	if err := Save(&Config{BaseURL: "https://example.com", Token: "t"}); err != nil {
 		t.Fatal(err)
 	}
+	into := readStoredJSON(t)
+	if into["base_url"] != "https://example.com" {
+		t.Fatalf("base_url missing: %v", into)
+	}
+	if _, ok := into["token"]; ok {
+		t.Fatalf("the secret was written to the file as well: %v", into)
+	}
 
+	// Without one - a container, a CI runner - it falls back to the file.
+	fakeKeyringFor(t).fail = true
+	if err := Save(&Config{BaseURL: "https://example.com", Token: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if into := readStoredJSON(t); into["token"] != "t" {
+		t.Fatalf("no credential store, so the file should hold the token: %v", into)
+	}
+}
+
+func readStoredJSON(t *testing.T) map[string]any {
+	t.Helper()
 	path, _ := Path()
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	var into map[string]any
 	if err := json.Unmarshal(raw, &into); err != nil {
 		t.Fatalf("stored file is not valid JSON: %v\n%s", err, raw)
 	}
-	if into["base_url"] != "https://example.com" || into["token"] != "t" {
-		t.Fatalf("unexpected keys: %v", into)
-	}
+	return into
 }
 
 // root.go validates --base-url with this before any request: a bare host
@@ -438,5 +475,362 @@ func TestValidateBaseURL(t *testing.T) {
 		if tc.fix != "" && !strings.Contains(err.Error(), tc.fix) {
 			t.Errorf("ValidateBaseURL(%q) = %v, want the fix %q", tc.raw, err, tc.fix)
 		}
+	}
+}
+
+// Loading a loose config silently hands the token to anyone on the machine.
+func TestLoadRefusesALooseConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no POSIX permission bits; the file sits under the user profile")
+	}
+	for _, mode := range []os.FileMode{0644, 0640, 0604, 0666} {
+		dir := isolate(t)
+		path := filepath.Join(dir, "intuizi", "config.json")
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(`{"token":"t"}`), mode); err != nil {
+			t.Fatal(err)
+		}
+		// WriteFile respects umask; set the mode explicitly.
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := Load()
+		if err == nil {
+			t.Fatalf("mode %04o loaded without complaint", mode)
+		}
+		// A refusal with no remedy is worse than the permissions.
+		if !strings.Contains(err.Error(), "chmod 600") {
+			t.Errorf("mode %04o: error %q does not say how to fix it", mode, err)
+		}
+	}
+}
+
+func TestLoadAcceptsAnOwnerOnlyConfig(t *testing.T) {
+	dir := isolate(t)
+	path := filepath.Join(dir, "intuizi", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"token":"t","base_url":"https://example.com"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("0600 config refused: %v", err)
+	}
+	if cfg.Token != "t" {
+		t.Fatalf("token = %q", cfg.Token)
+	}
+}
+
+// The store wins, so a token left by an older version is superseded.
+func TestStoredTokenPrefersTheCredentialStore(t *testing.T) {
+	isolate(t)
+	cfg := &Config{BaseURL: "https://example.com", Token: "from-file"}
+	if err := keyring.Set(keyringService, keyringKey(cfg.BaseURL), "from-store"); err != nil {
+		t.Fatal(err)
+	}
+
+	if tok, src := StoredToken(cfg); tok != "from-store" || src != SourceKeyring {
+		t.Fatalf("got (%q, %q), want (\"from-store\", SourceKeyring)", tok, src)
+	}
+}
+
+// Keyed by console: a token minted for one must never answer for another.
+func TestStoredTokenIsPerConsole(t *testing.T) {
+	isolate(t)
+	if err := keyring.Set(keyringService, "https://a.example.com", "token-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	if tok, _ := StoredToken(&Config{BaseURL: "https://a.example.com"}); tok != "token-a" {
+		t.Fatalf("same console: got %q", tok)
+	}
+	if tok, src := StoredToken(&Config{BaseURL: "https://b.example.com"}); tok != "" || src != SourceNone {
+		t.Fatalf("other console: got (%q, %q), want empty", tok, src)
+	}
+}
+
+// logout must clear both, or someone who logged out is still authenticated.
+func TestClearTokenEmptiesTheStoreToo(t *testing.T) {
+	isolate(t)
+	cfg := &Config{BaseURL: "https://example.com", Token: "secret", ExpiresAt: "2027-01-01T00:00:00+00:00"}
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if tok, _ := StoredToken(cfg); tok == "" {
+		t.Fatal("setup: nothing stored")
+	}
+
+	if _, err := ClearToken("https://example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok, src := StoredToken(after); tok != "" || src != SourceNone {
+		t.Fatalf("after logout: (%q, %q), want empty", tok, src)
+	}
+	// The base URL survives, so the next login knows which console this was.
+	if after.BaseURL != "https://example.com" {
+		t.Fatalf("base_url lost: %q", after.BaseURL)
+	}
+}
+
+// The escape hatch: anyone who would rather keep the token in the file.
+func TestNoKeyringEnvKeepsTheTokenInTheFile(t *testing.T) {
+	isolate(t)
+	t.Setenv(EnvNoKeyring, "1")
+
+	if err := Save(&Config{BaseURL: "https://example.com", Token: "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if into := readStoredJSON(t); into["token"] != "secret" {
+		t.Fatalf("token not in the file: %v", into)
+	}
+	cfg, _ := Load()
+	if tok, src := StoredToken(cfg); tok != "secret" || src != SourceConfig {
+		t.Fatalf("got (%q, %q), want (\"secret\", SourceConfig)", tok, src)
+	}
+}
+
+// Login returns before Save when it reuses a token, so without this an
+// existing file token would stay in the file for the life of the token.
+func TestMigrateTokenMovesAFileTokenIntoTheStore(t *testing.T) {
+	isolate(t)
+	cfg := &Config{BaseURL: "https://example.com", Token: "from-file"}
+	t.Setenv(EnvNoKeyring, "1")
+	if err := Save(cfg); err != nil { // lands in the file
+		t.Fatal(err)
+	}
+	t.Setenv(EnvNoKeyring, "")
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, from := StoredToken(loaded)
+	if from != SourceConfig {
+		t.Fatalf("setup: token is in %q, want the file", from)
+	}
+
+	MigrateToken(loaded, from)
+
+	after, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok2, src := StoredToken(after); tok2 != tok || src != SourceKeyring {
+		t.Fatalf("after migrate: (%q, %q), want (%q, SourceKeyring)", tok2, src, tok)
+	}
+	if into := readStoredJSON(t); into["token"] != nil {
+		t.Fatalf("the secret is still in the file: %v", into)
+	}
+}
+
+// Nothing to move when the store already holds it.
+func TestMigrateTokenIsANoOpFromTheStore(t *testing.T) {
+	isolate(t)
+	cfg := &Config{BaseURL: "https://example.com", Token: "secret"}
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	before := readStoredJSON(t)
+
+	loaded, _ := Load()
+	_, from := StoredToken(loaded)
+	MigrateToken(loaded, from)
+
+	if after := readStoredJSON(t); len(after) != len(before) {
+		t.Fatalf("file changed: %v -> %v", before, after)
+	}
+}
+
+// The bug: ClearToken keyed off the file's base URL, so logging out of A
+// deleted B's entry and reported success.
+func TestClearTokenScopedToTheRequestedConsole(t *testing.T) {
+	isolate(t)
+	const a, b = "https://a.example.com", "https://b.example.com"
+
+	if err := Save(&Config{BaseURL: a, Token: "token-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(&Config{BaseURL: b, Token: "token-b"}); err != nil {
+		t.Fatal(err)
+	}
+
+	had, err := ClearToken(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !had {
+		t.Error("reported nothing to remove, but A had a token")
+	}
+
+	if tok, _ := StoredToken(&Config{BaseURL: a}); tok != "" {
+		t.Errorf("A survived logout: %q", tok)
+	}
+	if tok, _ := StoredToken(&Config{BaseURL: b}); tok != "token-b" {
+		t.Errorf("B was cleared by logging out of A: %q", tok)
+	}
+}
+
+// The file holds B; logging out of A must not blank it.
+func TestClearTokenLeavesAnotherConsolesFileToken(t *testing.T) {
+	isolate(t)
+	t.Setenv(EnvNoKeyring, "1") // no store, so the token stays in the file
+	if err := Save(&Config{BaseURL: "https://b.example.com", Token: "token-b"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ClearToken("https://a.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "token-b" {
+		t.Errorf("file token cleared by another console's logout: %q", cfg.Token)
+	}
+}
+
+// A file with no base URL predates per-console scoping; logout must still work.
+func TestClearTokenClearsALegacyFile(t *testing.T) {
+	isolate(t)
+	if err := Save(&Config{Token: "legacy"}); err != nil {
+		t.Fatal(err)
+	}
+	had, err := ClearToken(DefaultBaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !had {
+		t.Error("reported nothing to remove")
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "" {
+		t.Errorf("legacy token not cleared: %q", cfg.Token)
+	}
+}
+
+// A delete that fails leaves the token in the store, so logout must not report
+// success. With nothing stored, a delete error is noise and is ignored.
+func TestClearTokenReportsAFailedDelete(t *testing.T) {
+	const base = "https://a.example.com"
+
+	t.Run("token present", func(t *testing.T) {
+		isolate(t)
+		if err := Save(&Config{BaseURL: base, Token: "tok"}); err != nil {
+			t.Fatal(err)
+		}
+		fakeKeyringFor(t).failDelete = true // the read still works
+
+		if _, err := ClearToken(base); err == nil {
+			t.Error("a failed delete was reported as a successful logout")
+		}
+	})
+
+	t.Run("nothing stored", func(t *testing.T) {
+		isolate(t)
+		fakeKeyringFor(t).fail = true
+
+		had, err := ClearToken(base)
+		if err != nil {
+			t.Errorf("no store is not a logout failure: %v", err)
+		}
+		if had {
+			t.Error("reported a removal with nothing stored")
+		}
+	})
+}
+
+// A failed store delete must not blank the file too: partial cleanup loses one
+// token and leaves the other.
+func TestClearTokenLeavesTheFileOnAFailedDelete(t *testing.T) {
+	const base = "https://a.example.com"
+	isolate(t)
+	f := fakeKeyringFor(t)
+	if err := Save(&Config{BaseURL: base, Token: "in-store"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvNoKeyring, "1")
+	if err := Save(&Config{BaseURL: base, Token: "in-file"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvNoKeyring, "")
+	f.failDelete = true
+
+	if _, err := ClearToken(base); err == nil {
+		t.Fatal("a failed delete was reported as success")
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Token != "in-file" {
+		t.Errorf("file token changed despite the failure: %q", cfg.Token)
+	}
+}
+
+// A locked keychain is not an empty one. Reported as SourceNone, login mints a
+// replacement and spends one of the ten slots.
+func TestStoredTokenReportsAStoreTimeout(t *testing.T) {
+	const base = "https://a.example.com"
+	isolate(t)
+	if err := Save(&Config{BaseURL: base, Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	fakeKeyringFor(t).getErr = errKeyringTimeout
+
+	tok, src := StoredToken(&Config{BaseURL: base})
+	if tok != "" {
+		t.Errorf("token = %q, want empty", tok)
+	}
+	if src != SourceUnavailable {
+		t.Errorf("source = %q, want %q", src, SourceUnavailable)
+	}
+}
+
+// The file needs no store, so a timeout must not hide a usable token.
+func TestStoredTokenPrefersTheFileOverATimeout(t *testing.T) {
+	const base = "https://a.example.com"
+	isolate(t)
+	t.Setenv(EnvNoKeyring, "1")
+	if err := Save(&Config{BaseURL: base, Token: "from-file"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvNoKeyring, "")
+	fakeKeyringFor(t).getErr = errKeyringTimeout
+
+	tok, src := StoredToken(&Config{BaseURL: base, Token: "from-file"})
+	if tok != "from-file" || src != SourceConfig {
+		t.Errorf("got (%q, %q), want (from-file, %q)", tok, src, SourceConfig)
+	}
+}
+
+// Nothing can be removed from a store that will not answer.
+func TestClearTokenReportsAStoreTimeout(t *testing.T) {
+	const base = "https://a.example.com"
+	isolate(t)
+	if err := Save(&Config{BaseURL: base, Token: "tok"}); err != nil {
+		t.Fatal(err)
+	}
+	fakeKeyringFor(t).getErr = errKeyringTimeout
+
+	had, err := ClearToken(base)
+	if err == nil {
+		t.Error("a timed-out store was reported as a successful logout")
+	}
+	if had {
+		t.Error("claimed to have removed a token it could not read")
 	}
 }

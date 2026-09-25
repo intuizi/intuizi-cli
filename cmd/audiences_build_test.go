@@ -449,3 +449,77 @@ func TestAudienceBodyMarshalling(t *testing.T) {
 		}
 	}
 }
+
+// The search is a substring match, so "Example Coffee" also returns "Example
+// Coffee Reserve". One exact label is the one that was meant.
+func TestResolveOnePrefersAnExactLabel(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":208,"text":"Example Coffee"},{"value":777,"text":"Example Coffee Reserve"}]}`)
+
+	got, err := resolveOne(context.Background(), c, brandsPath, "example coffee", "brands")
+	if err != nil {
+		t.Fatalf("resolveOne: %v", err)
+	}
+	raw, _ := json.Marshal(got)
+	if string(raw) != "208" {
+		t.Fatalf("resolved %s, want 208 (the exact label, not the longer one)", raw)
+	}
+}
+
+// Two rows with the same label is a catalog problem, not something to guess at.
+func TestResolveOneStillRejectsDuplicateExactLabels(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":1,"text":"Example Fuel"},{"value":2,"text":"Example Fuel"}]}`)
+
+	if _, err := resolveOne(context.Background(), c, brandsPath, "example fuel", "brands"); err == nil {
+		t.Fatal("resolveOne picked one of two identically named rows")
+	}
+}
+
+// An exact label settles it only when every match came back: on one page of
+// several, its twin may be on the next.
+func TestResolveOneTrustsAnExactLabelOnlyOnACompleteResult(t *testing.T) {
+	page := func(total, lastPage int) string {
+		return `{"status":"success","code":200,"message":"ok","data":{"items":[` +
+			`{"value":1,"text":"Games"},{"value":2,"text":"Games Extra"}],` +
+			`"pagination":{"current_page":1,"per_page":2,"total":` + strconv.Itoa(total) +
+			`,"last_page":` + strconv.Itoa(lastPage) + `}}}`
+	}
+	appsCategories := referencePrefix + "apps/categories"
+
+	t.Run("partial page lists", func(t *testing.T) {
+		c, _ := catalogServer(t, page(3, 2))
+		_, err := resolveOne(context.Background(), c, appsCategories, "games", "categories")
+		if err == nil {
+			t.Fatal("resolveOne took an exact label from a partial page")
+		}
+		if !strings.Contains(err.Error(), "showing 2 of 3") {
+			t.Errorf("error does not say more matches exist: %v", err)
+		}
+	})
+
+	t.Run("complete page resolves", func(t *testing.T) {
+		c, _ := catalogServer(t, page(2, 1))
+		got, err := resolveOne(context.Background(), c, appsCategories, "games", "categories")
+		if err != nil {
+			t.Fatalf("resolveOne: %v", err)
+		}
+		if raw, _ := json.Marshal(got); string(raw) != "1" {
+			t.Fatalf("resolved %s, want 1 (the exact label)", raw)
+		}
+	})
+}
+
+// No exact label leaves the ambiguity error intact.
+func TestResolveOneKeepsAmbiguityWithoutAnExactLabel(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":929,"text":"Example Coffee North"},{"value":921,"text":"Example Coffee South"}]}`)
+
+	_, err := resolveOne(context.Background(), c, brandsPath, "coffee", "brands")
+	if err == nil {
+		t.Fatal("resolveOne picked one of several partial matches")
+	}
+	if !strings.Contains(err.Error(), "narrow the search") {
+		t.Errorf("error changed shape: %v", err)
+	}
+}

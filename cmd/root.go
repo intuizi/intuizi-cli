@@ -121,7 +121,11 @@ func client() (*api.Client, error) {
 		}
 		return nil, err
 	}
-	if cfg.Token == "" {
+	token, source := config.StoredToken(cfg)
+	if err := storeUnavailable(source); err != nil {
+		return nil, err
+	}
+	if token == "" {
 		return nil, errors.New("not logged in - run 'intuizi auth login', or set " +
 			config.EnvToken + " for CI")
 	}
@@ -129,7 +133,18 @@ func client() (*api.Client, error) {
 		return nil, fmt.Errorf("the stored token belongs to %s, not %s - run "+
 			"'intuizi auth login --base-url %s' or set %s", stored, base, base, config.EnvToken)
 	}
-	return api.New(base, cfg.Token), nil
+	return api.New(base, token), nil
+}
+
+// storeUnavailable reports a store that did not answer. A locked keychain is
+// not a missing token: login would mint one, and status and client would say
+// "not logged in".
+func storeUnavailable(source string) error {
+	if source != config.SourceUnavailable {
+		return nil
+	}
+	return errors.New("the credential store did not answer - unlock it and try again, " +
+		"or set " + config.EnvNoKeyring + "=1 to use the config file")
 }
 
 // trimURL makes two spellings of one host compare equal.

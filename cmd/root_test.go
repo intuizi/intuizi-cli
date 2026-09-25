@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/intuizi/intuizi-cli/internal/api"
+	"github.com/intuizi/intuizi-cli/internal/config"
 )
 
 // The other test files build commands from their constructors, which never
@@ -67,7 +68,10 @@ func rootRun(t *testing.T, args ...string) rootResult {
 // harness run reads nothing of the developer's own and needs no login.
 func isolate(t *testing.T) {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
+	t.Setenv(config.EnvNoKeyring, "1")
 	t.Setenv("INTUIZI_API_TOKEN", "tok")
 }
 
@@ -77,6 +81,8 @@ func writeConfig(t *testing.T, body string) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
+	t.Setenv(config.EnvNoKeyring, "1")
 	t.Setenv("INTUIZI_API_TOKEN", "")
 	if err := os.MkdirAll(filepath.Join(dir, "intuizi"), 0o700); err != nil {
 		t.Fatal(err)
@@ -356,6 +362,25 @@ func TestPlainHTTPBaseURLWarns(t *testing.T) {
 				t.Errorf("warned = %v, want %v; stderr: %q", got, c.warn, res.stderr)
 			}
 		})
+	}
+}
+
+// login, client and status all treat a silent store the same way: a locked
+// keychain is not a missing token, and minting on one costs a slot.
+func TestStoreUnavailable(t *testing.T) {
+	for _, src := range []string{config.SourceNone, config.SourceEnv, config.SourceKeyring, config.SourceConfig} {
+		if err := storeUnavailable(src); err != nil {
+			t.Errorf("source %q: unexpected error %v", src, err)
+		}
+	}
+	err := storeUnavailable(config.SourceUnavailable)
+	if err == nil {
+		t.Fatal("a silent store was not reported")
+	}
+	for _, want := range []string{"did not answer", "unlock it", config.EnvNoKeyring} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message omits %q: %v", want, err)
+		}
 	}
 }
 
