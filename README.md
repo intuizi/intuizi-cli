@@ -126,8 +126,8 @@ id=$(intuizi audiences create --type poi ... --wait --quiet)
 intuizi audiences show "$id" --json | jq '.data[0].normalized_payload'
 ```
 
-Full flag reference, including the lookup command behind every value, is in
-[DOCS.md](DOCS.md).
+How to build each create, including the lookup command behind every value, is
+in [DOCS.md](DOCS.md); `--help` on any command lists all of its flags.
 
 ## Commands
 
@@ -346,8 +346,9 @@ their own licenses, reproduced in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
 
 ## Related
 
-- [DOCS.md](DOCS.md) - every flag, the catalog behind each value, and the
-  response shapes a script has to parse.
+- [DOCS.md](DOCS.md) - how to build each create, the catalog behind each
+  value, and the response shapes a script has to parse. `intuizi <command>
+  --help` lists every flag.
 - [examples/](examples) - ready-made payloads for the creates that take
   `--file`.
 - The Intuizi API v2 reference is the source of truth for every endpoint this

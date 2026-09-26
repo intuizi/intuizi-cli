@@ -161,7 +161,7 @@ means something else changed it.
 | `schedules` | Recurring rebuilds, with activate and deactivate |
 | `uploads` | `reserve` a presigned slot, or `put` to upload in one step |
 | `webhooks list` | Inspect webhook endpoints registered in the Console |
-| `usage` | This month's data-scan usage and limits |
+| `usage` | Data-scan usage and limits for a calendar month (`--month YYYY-MM`, default the current month) |
 | `completion <shell>` | Shell completion script |
 
 Deletes prompt for confirmation unless `--yes`.
