@@ -186,7 +186,15 @@ step 0 "audiences show" I audiences show "$AUD"
 step 0 "audiences show --json" I audiences show "$AUD" --json
 step 0 "audiences create --file - (body from --dry-run)" bash -c "'$B' --base-url '$BASE' audiences create --type poi --brand $SBUX --country USA --start-date $START --end-date $END --name 'cli-live-test file $STAMP' --dry-run | '$B' --base-url '$BASE' audiences create --file - --quiet"
 AUD2=$(first); [ -n "$AUD2" ] && AUDIENCES+=("$AUD2")
-step any "audiences lookalike create --dry-run (capability may be off)" I audiences lookalike create --name "cli-live-lal $STAMP" --source-audience-id "$AUD" --target-size 10000 --signal poi --country USA --dry-run
+step any "audiences lookalike create --notify=false --dry-run (capability may be off)" I audiences lookalike create --name "cli-live-lal $STAMP" --source-audience-id "$AUD" --target-size 10000 --signal poi --country USA --notify=false --dry-run
+
+# Origin: a --dry-run only, and only where this console lists Origin providers;
+# without them the CLI has no default to fill signal_providers with.
+step any "reference common signal-providers --data-type Origin --quiet" I reference common signal-providers --data-type Origin --quiet
+if [ -n "$(first)" ]; then
+  step 0 "audiences create --type origin --dry-run" I audiences create --type origin --country USA --start-date "$START" --end-date "$END" --name "cli-live-origin $STAMP" --dry-run
+fi
+step 2 "audiences create --type origin --brand is refused" I audiences create --type origin --country USA --brand "$SBUX" --start-date "$START" --end-date "$END" --name "cli-live-origin $STAMP" --dry-run
 
 step 0 "cohorts create --audience-id" I cohorts create --audience-id "$AUD" --device-limit 100 --quiet
 COH=$(first); [ -n "$COH" ] && COHORTS+=("$COH")
@@ -214,9 +222,11 @@ step 0 "reference common endpoint-connections --quiet" I reference common endpoi
 EC=$(first)
 step 0 "reference common pricing-models --quiet" I reference common pricing-models --partner-id "$PARTNER" --quiet
 PM=$(first)
-if [ -n "$EC" ] && [ -n "$PM" ]; then
-  step 0 "activations create --dry-run (never sent)" I activations create --audience-id "$AUD" --endpoint-connection-id "$EC" --pricing-model-id "$PM" --project-id "$PROJECT" --dry-run
-  step 2 "activations create --dry-run --wait is refused" I activations create --audience-id "$AUD" --endpoint-connection-id "$EC" --pricing-model-id "$PM" --dry-run --wait
+step 0 "reference common datastreams --quiet" I reference common datastreams --partner-id "$PARTNER" --quiet
+DS=$(first)
+if [ -n "$EC" ] && [ -n "$PM" ] && [ -n "$DS" ]; then
+  step 0 "activations create --datastream --dry-run (never sent)" I activations create --audience-id "$AUD" --endpoint-connection-id "$EC" --pricing-model-id "$PM" --datastream "$DS" --project-id "$PROJECT" --dry-run
+  step 2 "activations create --dry-run --wait is refused" I activations create --audience-id "$AUD" --endpoint-connection-id "$EC" --pricing-model-id "$PM" --datastream "$DS" --dry-run --wait
 fi
 
 # POI submissions against the first first-party brand, by file and by upload.
