@@ -39,6 +39,8 @@ func TestLookalikeCreateRejectsBadValues(t *testing.T) {
 		{"empty country", more("--country", ""), []string{"--country"}},
 		{"empty state", more("--state", ""), []string{"--state"}},
 		{"zero contrast", more("--contrast-audience-id", "0"), []string{"--contrast-audience-id"}},
+		// The API refuses a contrast audience that is the seed itself.
+		{"contrast is the seed", more("--contrast-audience-id", "1381"), []string{"--contrast-audience-id 1381", "seed"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, got := stub(t, created)
@@ -166,5 +168,42 @@ func TestLookalikeCreateNamesTheCommandThatFollowsTheRun(t *testing.T) {
 				t.Errorf("stderr does not name the follow-up command:\n%s", stderr)
 			}
 		})
+	}
+}
+
+// A cancelled run posts no further status, so the audience reads 108 Modeling
+// for good and a --wait on it only ends at --timeout. The confirmation and
+// the help both say so, and name the delete that removes it.
+func TestLookalikeCancelSaysTheRunNeverCompletes(t *testing.T) {
+	srv, got := stub(t, `{"status":"success","code":200,"message":"Cancellation requested.","data":[]}`)
+
+	_, stderr, err := run(t, audiencesLookalikeCommand(), srv, "cancel", "42")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(got.paths) != 1 || !strings.HasSuffix(got.paths[0], "/cancel-lookalike") {
+		t.Errorf("paths = %v", got.paths)
+	}
+	for _, want := range []string{"cancellation requested for audience 42", "108 Modeling", "--wait",
+		"intuizi audiences delete 42"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr omits %q: %q", want, stderr)
+		}
+	}
+
+	var long string
+	for _, c := range audiencesLookalikeCommand().Commands() {
+		if c.Name() == "cancel" {
+			long = c.Long
+		}
+	}
+	for _, want := range []string{"never reaches Completed", "show <id> --wait", "already finished",
+		"audiences delete <id>"} {
+		if !strings.Contains(long, want) {
+			t.Errorf("cancel help omits %q:\n%s", want, long)
+		}
+	}
+	if strings.Contains(long, "short while") {
+		t.Errorf("cancel help still says the status lingers only briefly:\n%s", long)
 	}
 }

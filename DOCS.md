@@ -529,7 +529,7 @@ intuizi audiences create --file examples/audience-refine-crosspurchase.json
 | `--country` | ISO-3 code, repeatable, required | `reference common countries` |
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--exclude-seed-devices` `--expand-eids` | booleans, default false, always sent | - |
-| `--contrast-audience-id` | Completed, non-lookalike audience | `audiences list` |
+| `--contrast-audience-id` | Completed, non-lookalike audience other than the seed | `audiences list` |
 | `--notify` | boolean, default true, always sent | - |
 | `--file` | the whole payload as JSON, or `-` for stdin | for fields the flags do not model |
 | `--dry-run` | - | - |
@@ -538,8 +538,9 @@ The seed for `--source-audience-id` must be Completed, must not itself be a
 lookalike, and must hold at least 1,000 devices.
 
 Checked before anything is sent: `--name` is not blank, the two audience ids
-are positive, `--target-size` is between 1 and 4,000,000, and no `--signal`,
-`--country` or `--state` is blank. A repeated `--signal` is sent once.
+are positive and differ, `--target-size` is between 1 and 4,000,000, and no
+`--signal`, `--country` or `--state` is blank. A repeated `--signal` is sent
+once.
 `--file` takes the whole body instead, forwarded untouched, for anything the
 flags do not model.
 
@@ -556,6 +557,15 @@ Manager; a 403 means they are not enabled for the account.
 
 Training shows as status `108` Modeling, which is not terminal;
 `audiences show <id> --wait` follows the new audience through it to Completed.
+
+`audiences lookalike cancel <id>` takes the id `lookalike create` returned, not
+the seed's. The run stops at its next checkpoint and reports no further
+status, so from then on the audience keeps reading `108` Modeling and never
+reaches Completed: do not follow a cancelled run with `show <id> --wait`,
+which would poll until `--timeout` and exit `1`. A cancel that arrives once
+the result is already being published is ignored, and the run completes. A
+run that has already finished cannot be cancelled. Remove a cancelled run
+with `audiences delete <id>`.
 
 ```bash
 intuizi audiences lookalike create \

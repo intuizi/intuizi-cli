@@ -388,7 +388,8 @@ each status change to stderr and the last record read to stdout, and exiting
 non-zero if it fails, --timeout runs out or three reads in a row fail. A
 lookalike in 108 Modeling is still training, and an audience in 109
 Visualizing data streams is drawing its data stream visualizations, so both
-are waited through:
+are waited through. A cancelled lookalike reads 108 for good, so a wait on one
+only ends at --timeout:
 
     intuizi audiences show 1377 --wait
 
@@ -435,7 +436,8 @@ require additional permissions which need to be approved by your Account
 Manager; a 403 means they are not enabled for the account.
 
 Training shows as status 108 Modeling, which is not terminal - follow it with
-'intuizi audiences show <id> --wait' until it reads Completed.`,
+'intuizi audiences show <id> --wait' until it reads Completed. A cancelled run
+never does: see 'intuizi audiences lookalike cancel --help'.`,
 	}
 
 	create := lookalikeCreateCommand()
@@ -445,8 +447,13 @@ Training shows as status 108 Modeling, which is not terminal - follow it with
 		Short: "Cancel a lookalike run in progress",
 		Long: `Cancel a lookalike run in progress.
 
-The job stops at its next checkpoint rather than immediately, so the audience
-may sit in its current status for a short while after this returns.
+The run stops at its next checkpoint and reports no further status, so from
+then on the audience keeps reading 108 Modeling and never reaches Completed.
+Do not follow a cancelled run with 'intuizi audiences show <id> --wait': it
+polls until --timeout and exits non-zero. A cancel that arrives once the
+result is already being published is ignored, and the run completes. A run
+that has already finished cannot be cancelled. Remove a cancelled run with
+'intuizi audiences delete <id>'.
 
 Takes the id 'lookalike create' returned, not the seed's. Like create, it
 requires additional permissions which need to be approved by your Account
@@ -458,7 +465,9 @@ Manager; a 403 means they are not enabled for the account.`,
 				return err
 			}
 			return postID(cmd, audiencesPrefix+"/cancel-lookalike", id,
-				fmt.Sprintf("cancellation requested for audience %d", id))
+				fmt.Sprintf("cancellation requested for audience %d - once it stops it keeps "+
+					"reading 108 Modeling, so do not --wait on it; remove it with "+
+					"'intuizi audiences delete %d'", id, id))
 		},
 	}
 
@@ -546,7 +555,8 @@ repeated for more than one. web and ctv are withdrawn and rejected.
 
 --exclude-seed-devices and --expand-eids default to false and are always sent,
 because the API requires both fields. --contrast-audience-id names a Completed,
-non-lookalike audience to contrast the seed against. --dry-run prints the body
+non-lookalike audience other than the seed to contrast the seed against; the
+seed's own id is refused before anything is sent. --dry-run prints the body
 and sends nothing.
 
 When the run completes, the API emails the user who created it. --notify is on
@@ -612,6 +622,11 @@ additional permissions which need to be approved by your Account Manager; a
 		if err := positiveID(flags, "contrast-audience-id", contrastID); err != nil {
 			return err
 		}
+		// The API's rule: a model cannot contrast the seed with itself.
+		if flags.Changed("contrast-audience-id") && contrastID == sourceID {
+			return usageErr(fmt.Sprintf("--contrast-audience-id %d is the seed; "+
+				"contrast it against a different Completed, non-lookalike audience", contrastID))
+		}
 
 		body := lookalikeBody{
 			Name:             name,
@@ -657,7 +672,7 @@ additional permissions which need to be approved by your Account Manager; a
 	f.BoolVar(&expandEIDs, "expand-eids", false,
 		"Expand matched devices to their EIDs")
 	f.IntVar(&contrastID, "contrast-audience-id", 0,
-		"Completed, non-lookalike audience to contrast against")
+		"Completed, non-lookalike audience other than the seed, to contrast\nagainst")
 	f.BoolVar(&notify, "notify", true,
 		"Email the user who created the run when it completes\n(--notify=false to skip)")
 	// No MarkFlagsOneRequired("file", "source-audience-id"): see audiencesCreateCommand.
