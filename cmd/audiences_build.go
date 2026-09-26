@@ -261,7 +261,8 @@ func resolveAll(ctx context.Context, c *api.Client, path, search, what string) (
 	return ids, nil
 }
 
-// audienceLocation omits dmas, which the API rejects.
+// audienceLocation has no dmas: no flag writes them. POI and Origin accept
+// location.dmas, so a body that needs them goes through --file.
 type audienceLocation struct {
 	Countries []string `json:"countries,omitempty"`
 	States    []string `json:"states,omitempty"`

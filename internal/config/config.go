@@ -300,10 +300,11 @@ func Token() string {
 }
 
 // ClearToken removes one console's token: its store entry, and the file's
-// token, expiry and account email when the file holds that console. It reports whether there was one,
-// being the only place that looks in both, and keeps the file, which holds the
-// base URL. It does not affect EnvToken - the caller should warn when that is
-// set, since logout cannot unset the caller's environment.
+// token, expiry and account email when the file holds that console. It
+// reports whether there was one, being the only place that looks in both, and
+// keeps the file, which holds the base URL. It does not affect EnvToken - the
+// caller should warn when that is set, since logout cannot unset the caller's
+// environment.
 //
 // This is deliberately local-only. POST /api/v2/auth/api-token/revoke exists but
 // is all-or-nothing: it revokes every api token on the account, including one CI
