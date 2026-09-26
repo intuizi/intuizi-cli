@@ -88,7 +88,8 @@ func uploadsReserveCommand() *cobra.Command {
 		Long: `Reserve an upload slot.
 
 Returns an upload_reference and the presigned URL to PUT the bytes to. Use this
-when you want to do the PUT yourself; 'uploads put' is the one-step version.
+when you want to do the PUT yourself; 'uploads put' does the reserve and the
+PUT in one command.
 
 content_length must be the exact byte size of the file you will send.`,
 		Args: cobra.NoArgs,
