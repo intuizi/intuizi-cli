@@ -126,7 +126,13 @@ func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Re
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "printing the last polled record instead of re-reading it")
 			raw, err = json.MarshalIndent(final, "", "  ")
 		} else {
-			raw, err = rawAfterWait(cmd, c, path, final)
+			// After a failure or a timeout the exit code is 1 whatever this
+			// read does, so it is not worth up to two more poll intervals.
+			attempts := maxPollFailures
+			if waitErr != nil {
+				attempts = 1
+			}
+			raw, err = rawAfterWait(cmd, c, path, final, attempts)
 		}
 		if err != nil {
 			return err
@@ -136,12 +142,11 @@ func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Re
 	return output.Detail(cmd.OutOrStdout(), flatten(final), cols)
 }
 
-// rawAfterWait re-reads the record a wait ended on, for --json. The wait is
-// over whatever its outcome, so a blip here is retried with the poll's own
-// tolerance and, failing that, the last polled record is printed instead:
-// after a success, exit 1 with nothing on stdout would read as the job having
-// failed.
-func rawAfterWait(cmd *cobra.Command, c *api.Client, path string, final output.Record) ([]byte, error) {
+// rawAfterWait re-reads the record a wait ended on, for --json, in up to
+// attempts tries. The wait is over whatever its outcome, so when the re-read
+// keeps failing the last polled record is printed instead: after a success,
+// exit 1 with nothing on stdout would read as the job having failed.
+func rawAfterWait(cmd *cobra.Command, c *api.Client, path string, final output.Record, attempts int) ([]byte, error) {
 	ctx := cmd.Context()
 	var err error
 	for attempt := 1; ; attempt++ {
@@ -152,7 +157,7 @@ func rawAfterWait(cmd *cobra.Command, c *api.Client, path string, final output.R
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if attempt >= maxPollFailures || isHardError(err) {
+		if attempt >= attempts || isHardError(err) {
 			break
 		}
 		if err := sleepCtx(ctx, pollInterval); err != nil {

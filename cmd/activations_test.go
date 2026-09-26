@@ -764,3 +764,26 @@ func TestWaitGiveUpPrintsTheLastRecord(t *testing.T) {
 		}
 	})
 }
+
+// After a failed or timed-out wait the exit code is already 1, so the --json
+// re-read is tried once and then falls back to the polled record, rather than
+// retrying for up to two more poll intervals.
+func TestWaitJSONReReadsOnceAfterAFailure(t *testing.T) {
+	fast(t)
+	boom := reply{status: 500, body: `{"status":"error","code":500,"message":"boom","data":[]}`}
+	srv, got := stubSeq(t, activation(101, "Processing"), failedActivation, boom)
+
+	out, errb, err := runJSON(t, activationsShowCommand(), srv, "501", "--wait")
+	if !errors.Is(err, errWaitFailed) {
+		t.Fatalf("err = %v, want errWaitFailed", err)
+	}
+	if len(got.paths) != 3 {
+		t.Errorf("expected two polls and one re-read, got %d calls", len(got.paths))
+	}
+	if !strings.Contains(out, `"Error"`) {
+		t.Errorf("stdout should be the failed record:\n%s", out)
+	}
+	if !strings.Contains(errb, "last polled record") {
+		t.Errorf("stderr should say the shape is the fallback, got %q", errb)
+	}
+}

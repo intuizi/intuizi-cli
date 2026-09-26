@@ -895,9 +895,12 @@ the last one read, so it shows where the job stood; the job keeps running
 server-side. With `--json` the record is re-read and printed as the server's
 own envelope, so a failed wait exits 1 with a `"status": "success"` envelope
 on stdout: branch on the exit code or on `.data[0].status.id`, not on
-`.status`. After three failed reads in a row it is not re-read: stdout carries
-the last polled record itself rather than an envelope, and stderr says so.
-With `--quiet` only the id is printed, whatever the outcome.
+`.status`. That re-read is one more request after the wait ends, tried up to
+three times after a success and once after a failure or a timeout; if it
+fails, the last polled record is printed instead and stderr says so. After
+three failed reads in a row there is no re-read: stdout carries the last
+polled record itself rather than an envelope, and stderr says so. With
+`--quiet` only the id is printed, whatever the outcome.
 
 Nothing is printed on stdout when the wait ends with no record to show: a
 timeout or three failed reads before any status was read, a 401, 403 or 404
