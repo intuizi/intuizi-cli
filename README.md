@@ -150,9 +150,12 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 
 ## Design
 
-- **Pure API v2 client.** Every command maps to a documented endpoint of the
-  Intuizi API v2 (`https://console.intuizi.com/api/v2`). No server-side
-  logic lives here.
+- **Pure API v2 client.** Every command that calls the API uses documented
+  endpoints of the Intuizi API v2 (`https://console.intuizi.com/api/v2`).
+  Some make more than one call (catalog lookups for names, `--wait` polling,
+  and the presigned storage PUT in `uploads put`), and `version`,
+  `completion`, `auth logout` and `auth status` without `--verify` call none.
+  No server-side logic lives here.
 - **Most of the v2 surface.** Auth, audiences (including refine,
   crossvisitation and crosspurchase), activations, cohorts, schedules,
   projects, POI, uploads, usage and reference reads. Audience size estimates,
