@@ -224,9 +224,15 @@ step 0 "reference common pricing-models --quiet" I reference common pricing-mode
 PM=$(first)
 step 0 "reference common datastreams --quiet" I reference common datastreams --partner-id "$PARTNER" --quiet
 DS=$(first)
-if [ -n "$EC" ] && [ -n "$PM" ] && [ -n "$DS" ]; then
-  step 0 "activations create --datastream --dry-run (never sent)" I activations create --audience-id "$AUD" --endpoint-connection-id "$EC" --pricing-model-id "$PM" --datastream "$DS" --project-id "$PROJECT" --dry-run
-  step 2 "activations create --dry-run --wait is refused" I activations create --audience-id "$AUD" --endpoint-connection-id "$EC" --pricing-model-id "$PM" --datastream "$DS" --dry-run --wait
+if [ -n "$EC" ] && [ -n "$PM" ]; then
+  # Without --datastream the body is valid but would deliver nothing, which
+  # stderr says; pipefail keeps the CLI's own exit code in the result.
+  step 0 "activations create --dry-run without --datastream warns" bash -c "set -o pipefail; '$B' --base-url '$BASE' activations create --audience-id '$AUD' --endpoint-connection-id '$EC' --pricing-model-id '$PM' --project-id '$PROJECT' --dry-run 2>&1 >/dev/null | grep 'deliver nothing'"
+  if [ -n "$DS" ]; then
+    step 0 "activations create --datastream --dry-run (never sent)" I activations create --audience-id "$AUD" --endpoint-connection-id "$EC" --pricing-model-id "$PM" --datastream "$DS" --project-id "$PROJECT" --dry-run
+  fi
+  # shellcheck disable=SC2086
+  step 2 "activations create --dry-run --wait is refused" I activations create --audience-id "$AUD" --endpoint-connection-id "$EC" --pricing-model-id "$PM" ${DS:+--datastream $DS} --dry-run --wait
 fi
 
 # POI submissions against the first first-party brand, by file and by upload.
