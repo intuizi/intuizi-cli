@@ -225,6 +225,25 @@ func TestCohortsCreateRejectsNameOnAnAudienceSource(t *testing.T) {
 	}
 }
 
+// An audience cohort is filed under the audience's own project: the API
+// checks a project_id it is sent and then ignores it. So --project-id on an
+// audience source is refused like --name, rather than sent to be ignored.
+func TestCohortsCreateRejectsProjectIDOnAnAudienceSource(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	_, _, err := run(t, cohortsCreateCommand(), srv, "--audience-id", "88", "--project-id", "4")
+	var ue usageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("err = %v, want a usageError", err)
+	}
+	if !strings.Contains(err.Error(), "--project-id") || !strings.Contains(err.Error(), "audience's project") {
+		t.Errorf("err = %v, want it to say the cohort takes the audience's project", err)
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
 // Cobra validates flag groups after PersistentPreRun, so its own "at least one
 // of" error would exit 1. The check in RunE is the one that runs.
 func TestCohortsPreviewWithNoFlagsIsAUsageError(t *testing.T) {

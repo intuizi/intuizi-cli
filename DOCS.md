@@ -609,7 +609,7 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 | `--metadata-columns` | column name, repeatable | `cohorts preview` |
 | `--ip-enrichment` | boolean: also add devices seen on the same IP addresses as the cohort's devices (Enrich by Household) | - |
 | `--device-limit` | device cap | - |
-| `--project-id` | project id, for a file or upload source; an audience source takes the audience's project, though an id you do not own still fails the create | `projects list` |
+| `--project-id` | project id, for a file or upload source; rejected for an audience source, which takes the audience's project | `projects list` |
 | `--dry-run` | - | - |
 
 `--identifier-type` takes `eid`, `eid_md5`, `maid`, `ip`, `hem_plaintext`,
@@ -618,8 +618,9 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 A `file_uri` ending `.csv`, `.gz` or `.parquet` is read as a single file;
 anything else is read as a folder, and whitespace anywhere in it is refused.
 A regular audience makes at most one cohort, and a Lookalike Model audience
-can make several. An audience cohort takes the audience's own name, so
-`--name` is rejected alongside `--audience-id` rather than sent to be ignored.
+can make several. An audience cohort takes the audience's own name and
+project, so `--name` and `--project-id` are rejected alongside `--audience-id`
+rather than sent to be ignored.
 
 ```bash
 # from a cloud file

@@ -48,11 +48,12 @@ var cohortRequired = []string{
 	"name", "file-format", "identifier-type", "identifier-column",
 }
 
-// cohortAudienceOnly describe a file import. The API ignores them on an
-// audience source rather than rejecting them, so name the mistake here.
+// cohortAudienceOnly describe a file import, or what an audience source takes
+// from the audience itself. The API ignores them on an audience source rather
+// than rejecting them, so name the mistake here.
 var cohortAudienceOnly = []string{
 	"name", "file-format", "identifier-type", "identifier-column",
-	"metadata-columns", "ip-enrichment",
+	"metadata-columns", "ip-enrichment", "project-id",
 }
 
 // The server's accepted sets, checked here so a typo is named with the values
@@ -120,7 +121,8 @@ for the reference 'intuizi uploads put --purpose cohort' printed:
       --identifier-type hem_sha256 --identifier-column email_sha256
 
 From a Completed audience, --audience-id is the only flag needed; the cohort
-takes the audience's own name, so --name is rejected:
+takes the audience's own name and project, so --name is rejected, and so is
+--project-id:
 
     intuizi cohorts create --audience-id 88 --device-limit 1000
 
@@ -186,8 +188,11 @@ file has to be uploaded again for a new one once the budget has room.`,
 				for _, f := range cohortAudienceOnly {
 					if flags.Changed(f) {
 						why := " describes a file import"
-						if f == "name" {
+						switch f {
+						case "name":
 							why = " is ignored: the cohort takes the audience's name"
+						case "project-id":
+							why = " is ignored: the cohort is filed under the audience's project"
 						}
 						return usageErr("--" + f + why +
 							"; drop it when the source is --audience-id")
@@ -282,8 +287,7 @@ file has to be uploaded again for a new one once the budget has room.`,
 		"Cap the devices imported")
 	flags.IntVar(&projectID, "project-id", 0,
 		"The project to create the cohort in, for a file or upload source (an\n"+
-			"audience source takes the audience's project; an id you do not own\n"+
-			"still fails)")
+			"audience source takes the audience's project, so it is rejected there)")
 
 	completeValues(cmd, "file-format", cohortFileFormats)
 	completeValues(cmd, "identifier-type", identifierTypes)
