@@ -78,6 +78,10 @@ WebDomain that is 'intuizi reference web iab-categories', whose id is the
 number in its id column, not the IAB code in its value column. Every selector
 repeats for more than one value.
 
+Most types also need --country: the API rejects a dataset without one on
+every type except Cohorts, AffinityTransactions and ProfileAttributes. The CLI
+checks for it before sending only on Origin.
+
 --type origin targets devices by their home location rather than the places
 they visited, so its only filters are geographic. --country is required, and
 the countries with Origin data come from 'intuizi reference common countries

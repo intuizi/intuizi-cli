@@ -247,7 +247,7 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--brand-all` | a search, taking every match; POI only | `reference poi brands` |
 | `--category` | name or id, repeatable | one catalog per type, below |
 | `--provider` | id, repeatable | `reference common signal-providers --data-type <type>` |
-| `--country` | ISO-3 code, repeatable; required for Origin | `reference common countries` |
+| `--country` | ISO-3 code, repeatable; the API requires it for every type except Cohorts, AffinityTransactions and ProfileAttributes, and the CLI checks it before sending only on Origin | `reference common countries` |
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--city` | city name, repeatable | `reference common cities --states CA` |
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
@@ -305,7 +305,7 @@ on exactly one. It reports what it selected to stderr, so an expansion is
 visible without polluting a piped payload:
 
 ```bash
-intuizi audiences create --type poi --brand-all coffee \
+intuizi audiences create --type poi --brand-all coffee --country USA \
   --start-date 2026-09-02 --end-date 2026-09-09 --name "Coffee - 1 week" --dry-run
 ```
 
@@ -852,6 +852,7 @@ field. Anything deeper needs `--json` and `jq`.
 
 ```bash
 id=$(intuizi audiences create --type poi --brand starbucks \
+       --country USA --state CA --city "San Francisco" \
        --start-date 2026-09-02 --end-date 2026-09-09 \
        --name "Starbucks - SF" --wait --quiet)
 
