@@ -283,7 +283,9 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 	f.IntVar(&after, "after-recurrences", 0, "Number of runs before stopping (--ending 2)")
 
 	completeValues(cmd, "frequency", sortedKeys(scheduleFrequencies))
-	f.StringVar(&endDate, "end-date", "", "Last run date, YYYY-MM-DD (--ending 3)")
+	f.StringVar(&endDate, "end-date", "",
+		"Date the schedule ends, YYYY-MM-DD (--ending 3); counted as whole\n"+
+			"cycles from --start to 00:00 on that date, so it is not always a run date")
 	return cmd
 }
 
