@@ -902,13 +902,13 @@ intuizi reference apps categories --search "Food & Drink" --quiet    # 23
 
 ### Checking what the API accepted
 
-A `--file` body is forwarded as written, and the API checks it. On an
-audience, a key the dataset type does not support inside a dataset block or
-its `location`, or an unknown key inside the top-level `analyses` block, is
-rejected with a 422 that names the key, so a mistyped filter fails the create
-rather than building something unintended. Top-level keys are not checked by
-name: a misspelt top-level block such as `crosspurchse` is ignored, and the
-audience builds without it.
+A `--file` body is forwarded as written, and the API validates the fields it
+defines. On an audience, a key the dataset type does not support inside a
+dataset block or its `location`, or an unknown key inside the top-level
+`analyses` block, is rejected with a 422 that names the key, so a mistyped
+filter fails the create rather than building something unintended. Top-level
+keys are not checked by name: a misspelt top-level block such as
+`crosspurchse` is ignored, and the audience builds without it.
 
 `normalized_payload` on an audience is the canonical copy of the `name`,
 `operator` and `datasets` it was created from, the body its `recipe_hash` is
