@@ -21,7 +21,7 @@ sending anything.
 | `audience-poi.json` | `audiences create` | The minimum: one POI dataset. |
 | `audience-two-datasets.json` | `audiences create` | Two datasets, so `operator` is required. |
 | `audience-refine-crosspurchase.json` | `audiences create` | `refine` sits **inside** the dataset; `crosspurchase` sits at the **top level**. Both are permission-gated. |
-| `activation.json` | `activations create --file` | A minimal export is three ids and needs no file at all. Add `--wait` to follow it to Completed; `--timeout` defaults to 60m. |
+| `activation.json` | `activations create --file` | From flags, an export needs `--audience-id`, `--endpoint-connection-id`, `--pricing-model-id` and at least one `--datastream`; without a datastream it completes and delivers nothing. Use this file for per-stream inputs or compression. Add `--wait` to follow it to Completed; `--timeout` defaults to 60m. |
 | `cohort.json` | `cohorts create` | Swap `file_uri` for `upload_reference` to use `intuizi uploads put`. Or build it from flags - see the README. |
 | `cohort-from-audience.json` | `cohorts create` | The audience must be Completed, and makes at most one live cohort. Swap `device_limit` for `freq_limit` + `freq_min`/`freq_max`, or `distance_limit` + `distance` (meters). Its `name` is ignored - the cohort takes the audience's. |
 | `schedule.json` | `schedules create` | `recurrence.start` must be in the future. |
@@ -37,6 +37,7 @@ intuizi reference apps categories                 # Apps "categories"
 intuizi reference transactions categories         # crosspurchase targets
 intuizi reference common endpoint-connections     # endpoint_connection_id
 intuizi reference common pricing-models --partner-id <id>
+intuizi reference common datastreams --partner-id <id>  # datastreams[].id
 intuizi reference common schedule-frequencies     # recurrence.frequency
 intuizi reference common schedule-windows         # recurrence.window_type
 intuizi reference common schedule-endings         # recurrence.ending.type
