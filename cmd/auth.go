@@ -75,9 +75,17 @@ the stored token is kept; an --email other than the stored account's, compared
 ignoring case, mints a token for that account and replaces the stored one. A
 token stored before accounts were recorded (v0.1.3 and earlier) cannot be
 matched, so the first --email login over it mints a new one. Run 'intuizi auth
-logout' first if you genuinely need a fresh one. A token is bound to the
-console that minted it, so logging in with a different --base-url mints a new
-one and replaces the stored base URL, token and account together.
+logout' first if you genuinely need a fresh one.
+
+A token is bound to the console that minted it, so logging in with a
+different --base-url mints a token for that console and makes it the one in
+use. In the config file that replaces the previous console's token. In the OS
+credential store the previous console's token stays stored under that
+console: a plain 'auth logout' does not remove it, 'auth status' does not show
+it, and logging back in to that console mints another rather than reusing it.
+Remove it with 'intuizi --base-url <previous console> auth logout'. Either way
+it stays valid on the server until it expires or is revoked at My Account >
+API Tokens.
 
 The token goes to the OS credential store when there is one, otherwise to the
 config file with owner-only permissions; the account email is kept in the

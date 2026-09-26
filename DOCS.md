@@ -46,12 +46,23 @@ expires or is revoked at My Account > API Tokens. A token stored before the
 account was recorded (v0.1.3 and earlier) cannot be matched, so the first
 `auth login --email` after upgrading mints a new token and records the account,
 and stderr says it replaced the stored token and whether that token was still
-valid; `auth login` without `--email` keeps it. Logging in
-with a different `--base-url` mints a new token there and replaces the stored
-base URL, token and account together. The file and its directory are checked
-before anything is minted, so a corrupt file or an unwritable directory fails
-without spending a token slot, and `auth login`, `auth status` and `auth
-logout` all name the file when it cannot be read. When the credential store
+valid; `auth login` without `--email` keeps it.
+
+Logging in with a different `--base-url` mints a token for that console and
+makes it the one in use, with its account. In the config file that replaces
+the previous console's token. In the OS credential store the previous
+console's token stays stored under that console: a plain `auth logout` does
+not remove it, `auth status` does not show it, and logging back in to that
+console mints another rather than reusing it. Remove it with
+`intuizi --base-url <previous console> auth logout`, as
+[Where the token is stored](#where-the-token-is-stored) shows. Either way it
+stays valid on the server until it expires or is revoked at My Account > API
+Tokens.
+
+The file and its directory are checked before anything is minted, so a
+corrupt file or an unwritable directory fails without spending a token slot,
+and `auth login`, `auth status` and `auth logout` all name the file when it
+cannot be read. When the credential store
 does not answer within two seconds and the config file names a console but
 does not hold the token itself, `auth login` fails before it mints anything;
 unlock the store and try again. A login that mints while the store is not
