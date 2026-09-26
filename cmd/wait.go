@@ -123,8 +123,7 @@ func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Re
 		)
 		if errors.Is(waitErr, errWaitGaveUp) {
 			// The last three reads failed; a fourth would only delay the exit.
-			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "printing the last polled record instead of re-reading it")
-			raw, err = json.MarshalIndent(final, "", "  ")
+			raw, err = polledRecord(cmd, final, fmt.Sprintf("the last %d reads failed", maxPollFailures))
 		} else {
 			// After a failure or a timeout the exit code is 1 whatever this
 			// read does, so it is not worth up to two more poll intervals.
@@ -164,8 +163,14 @@ func rawAfterWait(cmd *cobra.Command, c *api.Client, path string, final output.R
 			return nil, err
 		}
 	}
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-		"re-reading the final state failed (%v) - printing the last polled record instead\n", err)
+	return polledRecord(cmd, final, fmt.Sprintf("re-reading it failed (%v)", err))
+}
+
+// polledRecord is the --json fallback when the server's envelope for the
+// record cannot be had: the record as last polled, bare, which a jq path into
+// .data does not reach - so stderr says so, the same way whatever the reason.
+func polledRecord(cmd *cobra.Command, final output.Record, why string) ([]byte, error) {
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "printing the last polled record, not the server's envelope: %s\n", why)
 	return json.MarshalIndent(final, "", "  ")
 }
 

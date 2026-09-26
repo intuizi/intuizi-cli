@@ -13,6 +13,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// fallbackNote opens the one stderr line both --json fallbacks print - after
+// a failed re-read and after giving up - so a log reads the same either way
+// and says the stdout shape is not the envelope.
+const fallbackNote = "printing the last polled record, not the server's envelope:"
+
 // waitShow is a show-like leaf built on the wait helpers alone, so these tests
 // pin the helpers rather than whichever resource commands keep --wait.
 func waitShow() *cobra.Command {
@@ -171,8 +176,8 @@ func TestWaitJSONFallsBackToTheFinalRecord(t *testing.T) {
 	if status, _ := rec["status"].(map[string]any); status["name"] != "Completed" {
 		t.Errorf("stdout should be the final record:\n%s", out)
 	}
-	if !strings.Contains(errb, "last polled record") {
-		t.Errorf("stderr should say the shape is the fallback, got %q", errb)
+	if !strings.Contains(errb, fallbackNote+" re-reading it failed (") {
+		t.Errorf("stderr should say the shape is the fallback, and why, got %q", errb)
 	}
 }
 

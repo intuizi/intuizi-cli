@@ -746,8 +746,8 @@ func TestWaitGiveUpPrintsTheLastRecord(t *testing.T) {
 		if status, _ := rec["status"].(map[string]any); status["name"] != "Processing" {
 			t.Errorf("stdout should be the last polled record:\n%s", out)
 		}
-		if !strings.Contains(errb, "last polled record") {
-			t.Errorf("stderr should say the shape is the polled record, got %q", errb)
+		if !strings.Contains(errb, fallbackNote+" the last 3 reads failed") {
+			t.Errorf("stderr should say the shape is the polled record, and why, got %q", errb)
 		}
 	})
 
@@ -783,7 +783,7 @@ func TestWaitJSONReReadsOnceAfterAFailure(t *testing.T) {
 	if !strings.Contains(out, `"Error"`) {
 		t.Errorf("stdout should be the failed record:\n%s", out)
 	}
-	if !strings.Contains(errb, "last polled record") {
-		t.Errorf("stderr should say the shape is the fallback, got %q", errb)
+	if !strings.Contains(errb, fallbackNote+" re-reading it failed (") {
+		t.Errorf("stderr should say the shape is the fallback, and why, got %q", errb)
 	}
 }

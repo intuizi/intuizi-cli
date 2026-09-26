@@ -903,10 +903,11 @@ server-side. With `--json` the record is re-read and printed as the server's
 own envelope, so a failed wait exits 1 with a `"status": "success"` envelope
 on stdout: branch on the exit code or on `.data[0].status.id`, not on
 `.status`. That re-read is one more request after the wait ends, tried up to
-three times after a success and once after a failure or a timeout; if it
-fails, the last polled record is printed instead and stderr says so. After
-three failed reads in a row there is no re-read: stdout carries the last
-polled record itself rather than an envelope, and stderr says so. With
+three times after a success and once after a failure or a timeout. If it
+fails, or the wait gave up after three failed reads in a row (then there is no
+re-read), stdout carries the last polled record itself rather than an
+envelope, so read it as `.status.id`, not `.data[0].status.id`; stderr says
+`printing the last polled record, not the server's envelope:` and why. With
 `--quiet` only the id is printed, whatever the outcome.
 
 Nothing is printed on stdout when the wait ends with no record to show: a
