@@ -96,6 +96,10 @@ server - it only forgets it locally.`,
 	return cmd
 }
 
+// saveConfig stores what login minted and reports where the token went. A var
+// so a test can stand in for a credential store, which cmd tests never reach.
+var saveConfig = config.SaveWhere
+
 // login is commentary end to end - nothing here is data for a pipe - so every
 // line goes to stderr.
 func login(cmd *cobra.Command, email, password string) error {
@@ -163,7 +167,8 @@ func login(cmd *cobra.Command, email, password string) error {
 	cfg.Token = res.Token
 	cfg.ExpiresAt = res.ExpiresAt
 	cfg.Email = strings.TrimSpace(email)
-	if err := config.Save(cfg); err != nil {
+	where, err := saveConfig(cfg)
+	if err != nil {
 		return err
 	}
 
@@ -171,7 +176,12 @@ func login(cmd *cobra.Command, email, password string) error {
 	if heldHere {
 		reportReplaced(stderr, replaced, cfg.Email, dead)
 	}
-	_, _ = fmt.Fprintf(stderr, "Token saved to %s\n", path)
+	// Worded as 'auth status' reports the source.
+	if where == config.SourceKeyring {
+		_, _ = fmt.Fprintln(stderr, "Token saved in the OS credential store")
+	} else {
+		_, _ = fmt.Fprintf(stderr, "Token saved to %s\n", path)
+	}
 	if exp := formatExpiry(res.ExpiresAt); exp != "" {
 		_, _ = fmt.Fprintf(stderr, "Expires %s\n", exp)
 	}

@@ -142,50 +142,67 @@ func EnsureDir() error {
 // os.WriteFile's perm argument only applies when it creates the file, so it
 // cannot tighten an existing one.
 func Save(cfg *Config) error {
+	_, err := SaveWhere(cfg)
+	return err
+}
+
+// SaveWhere is Save, reporting where the token went: SourceKeyring when the
+// credential store took it, SourceConfig when the file holds it, and
+// SourceNone when there was no token to store. Login reports it, and must not
+// name the file for a token the file does not hold.
+func SaveWhere(cfg *Config) (string, error) {
 	// Only the secret moves; without a store nothing changes.
 	out := *cfg
+	where := SourceNone
+	if out.Token != "" {
+		where = SourceConfig
+	}
 	// Must match the key StoredToken reads, or the secret is unreachable.
 	if key := keyringKey(out.BaseURL); key != "" && out.Token != "" && keyringEnabled() &&
 		keyring.Set(keyringService, key, out.Token) == nil {
 		out.Token = ""
+		where = SourceKeyring
 	}
 	cfg = &out
 
 	path, err := Path()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := EnsureDir(); err != nil {
-		return err
+		return "", err
 	}
 	dir := filepath.Dir(path)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return err
+		return "", err
 	}
 	data = append(data, '\n')
 
 	// Same directory as the target, so the rename stays on one filesystem
 	tmp, err := os.CreateTemp(dir, ".config-*.json")
 	if err != nil {
-		return err
+		return "", err
 	}
 	tmpName := tmp.Name()
 	defer func() { _ = os.Remove(tmpName) }() // no-op once the rename succeeds
 
 	if err := tmp.Chmod(0600); err != nil {
 		_ = tmp.Close()
-		return err
+		return "", err
 	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
-		return err
+		return "", err
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return "", err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return "", err
+	}
+	return where, nil
 }
 
 // BaseURL resolves the console URL: the --base-url flag wins, then the stored

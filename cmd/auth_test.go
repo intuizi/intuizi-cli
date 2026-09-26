@@ -173,6 +173,37 @@ func TestLoginStoresTokenBaseAndExpiry(t *testing.T) {
 	}
 }
 
+// When the credential store takes the token, the file holds none, so naming
+// the file as where it went would send someone looking in the wrong place.
+func TestLoginSaysTheTokenWentToTheCredentialStore(t *testing.T) {
+	srv, _ := fakeConsole(t, "fresh-token", 200)
+	path := authEnv(t, srv.URL)
+
+	// cmd tests never reach a real store, so stand in for a Save the store
+	// accepted: the file keeps everything but the token.
+	prev := saveConfig
+	saveConfig = func(cfg *config.Config) (string, error) {
+		out := *cfg
+		out.Token = ""
+		if err := config.Save(&out); err != nil {
+			return "", err
+		}
+		return config.SourceKeyring, nil
+	}
+	t.Cleanup(func() { saveConfig = prev })
+
+	_, errb, err := runAuth(t, authLoginCommand(), "s3cret\n", "--email", "a@b.com")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if !strings.Contains(errb, "Token saved in the OS credential store") {
+		t.Errorf("stderr does not name the credential store:\n%s", errb)
+	}
+	if strings.Contains(errb, path) {
+		t.Errorf("stderr names the config file, which holds no token:\n%s", errb)
+	}
+}
+
 func TestLoginTakesPasswordFromFlag(t *testing.T) {
 	srv, got := fakeConsole(t, "tok", 200)
 	authEnv(t, srv.URL)

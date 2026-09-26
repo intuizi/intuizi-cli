@@ -928,3 +928,44 @@ func TestClearTokenKeepsAnotherConsolesEmail(t *testing.T) {
 		t.Errorf("another console's email was cleared: %+v", cfg)
 	}
 }
+
+// Login says where the token went, so Save has to report it: the store when it
+// took the secret, the file otherwise, and nothing when there was no token.
+func TestSaveWhereReportsWhereTheTokenWent(t *testing.T) {
+	isolate(t)
+
+	where, err := SaveWhere(&Config{BaseURL: "https://example.com", Token: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if where != SourceKeyring {
+		t.Errorf("with a store: where = %q, want %q", where, SourceKeyring)
+	}
+
+	fakeKeyringFor(t).fail = true
+	where, err = SaveWhere(&Config{BaseURL: "https://example.com", Token: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if where != SourceConfig {
+		t.Errorf("with no store: where = %q, want %q", where, SourceConfig)
+	}
+
+	fakeKeyringFor(t).fail = false
+	t.Setenv(EnvNoKeyring, "1")
+	where, err = SaveWhere(&Config{BaseURL: "https://example.com", Token: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if where != SourceConfig {
+		t.Errorf("with %s set: where = %q, want %q", EnvNoKeyring, where, SourceConfig)
+	}
+
+	where, err = SaveWhere(&Config{BaseURL: "https://example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if where != SourceNone {
+		t.Errorf("with no token: where = %q, want %q", where, SourceNone)
+	}
+}
