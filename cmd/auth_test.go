@@ -719,6 +719,63 @@ func TestStatusWithConfigToken(t *testing.T) {
 	}
 }
 
+// A --base-url other than the stored token's console: every other command
+// refuses that token, and --verify used to send it to the other host. Status
+// says there is none for this console, exits 1, and sends nothing.
+func TestStatusAgainstAnotherConsole(t *testing.T) {
+	srv, got := fakeConsole(t, "tok", 200)
+	path := authEnv(t, srv.URL)
+	storeAuthConfig(t, path, config.Config{BaseURL: "https://console.intuizi.com", Token: "stored",
+		ExpiresAt: "2099-01-01T00:00:00+00:00", Email: "a@b.com"})
+
+	out, _, err := runAuth(t, authStatusCommand(), "", "--verify")
+	if err == nil {
+		t.Fatal("status against another console should fail")
+	}
+	if code := exitCode(err, nil, true); code != exitError {
+		t.Errorf("exit = %d, want %d", code, exitError)
+	}
+	for _, want := range []string{"belongs to https://console.intuizi.com", "not " + srv.URL,
+		"auth login --base-url " + srv.URL} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
+	}
+	if !strings.Contains(out, "Token:    none for this console") || !strings.Contains(out, "https://console.intuizi.com") {
+		t.Errorf("stdout = %q, want no token for this console", out)
+	}
+	// Another console's account and expiry say nothing about this one.
+	if strings.Contains(out, "a@b.com") || strings.Contains(out, "Expires") {
+		t.Errorf("stdout describes the other console's token:\n%s", out)
+	}
+	if got.hits() != 0 {
+		t.Errorf("the token must not travel to the other host, got %v", got.paths)
+	}
+}
+
+// Only a different host is another console: a trailing slash is not, and a
+// config from before base URLs were stored names none.
+func TestStatusSameConsoleIsNotAMismatch(t *testing.T) {
+	for name, stored := range map[string]func(string) string{
+		"trailing slash": func(u string) string { return u + "/" },
+		"no base url":    func(string) string { return "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, _ := fakeConsole(t, "tok", 200)
+			path := authEnv(t, srv.URL)
+			storeAuthConfig(t, path, config.Config{BaseURL: stored(srv.URL), Token: "stored", Email: "a@b.com"})
+
+			out, _, err := runAuth(t, authStatusCommand(), "", "--verify")
+			if err != nil {
+				t.Fatalf("status: %v", err)
+			}
+			if !strings.Contains(out, "Account:  a@b.com") || !strings.Contains(out, "Verified") {
+				t.Errorf("stdout = %q", out)
+			}
+		})
+	}
+}
+
 func TestStatusWithNoTokenExitsNonZero(t *testing.T) {
 	srv, _ := fakeConsole(t, "tok", 200)
 	authEnv(t, srv.URL)

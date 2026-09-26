@@ -407,11 +407,19 @@ func status(cmd *cobra.Command, verify bool) error {
 		// Not the stored token, so the stored account says nothing about it.
 		_, _ = fmt.Fprintf(stdout, "Account:  unknown (the token comes from %s, so the account "+
 			"is not known locally)\n", config.EnvToken)
-	case config.SourceKeyring:
-		_, _ = fmt.Fprintf(stdout, "Token:    present (in the OS credential store)\n")
-		printStored(cmd, cfg)
-	case config.SourceConfig:
-		_, _ = fmt.Fprintf(stdout, "Token:    present (from %s)\n", path)
+	case config.SourceKeyring, config.SourceConfig:
+		// Every other command refuses it here, and --verify would send it
+		// to this host; its account and expiry are another console's.
+		if err := otherConsole(cfg.BaseURL, base); err != nil {
+			_, _ = fmt.Fprintf(stdout, "Token:    none for this console (the stored one belongs to %s)\n",
+				trimURL(cfg.BaseURL))
+			return err
+		}
+		if source == config.SourceKeyring {
+			_, _ = fmt.Fprintln(stdout, "Token:    present (in the OS credential store)")
+		} else {
+			_, _ = fmt.Fprintf(stdout, "Token:    present (from %s)\n", path)
+		}
 		printStored(cmd, cfg)
 	case config.SourceUnavailable:
 		_, _ = fmt.Fprintln(stdout, "Token:    unknown (the credential store did not answer)")

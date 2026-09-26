@@ -69,6 +69,12 @@ Account:  you@example.com
 Expires:  2027-09-26 (in 365 days)
 ```
 
+Every command refuses a stored token for a `--base-url` other than the
+console that minted it, rather than send the credential to another host.
+`auth status` does the same: with another console's `--base-url` it prints
+`Token:    none for this console (the stored one belongs to <url>)`, no
+account or expiry, sends nothing even with `--verify`, and exits 1.
+
 `auth logout` forgets the account email with the token, and stays local: it
 never calls the server.
 
