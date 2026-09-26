@@ -113,9 +113,10 @@ intuizi audiences create --type poi --brand starbucks ... --dry-run > audience.j
 ```
 
 `--file payload.json` (or `-` for stdin) stays for what the flags do not
-model: two datasets combined with an operator, refine and crosspurchase
-blocks, a schedule's auto-export, cohort limits by visit frequency, distance or
-Lookalike Model score range, and Match Strictness on an SCID cohort import.
+model: two datasets combined with an operator, the refine, crossvisitation and
+crosspurchase blocks, an activation's partner and per-stream inputs, a
+schedule's auto-export, cohort limits by visit frequency, distance or Lookalike
+Model score range, and Match Strictness on an SCID cohort import.
 Ready-made payloads live in [`examples/`](examples).
 
 ```bash
@@ -152,10 +153,11 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 - **Pure API v2 client.** Every command maps to a documented endpoint of the
   Intuizi API v2 (`https://console.intuizi.com/api/v2`). No server-side
   logic lives here.
-- **Most of the v2 surface.** Auth, audiences (including refine and
-  crosspurchase), activations, cohorts, schedules, projects, POI, uploads,
-  usage and reference reads. Audience size estimates, activation preview and
-  datastream visualizations have no command; call the API for those.
+- **Most of the v2 surface.** Auth, audiences (including refine,
+  crossvisitation and crosspurchase), activations, cohorts, schedules,
+  projects, POI, uploads, usage and reference reads. Audience size estimates,
+  activation preview and datastream visualizations have no command; call the
+  API for those.
 - **Human first, script friendly.** Readable tables by default, `--json` for
   raw responses, `--quiet` for ids alone, and exit codes scripts can branch on.
 - **Wrong input fails before it is sent.** Names are resolved against the
