@@ -589,7 +589,7 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 | `--metadata-columns` | column name, repeatable | `cohorts preview` |
 | `--ip-enrichment` | boolean: also add devices seen on the same IP addresses as the cohort's devices (Enrich by Household) | - |
 | `--device-limit` | device cap | - |
-| `--project-id` | project id | `projects list` |
+| `--project-id` | project id, for a file or upload source; an audience source takes the audience's project, though an id you do not own still fails the create | `projects list` |
 | `--dry-run` | - | - |
 
 `--identifier-type` takes `eid`, `eid_md5`, `maid`, `ip`, `hem_plaintext`,

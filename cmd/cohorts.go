@@ -276,7 +276,9 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 	flags.IntVar(&deviceLimit, "device-limit", 0,
 		"Cap the devices imported")
 	flags.IntVar(&projectID, "project-id", 0,
-		"The project to create the cohort in")
+		"The project to create the cohort in, for a file or upload source (an\n"+
+			"audience source takes the audience's project; an id you do not own\n"+
+			"still fails)")
 
 	completeValues(cmd, "file-format", cohortFileFormats)
 	completeValues(cmd, "identifier-type", identifierTypes)
