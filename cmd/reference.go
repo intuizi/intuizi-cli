@@ -240,7 +240,10 @@ var referenceCmd = &cobra.Command{
 	Long: `Read the catalogs an audience payload is built from.
 
 Every reference read is a GET with no side effects, so these are safe to explore.
-Ids and values collected here are what 'intuizi audiences create' expects.
+Ids and values collected here are what 'intuizi audiences create' expects. The
+one exception is 'web iab-categories': its value is the IAB code that 'web
+domains --category-codes' takes, and a WebDomain audience takes the number in
+its id column instead.
 
     intuizi reference common dataset-types
     intuizi reference common states --countries USA

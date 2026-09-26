@@ -73,8 +73,10 @@ an error listing what was found, and so is an exact label on a result too long
 to arrive in one page. --brand-all takes every match for a search instead, for
 the deliberate "all the coffee brands" case, and reports to stderr how many it
 selected. --brand applies to POI. --category applies to POI, Apps, WebDomain
-and AffinityTransactions, each resolving against its own catalog. Every
-selector repeats for more than one value.
+and AffinityTransactions, each resolving against its own catalog. For
+WebDomain that is 'intuizi reference web iab-categories', whose id is the
+number in its id column, not the IAB code in its value column. Every selector
+repeats for more than one value.
 
 --type origin targets devices by their home location rather than the places
 they visited, so its only filters are geographic. --country is required, and

@@ -34,6 +34,7 @@ intuizi reference common signal-providers --data-type POI
 intuizi reference common countries                # location.countries
 intuizi reference poi categories                  # POI "categories"
 intuizi reference apps categories                 # Apps "categories"
+intuizi reference web iab-categories              # WebDomain "iab_category_codes": the id column, not the code
 intuizi reference transactions categories         # crosspurchase targets
 intuizi reference common endpoint-connections     # endpoint_connection_id
 intuizi reference common pricing-models --partner-id <id>

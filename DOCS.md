@@ -267,6 +267,12 @@ resolved ids go into a different payload field:
 | AffinityTransactions | `reference transactions categories` | `categories` |
 | WebDomain | `reference web iab-categories` | `iab_category_codes` |
 
+An IAB category row carries two identifiers: the IAB code (`IAB2`) as `value`,
+which `reference web domains --category-codes` takes, and the catalog `id`
+(`2`), which is what `iab_category_codes` takes. A WebDomain `--category` name
+resolves to the `id`, and a number passed instead must be that `id`, not the
+code.
+
 `--brand` is POI only. AffinityTransactions has brands too, in its own
 `brands` field, which no flag writes yet; that filter needs `--file`.
 
@@ -804,7 +810,9 @@ catalog unfiltered:
   `values` (`--category-ids`, `--key`).
 - **web** - `iab-categories`, then `iab-subcategories` (`--category-ids`).
   `domains` narrows by either level (`--category-codes`,
-  `--subcategory-codes`).
+  `--subcategory-codes`). An `iab-categories` row's `value` is the IAB code,
+  which `--quiet` prints and `domains --category-codes` takes; a WebDomain
+  audience's `iab_category_codes` takes the number in its `id` column instead.
 
 Table cells show a list of plain values inline, such as a datastream's
 `dataset_types`; a list of objects shows as a count, and `--json` has it in

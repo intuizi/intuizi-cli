@@ -143,6 +143,30 @@ func TestAudiencesCreateChecksProvidersAgainstTheCatalog(t *testing.T) {
 	})
 }
 
+// A WebDomain --category name resolves to the IAB category's id, which is what
+// iab_category_codes takes; the code in the row's value is rejected with a 422.
+func TestAudiencesCreateWebDomainCategoryResolvesToTheID(t *testing.T) {
+	srv, got := stubSeq(t,
+		reply{body: `{"status":"success","code":200,"message":"ok","data":[` +
+			`{"value":"IAB2","text":"IAB2 - Automotive","id":2}]}`},
+		reply{body: providersPOI})
+
+	body := dryRunBody(t, audiencesCreateCommand(), srv,
+		"--type", "webdomain", "--category", "Automotive", "--country", "USA",
+		"--start-date", "2026-09-02", "--end-date", "2026-09-09", "--name", "Auto")
+
+	if len(got.paths) == 0 || got.paths[0] != "/api/v2"+referencePrefix+"web/iab-categories" {
+		t.Errorf("paths = %v, want the IAB category catalog read first", got.paths)
+	}
+	ds := firstDataset(t, body)
+	if raw, _ := json.Marshal(ds["iab_category_codes"]); string(raw) != "[2]" {
+		t.Errorf("iab_category_codes = %s, want [2]", raw)
+	}
+	if _, ok := ds["categories"]; ok {
+		t.Errorf("WebDomain wrote categories too: %v", ds)
+	}
+}
+
 // Changed is true for --name "" and --country "", so the required-flag check
 // passed and the API was sent "" and [""] entries.
 func TestAudiencesCreateRejectsEmptyValues(t *testing.T) {

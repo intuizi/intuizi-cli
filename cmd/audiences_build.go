@@ -16,8 +16,9 @@ import (
 // Catalogs the create flags resolve against, mirroring the equivalent
 // 'intuizi reference <group> <item>'.
 const (
-	brandsPath    = referencePrefix + "poi/brands"
-	providersPath = referencePrefix + "common/signal-providers"
+	brandsPath        = referencePrefix + "poi/brands"
+	providersPath     = referencePrefix + "common/signal-providers"
+	iabCategoriesPath = referencePrefix + "web/iab-categories"
 )
 
 // categoryCatalog is where --category resolves and where the ids then go.
@@ -32,7 +33,7 @@ var categoryCatalogs = map[string]categoryCatalog{
 	"POI":                  {referencePrefix + "poi/categories", "categories"},
 	"Apps":                 {referencePrefix + "apps/categories", "categories"},
 	"AffinityTransactions": {referencePrefix + "affinity-transactions/categories", "categories"},
-	"WebDomain":            {referencePrefix + "web/iab-categories", "iab_category_codes"},
+	"WebDomain":            {iabCategoriesPath, "iab_category_codes"},
 }
 
 // categoryFor rejects types with no category catalog, rather than sending a
@@ -86,7 +87,7 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 				len(items), what, search)
 		}
 		for _, it := range items {
-			fmt.Fprintf(&b, "\n  %-8v %v", catalogID(it), catalogLabel(it))
+			fmt.Fprintf(&b, "\n  %-8v %v", catalogID(it, path), catalogLabel(it))
 		}
 		return nil, usageErr(b.String())
 	}
@@ -108,8 +109,8 @@ func exactMatches(items []output.Record, search string) []output.Record {
 
 // catalogID is catalogValue for a listing, where a row with no id is still
 // worth showing rather than aborting the message.
-func catalogID(r output.Record) any {
-	v, err := catalogValue(r, "")
+func catalogID(r output.Record, path string) any {
+	v, err := catalogValue(r, path)
 	if err != nil {
 		return "?"
 	}
@@ -128,9 +129,15 @@ func catalogLabel(r output.Record) any {
 
 // catalogValue reads a row's id. Catalogs answer with value/text or id/name,
 // and a missing one would marshal as null - which the API ignores, leaving an
-// audience that completes with no devices.
+// audience that completes with no devices. IAB category rows carry both: the
+// code (IAB2) as value, for 'reference web domains --category-codes', and the
+// catalog id as id, which is what iab_category_codes takes. The code is a 422.
 func catalogValue(r output.Record, path string) (any, error) {
-	for _, k := range []string{"value", "id"} {
+	keys := []string{"value", "id"}
+	if path == iabCategoriesPath {
+		keys = []string{"id", "value"}
+	}
+	for _, k := range keys {
 		if v := r[k]; v != nil {
 			return v, nil
 		}

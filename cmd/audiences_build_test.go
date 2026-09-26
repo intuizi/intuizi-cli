@@ -324,6 +324,52 @@ func TestCatalogValueReadsEitherKey(t *testing.T) {
 	}
 }
 
+// IAB category rows carry the code as value and the catalog id as id, and
+// Create Audience takes the id: iab_category_codes are integers. Every other
+// catalog's value is the id itself.
+func TestCatalogValueTakesTheIDForIABCategories(t *testing.T) {
+	row := output.Record{"value": "IAB2", "text": "IAB2 - Automotive", "id": 2}
+
+	got, err := catalogValue(row, referencePrefix+"web/iab-categories")
+	if err != nil {
+		t.Fatalf("catalogValue: %v", err)
+	}
+	if raw, _ := json.Marshal(got); string(raw) != "2" {
+		t.Errorf("IAB category resolved to %s, want the id 2", raw)
+	}
+
+	got, err = catalogValue(row, brandsPath)
+	if err != nil {
+		t.Fatalf("catalogValue: %v", err)
+	}
+	if got != "IAB2" {
+		t.Errorf("another catalog resolved to %v, want its value", got)
+	}
+}
+
+// The "pass an id" list must show what --category takes, so an IAB category
+// lists its id, not the code.
+func TestResolveOneAmbiguityListsIABCategoryIDs(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":"IAB2","text":"IAB2 - Automotive","id":2},`+
+		`{"value":"IAB20","text":"IAB20 - Travel","id":20}]}`)
+
+	_, err := resolveOne(context.Background(), c, referencePrefix+"web/iab-categories", "IAB2", "categories")
+	if err == nil {
+		t.Fatal("resolveOne picked one of several matches")
+	}
+	for _, want := range []string{"\n  2 ", "\n  20 ", "IAB2 - Automotive", "IAB20 - Travel"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error omits %q: %v", want, err)
+		}
+	}
+	for _, code := range []string{"\n  IAB2 ", "\n  IAB20 "} {
+		if strings.Contains(err.Error(), code) {
+			t.Errorf("error lists the code %q where the id belongs: %v", code, err)
+		}
+	}
+}
+
 // WebDomain reads its categories from iab_category_codes, not categories.
 // Writing the wrong field is not rejected by the API, just ignored.
 func TestCategoryForNamesBothCatalogAndField(t *testing.T) {
