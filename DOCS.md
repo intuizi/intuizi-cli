@@ -901,29 +901,38 @@ intuizi reference apps categories --search "Food & Drink" --quiet    # 23
 
 ### Checking what the API accepted
 
-A `--file` body is forwarded as written. A field the API does not recognise is
-ignored rather than rejected, so a mistyped key or an unsupported filter
-produces a Completed resource that quietly does not mean what was intended.
+A `--file` body is forwarded as written, and the API checks it. On an
+audience, a key the dataset type does not support inside a dataset block or
+its `location`, or an unknown key inside the top-level `analyses` block, is
+rejected with a 422 that names the key, so a mistyped filter fails the create
+rather than building something unintended. Top-level keys are not checked by
+name: a misspelt top-level block such as `crosspurchse` is ignored, and the
+audience builds without it.
 
-`normalized_payload` on an audience is the API's own record of what it kept.
-Reading it back is the only way to confirm a filter applied:
+`normalized_payload` on an audience is the canonical copy of the `name`,
+`operator` and `datasets` it was created from, the body its `recipe_hash` is
+computed from. It echoes what was sent, so a per-dataset filter, such as the
+brand or the country, that is missing from it was not sent:
 
 ```bash
 intuizi audiences show <id> --json | jq '.data[0].normalized_payload.datasets[0].location'
 ```
 
-A filter missing from the response was dropped. An implausible `results_count`
-is the other symptom: a signal provider id outside the account's catalog is not
-rejected, and the audience completes with zero devices.
+Top-level blocks such as `crossvisitation`, `crosspurchase` and `analyses` are
+never part of it, even when they were applied. An implausible `results_count`
+is the symptom to watch: a signal provider id outside the account's catalog is
+not rejected, and the audience completes with zero devices.
 
 Three things to know about the field:
 
 - It is spelled `normalized_payload`, with underscores.
-- It reflects what was stored, not what is valid to send. A single-dataset
-  audience reads back with `"operator": "Single"`, but `Single` is not a value
-  the operators catalog accepts on the way in, so do not copy it into a new
-  payload.
-- It is only populated on recently created records; older audiences return null.
+- It is the request in canonical form, not a guide to what is valid to send.
+  A single-dataset audience reads back with `"operator": "Single"`, but
+  `Single` is not a value the operators catalog accepts on the way in, so do
+  not copy it into a new payload.
+- Only an API create sets it. It is `null` for audiences built in Audience
+  Manager, for Lookalike Model results, and for audiences created before the
+  field existed.
 
 Building creates from flags avoids most of this: names are resolved against the
 catalogs before anything is sent, and the payload is assembled from typed fields
