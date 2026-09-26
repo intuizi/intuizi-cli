@@ -71,10 +71,12 @@ If a working token is already stored for the same console and the same
 account it is reused rather than minting another - accounts are capped at 10
 active tokens - and stderr names the account it belongs to. Without --email
 the stored token is kept; an --email other than the stored account's, compared
-ignoring case, mints a token for that account and replaces the stored one. Run
-'intuizi auth logout' first if you genuinely need a fresh one. A token is bound
-to the console that minted it, so logging in with a different --base-url mints
-a new one and replaces the stored base URL and token together.
+ignoring case, mints a token for that account and replaces the stored one. A
+token stored before accounts were recorded (v0.1.3 and earlier) cannot be
+matched, so the first --email login over it mints a new one. Run 'intuizi auth
+logout' first if you genuinely need a fresh one. A token is bound to the
+console that minted it, so logging in with a different --base-url mints a new
+one and replaces the stored base URL, token and account together.
 
 The token goes to the OS credential store when there is one, otherwise to the
 config file with owner-only permissions; the account email is kept in the
