@@ -120,7 +120,8 @@ content_length must be the exact byte size of the file you will send.`,
 	flags.StringVar(&filename, "filename", "",
 		"Original filename, which names the stored object: .csv or .txt for\n"+
 			"poi_submission; for cohort, a name ending .csv, .gz or .parquet imports\n"+
-			"as one file and anything else as a folder (default upload.csv)")
+			"as one file and anything else as a folder. Left out, the API uses\n"+
+			"upload.csv")
 	flags.StringVar(&contentType, "content-type", "", "MIME type the PUT will send (default text/csv)")
 	flags.Int64Var(&size, "content-length", 0, "Exact byte size of the file you will PUT")
 	_ = cmd.MarkFlagRequired("purpose")
