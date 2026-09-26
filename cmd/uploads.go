@@ -18,8 +18,9 @@ import (
 // reserve a slot, PUT the bytes to the presigned URL, then hand the
 // upload_reference to the create that claims it.
 //
-// 'uploads put' runs all three. 'uploads reserve' exposes step one alone, for a
-// caller that wants to do its own PUT.
+// 'uploads put' runs the first two and prints the reference; the create is a
+// separate command. 'uploads reserve' exposes step one alone, for a caller that
+// wants to do its own PUT.
 
 const uploadsCreatePath = "/uploads/create"
 
@@ -32,14 +33,28 @@ var uploadsCmd = &cobra.Command{
 
 Uploading is three steps: reserve a slot, PUT the bytes to the presigned URL
 that comes back, then pass the upload_reference to the create that claims it -
-'intuizi cohorts create' or 'intuizi poi submissions create --upload-reference'.
+'intuizi cohorts create --upload-reference' for a cohort upload, or
+'intuizi poi submissions create --upload-reference' for a poi_submission one.
 
-'uploads put' does all three and prints just the reference:
+'uploads put' does the first two and prints just the reference; the create is
+a separate command:
 
     ref=$(intuizi uploads put customers.csv --purpose cohort)
+    intuizi cohorts create --upload-reference "$ref" ...
 
-Caps are per purpose: 50 MB for poi_submission, 1 GB for cohort. A reservation
-that is never used simply expires.`,
+Caps are per purpose: 50 MB for poi_submission, 1 GB for cohort.
+
+A reservation expires at its expires_at, 15 minutes after it is made. The PUT
+and the create that claims the reference both have to happen before then: a
+create after it is refused even when the PUT succeeded. A reference is claimed
+once, and a create refused after claiming it, as by the build budget, has used
+it up, so upload the file again for a new one.
+
+The filename names the stored object, and matters twice. A poi_submission
+name must end .csv or .txt, or the reservation is refused. A cohort name
+decides how 'cohorts create' imports the file: one ending .csv, .gz or
+.parquet, case-sensitive and within its first 100 characters, is read as one
+file, and anything else as a folder.`,
 }
 
 // uploadPurposes is what --purpose accepts. Validation, help text and
@@ -84,7 +99,8 @@ func uploadsReserveCommand() *cobra.Command {
 		Long: `Reserve an upload slot.
 
 Returns an upload_reference and the presigned URL to PUT the bytes to. Use this
-when you want to do the PUT yourself; 'uploads put' is the one-step version.
+when you want to do the PUT yourself; 'uploads put' does the reserve and the
+PUT in one command.
 
 content_length must be the exact byte size of the file you will send.`,
 		Args: cobra.NoArgs,
@@ -101,7 +117,11 @@ content_length must be the exact byte size of the file you will send.`,
 	flags := cmd.Flags()
 	flags.StringVar(&purpose, "purpose", "", "What the upload is for: "+strings.Join(uploadPurposes, " or "))
 	completeValues(cmd, "purpose", uploadPurposes)
-	flags.StringVar(&filename, "filename", "", "Original filename, used to name the stored object")
+	flags.StringVar(&filename, "filename", "",
+		"Original filename, which names the stored object: .csv or .txt for\n"+
+			"poi_submission; for cohort, a name ending .csv, .gz or .parquet imports\n"+
+			"as one file and anything else as a folder. Left out, the API uses\n"+
+			"upload.csv")
 	flags.StringVar(&contentType, "content-type", "", "MIME type the PUT will send (default text/csv)")
 	flags.Int64Var(&size, "content-length", 0, "Exact byte size of the file you will PUT")
 	_ = cmd.MarkFlagRequired("purpose")
@@ -129,9 +149,15 @@ directly:
 With --json the reservation envelope is printed instead, once the PUT has
 succeeded, so .data[0].upload_reference is the same value.
 
-The size is taken from the file, so it always matches what is sent. The PUT
-itself carries no Intuizi credentials - the signature in the URL is what
-authorises it.`,
+The size is taken from the file, so it always matches what is sent, and the
+file's own name is sent as the filename. So a poi_submission file must end
+.csv or .txt, and a cohort file should end .csv, .gz or .parquet
+(case-sensitive), or 'cohorts create' imports it as a folder: rename it before
+uploading. The PUT itself carries no Intuizi credentials - the signature in
+the URL is what authorises it.
+
+The reference has to be claimed by a create within 15 minutes of the
+reservation, before its expires_at.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkPurpose(purpose); err != nil {
@@ -161,6 +187,9 @@ authorises it.`,
 			slot, raw, err := api.CreateWithEnvelope[output.Record](cmd.Context(), c, uploadsCreatePath,
 				reserveBody(purpose, info.Name(), contentType, info.Size()))
 			if err != nil {
+				if jsonOutput {
+					printErrorEnvelope(cmd, err)
+				}
 				return err
 			}
 
@@ -193,14 +222,14 @@ authorises it.`,
 	return cmd
 }
 
-// putHeaders is what the PUT must carry: every header the reservation signed,
+// putHeaders is what the PUT must carry: every header the reservation listed,
 // with --content-type replacing Content-Type alone. Keys are canonicalised on
 // the way in so the override replaces the server's spelling rather than
 // racing it on map order.
 func putHeaders(slot output.Record, contentType string) map[string]string {
 	headers := map[string]string{}
-	if signed, ok := slot["headers"].(map[string]any); ok {
-		for k, v := range signed {
+	if listed, ok := slot["headers"].(map[string]any); ok {
+		for k, v := range listed {
 			switch v := v.(type) {
 			case string:
 				headers[http.CanonicalHeaderKey(k)] = v

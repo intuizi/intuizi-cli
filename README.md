@@ -34,23 +34,30 @@ macOS, Linux and Windows, amd64 and arm64. The npm package is a small launcher
 that pulls in the binary for your platform as an optional dependency; nothing
 is downloaded at install time beyond the packages themselves.
 
-Or build from source, which needs the Go toolchain:
+Or build from source, which needs the Go toolchain. Name the binary
+`intuizi` and put it on your PATH, since every command below uses that name:
 
 ```bash
-go install github.com/intuizi/intuizi-cli@latest   # or: make build
+git clone https://github.com/intuizi/intuizi-cli && cd intuizi-cli
+go build -o "$(go env GOPATH)/bin/intuizi" .   # or: make build, which writes ./bin/intuizi
 ```
+
+A source build reports its version as `dev`.
 
 ## Quickstart
 
 ```bash
-intuizi auth login                  # stores a token in ~/.config/intuizi/
+intuizi auth login                  # mints an API token and stores it
 intuizi reference poi brands --search starbucks
 intuizi audiences list
 ```
 
-`auth login` asks for the email and password of your Intuizi account. In CI,
-set `INTUIZI_API_TOKEN` to a token minted in the console under My Account then
-API Tokens, and skip the login.
+`auth login` asks for the email and password of your Intuizi account and
+keeps the token it mints in the OS credential store, or in
+`~/.config/intuizi/config.json` where there is none; `auth status` shows where
+it is held and which account it belongs to. To switch accounts, log in again
+with the other account's `--email`. In CI, set `INTUIZI_API_TOKEN` to a token
+minted in the console under My Account then API Tokens, and skip the login.
 
 ## Usage
 
@@ -62,7 +69,7 @@ exact name; otherwise nothing or several is an error listing what it found.
 the coffee brands" case.
 
 ```bash
-# Authenticate once; stores a bearer token in ~/.config/intuizi/
+# Authenticate once; stores a bearer token for later commands
 intuizi auth login
 
 # Build an audience and block until it has built
@@ -72,9 +79,10 @@ intuizi audiences create \
   --start-date 2026-09-02 --end-date 2026-09-09 \
   --name "Starbucks visitors - SF - 1 week" --wait
 
-# Export it, following the delivery to Completed
+# Export it through one of the partner's datastreams, following the
+# delivery to Completed
 intuizi activations create --audience-id 88 \
-  --endpoint-connection-id 12 --pricing-model-id 3 --wait
+  --endpoint-connection-id 12 --pricing-model-id 3 --datastream 7 --wait
 
 # Import your own identifiers as a cohort from a cloud file
 intuizi cohorts create --name "Loyalty members" \
@@ -89,34 +97,40 @@ intuizi cohorts create --name "Customers" --upload-reference "$ref" \
 # Or turn a completed audience into a cohort
 intuizi cohorts create --audience-id 88 --device-limit 1000
 
-# Rebuild an audience every week
+# Rebuild an audience every week; --start must be in the future in --timezone
 intuizi schedules create --name "Weekly refresh" --audience-id 88 \
-  --start "2026-09-15 06:00:00" --timezone America/New_York \
-  --frequency weekly --window 2
+  --start "2027-09-15 06:00:00" --timezone America/New_York \
+  --frequency weekly --window 4
 ```
 
-`--dry-run` prints the request body those flags produce and sends nothing, so
-you can check a payload before it costs anything, or redirect it to a file as a
-starting point.
+`--dry-run` prints the request body those flags produce and creates nothing,
+so you can check a payload before it costs anything, or redirect it to a file
+as a starting point. On `audiences create` it still reads the catalogs to
+resolve names, so it needs a token; the other creates send nothing.
 
 ```bash
 intuizi audiences create --type poi --brand starbucks ... --dry-run > audience.json
 ```
 
-`--file payload.json` (or `-` for stdin) stays for the genuinely nested cases:
-two datasets combined with an operator, refine and crosspurchase blocks, a
-schedule's auto-export, and cohort caps by visit frequency or distance.
+`--file payload.json` (or `-` for stdin) stays for what the flags do not
+model: two datasets combined with an operator, the refine, crossvisitation and
+crosspurchase blocks, the Cohorts, Demographics and ProfileAttributes audience
+types, any other audience field no flag writes (project_id, POI locations,
+DMAs, the analyses block Preview Activation needs, datastreams), an
+activation's partner and per-stream inputs, a schedule's auto-export, cohort
+limits by visit frequency, distance or Lookalike Model score range, and Match
+Strictness on an SCID cohort import.
 Ready-made payloads live in [`examples/`](examples).
 
 ```bash
-# Everything supports --json for scripting, and --quiet for ids alone
+# Reads and creates take --json for scripting, and --quiet for ids alone
 intuizi reference poi brands --search starbucks --quiet       # 208
 id=$(intuizi audiences create --type poi ... --wait --quiet)
 intuizi audiences show "$id" --json | jq '.data[0].normalized_payload'
 ```
 
-Full flag reference, including the lookup command behind every value, is in
-[DOCS.md](DOCS.md).
+How to build each create, including the lookup command behind every value, is
+in [DOCS.md](DOCS.md); `--help` on any command lists all of its flags.
 
 ## Commands
 
@@ -139,29 +153,42 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 
 ## Design
 
-- **Pure API v2 client.** Every command maps to a documented endpoint of the
-  Intuizi API v2 (`https://console.intuizi.com/api/v2`). No server-side
-  logic lives here.
-- **Full v2 parity.** Auth, audiences (including refine and crosspurchase),
-  activations, cohorts, POI, and reference reads.
+- **Pure API v2 client.** Every command that calls the API uses documented
+  endpoints of the Intuizi API v2 (`https://console.intuizi.com/api/v2`).
+  Some make more than one call (catalog lookups for names, `--wait` polling,
+  and the presigned storage PUT in `uploads put`), and `version`,
+  `completion`, `auth logout` and `auth status` without `--verify` call none.
+  No server-side logic lives here.
+- **Most of the v2 surface.** Auth, audiences (including refine,
+  crossvisitation and crosspurchase), activations, cohorts, schedules,
+  projects, POI, uploads, usage and reference reads. Audience size estimates,
+  activation preview and datastream visualizations have no command; call the
+  API for those.
 - **Human first, script friendly.** Readable tables by default, `--json` for
   raw responses, `--quiet` for ids alone, and exit codes scripts can branch on.
 - **Wrong input fails before it is sent.** Names are resolved against the
   catalogs, dataset types and date ranges are validated locally, and payloads
-  are built from typed fields rather than free-form JSON.
+  built from flags come from typed fields rather than free-form JSON. A
+  `--file` body is forwarded as written.
 
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | `0` | Success |
-| `1` | API error, or a `--wait` that ended in a failed or timed-out state |
-| `2` | Usage error - an unknown flag or flag value, an unknown command or subcommand, an invalid id argument, or flags that are missing or conflict. Caught before anything is sent |
+| `1` | A failure once the command line parsed: an API error, a `--wait` that failed, timed out or gave up, or a local failure such as an unreadable `--file`, a missing token or a declined confirmation |
+| `2` | Usage error - an unknown command or flag, a bad value or id, missing or conflicting flags, a delete without `--yes` where stdin is not a terminal, or a name that matches no catalog entry or several. Nothing is created, though a name lookup or the `--provider` check may already have read a catalog |
 | `130` | Interrupted with Ctrl-C (SIGINT) |
 | `143` | Terminated (SIGTERM) |
 
 The signal codes follow the shell's `128 + signal` convention, so a script can
 tell a cancelled run from a failed one.
+
+With the npm package, `intuizi` is a Node launcher that runs the binary and
+passes its exit code through. A SIGTERM or SIGHUP sent to the launcher alone,
+as Docker, systemd or a CI runner sends one, is passed on to the binary, so
+the command stops and exits as it would without the launcher: `143` for a
+SIGTERM. Ctrl-C reaches the binary through the terminal.
 
 ## Support, issues and contributions
 
@@ -215,8 +242,10 @@ macos-latest. Lint runs on Ubuntu only, since results do not vary by OS.
 
 A separate `package` job runs a goreleaser snapshot on every pull request,
 checks that the rendered Homebrew formula parses, builds the npm packages from
-the snapshot, installs the launcher from the tarballs and runs it. Packaging
-breaks on the PR that causes them, not on the release tag.
+the snapshot, installs the launcher from the tarballs and runs it. It also
+runs the launcher's own tests (`node --test npm/cli/test/launcher.test.mjs`),
+which check that exit codes and SIGTERM pass through it. Packaging breaks on
+the PR that causes them, not on the release tag.
 
 `.github/workflows/codeql.yml` runs CodeQL over the Go code on every pull
 request and weekly. Every action in every workflow is pinned to a commit rather
@@ -267,7 +296,7 @@ scripts/live-test.sh https://TEST-CONSOLE
 ```
 
 It exercises every command group end to end and cleans up after itself, writing
-a pass/fail summary to `live-results/results.md` (gitignored — real API
+a pass/fail summary to `live-results/results.md` (gitignored - real API
 responses). Activations stay at `--dry-run`, so `activations show`/`delete` are
 not covered. A non-zero exit means do not tag. You need an account on the
 environment you test against; each has its own database.
@@ -310,7 +339,7 @@ and the npm registry cannot yet validate that format, so it answers "package
 not found" ([npm/cli#9969](https://github.com/npm/cli/issues/9969)). The claim
 cannot be disabled. When npm fixes it, prove the exchange first with a
 throwaway workflow running `npm publish --loglevel verbose` against an
-already-published version — two releases failed by removing the token first.
+already-published version - two releases failed by removing the token first.
 Only then drop `registry-url` and `NODE_AUTH_TOKEN`, revoke the token and
 delete the secret.
 
@@ -325,8 +354,9 @@ their own licenses, reproduced in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
 
 ## Related
 
-- [DOCS.md](DOCS.md) - every flag, the catalog behind each value, and the
-  response shapes a script has to parse.
+- [DOCS.md](DOCS.md) - how to build each create, the catalog behind each
+  value, and the response shapes a script has to parse. `intuizi <command>
+  --help` lists every flag.
 - [examples/](examples) - ready-made payloads for the creates that take
   `--file`.
 - The Intuizi API v2 reference is the source of truth for every endpoint this

@@ -44,7 +44,7 @@ func storage(t *testing.T, status int) (*httptest.Server, *putCapture) {
 }
 
 // reservation is the envelope /uploads/create answers with, pointed at the
-// given storage URL. headers is the signed header object, as JSON.
+// given storage URL. headers is the header object it lists, as JSON.
 func reservation(uploadURL, headers string) string {
 	return `{"status":"success","code":201,"message":"Resource created successfully.",` +
 		`"data":[{"upload_reference":"upl_abc","upload_url":"` + uploadURL + `/obj?X-Amz-Signature=sig",` +
@@ -138,15 +138,15 @@ func TestUploadsPutJSONPrintsNothingWhenThePUTFails(t *testing.T) {
 	}
 }
 
-// Every header in the reservation is signed. Only Content-Type used to reach
-// the PUT, so a server that started signing an encryption header would have
-// failed every upload.
+// Every header the reservation lists goes on the PUT. Only Content-Type used
+// to reach it, so a server that started requiring an encryption header would
+// have failed every upload.
 func TestUploadsPutForwardsTheReservationHeaders(t *testing.T) {
-	const signed = `{"Content-Type":"text/csv","x-amz-server-side-encryption":"AES256"}`
+	const listed = `{"Content-Type":"text/csv","x-amz-server-side-encryption":"AES256"}`
 
 	t.Run("as reserved", func(t *testing.T) {
 		store, put := storage(t, 0)
-		srv, _ := stub(t, reservation(store.URL, signed))
+		srv, _ := stub(t, reservation(store.URL, listed))
 
 		if _, _, err := run(t, uploadsPutCommand(), srv, uploadFile(t, "x"), "--purpose", "cohort"); err != nil {
 			t.Fatalf("execute: %v", err)
@@ -159,7 +159,7 @@ func TestUploadsPutForwardsTheReservationHeaders(t *testing.T) {
 	// --content-type replaces Content-Type alone; the rest still travel.
 	t.Run("content-type overridden", func(t *testing.T) {
 		store, put := storage(t, 0)
-		srv, _ := stub(t, reservation(store.URL, signed))
+		srv, _ := stub(t, reservation(store.URL, listed))
 
 		if _, _, err := run(t, uploadsPutCommand(), srv, uploadFile(t, "x"),
 			"--purpose", "cohort", "--content-type", "application/gzip"); err != nil {
@@ -169,7 +169,7 @@ func TestUploadsPutForwardsTheReservationHeaders(t *testing.T) {
 			t.Errorf("Content-Type = %q, want the flag to win", put.header.Get("Content-Type"))
 		}
 		if put.header.Get("x-amz-server-side-encryption") != "AES256" {
-			t.Errorf("the signed encryption header was dropped: %v", put.header)
+			t.Errorf("the listed encryption header was dropped: %v", put.header)
 		}
 		if vals := put.header.Values("Content-Type"); len(vals) != 1 {
 			t.Errorf("Content-Type sent %d times: %v", len(vals), vals)

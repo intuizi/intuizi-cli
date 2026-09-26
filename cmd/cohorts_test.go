@@ -127,6 +127,28 @@ func TestCohortsCreateSendsAFolderURI(t *testing.T) {
 	}
 }
 
+// No cohort command waits, so the hint after a create is the whole guide to
+// following it: the one success, and the codes a failed import reports
+// instead, which the table shows as Unknown.
+func TestCohortsCreateNamesWhenToStopPolling(t *testing.T) {
+	srv, _ := stub(t, `{"status":"success","code":201,"data":[{"id":77,"name":"Q3 customers","status":{"id":2,"name":"Initiating"}}]}`)
+
+	_, stderr, err := run(t, cohortsCreateCommand(), srv,
+		"--name", "Q3 customers",
+		"--file-uri", "s3://example-bucket/cohorts/q3.csv",
+		"--file-format", "csv",
+		"--identifier-type", "hem_sha256",
+		"--identifier-column", "email_sha256")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for _, want := range []string{"intuizi cohorts show <id>", "4 Completed", "outside 1 to 4", "failed"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr should contain %q, got %q", want, stderr)
+		}
+	}
+}
+
 func TestCohortsCreateRejectsFileMixedWithFlags(t *testing.T) {
 	srv, got := stub(t, `{}`)
 
@@ -219,6 +241,25 @@ func TestCohortsCreateRejectsNameOnAnAudienceSource(t *testing.T) {
 	var ue usageError
 	if !errors.As(err, &ue) {
 		t.Fatalf("err = %v, want a usageError", err)
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
+// An audience cohort is filed under the audience's own project: the API
+// checks a project_id it is sent and then ignores it. So --project-id on an
+// audience source is refused like --name, rather than sent to be ignored.
+func TestCohortsCreateRejectsProjectIDOnAnAudienceSource(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	_, _, err := run(t, cohortsCreateCommand(), srv, "--audience-id", "88", "--project-id", "4")
+	var ue usageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("err = %v, want a usageError", err)
+	}
+	if !strings.Contains(err.Error(), "--project-id") || !strings.Contains(err.Error(), "audience's project") {
+		t.Errorf("err = %v, want it to say the cohort takes the audience's project", err)
 	}
 	if len(got.paths) != 0 {
 		t.Errorf("should cost no round trip, got %v", got.paths)

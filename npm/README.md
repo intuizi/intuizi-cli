@@ -5,6 +5,9 @@ at the top of that file: `@intuizi/cli` plus one binary-only package per
 platform. The release workflow runs it after goreleaser and publishes the
 result; `cli/` holds the launcher and README that go into `@intuizi/cli`.
 
+`cli/test/` tests the launcher against a fake platform package, with no
+build needed: `node --test npm/cli/test/launcher.test.mjs`.
+
 To try it locally against a snapshot build:
 
 ```bash

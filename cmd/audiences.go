@@ -56,8 +56,9 @@ func audiencesCreateCommand() *cobra.Command {
 		Short: "Create an audience, from flags or a payload file",
 		Long: `Create an audience.
 
-A single-dataset audience has a shallow body, so it can be built from flags,
-with names resolved against the reference catalogs rather than pasted as ids:
+A single-dataset audience can be built from flags for any type whose required
+fields all have a flag, with names resolved against the reference catalogs
+rather than pasted as ids:
 
     intuizi audiences create \
       --type POI --brand starbucks \
@@ -65,39 +66,80 @@ with names resolved against the reference catalogs rather than pasted as ids:
       --start-date 2026-09-02 --end-date 2026-09-09 \
       --name "Starbucks visitors - SF - 1 week"
 
---brand and --category both take a name or an id; a name matching no entry, or
-more than one, is an error listing what was found. --brand-all takes every
-match for a search instead, for the deliberate "all the coffee brands" case,
-and reports to stderr how many it selected. --brand applies to POI.
---category applies to POI, Apps, WebDomain and AffinityTransactions, each
-resolving against its own catalog. Every selector repeats for more than one
-value.
+--brand and --category both take a name or an id. A name is a contains match:
+when several entries come back and exactly one is labelled with the name
+itself, ignoring case, that one is taken, so "Example Coffee" resolves even
+though "Example Coffee Reserve" also matches. Otherwise no match or several is
+an error listing what was found, and so is an exact label on a result too long
+to arrive in one page. --brand-all takes every match for a search instead, for
+the deliberate "all the coffee brands" case, and reports to stderr how many it
+selected. --brand applies to POI. --category applies to POI, Apps, WebDomain
+and AffinityTransactions, each resolving against its own catalog. For
+WebDomain that is 'intuizi reference web iab-categories', whose id is the
+number in its id column, not the IAB code in its value column. Its labels read
+"CODE - name", so there an exact IAB code or an exact name picks its row too:
+IAB1 resolves to IAB1, not to a list of IAB1 to IAB19. Every selector repeats
+for more than one value.
+
+Most types also need --country: the API rejects a dataset without one on
+every type except Cohorts, AffinityTransactions and ProfileAttributes. The CLI
+checks for it before sending only on Origin.
+
+--type origin targets devices by their home location rather than the places
+they visited, so its only filters are geographic. --country is required, and
+the countries with Origin data come from 'intuizi reference common countries
+--dataset-type Origin'; --state, --city and --zipcode narrow it further, and
+--brand and --category do not apply. Origin data is weekly: the API widens the
+window to the whole Monday-to-Sunday weeks it touches, and the CLI reports the
+widened dates on stderr when they differ from the ones given.
 
 Omitting --provider includes every signal provider for the dataset type, which
-is almost always what you want: a provider left out builds an audience that
-completes with zero devices and no error. A --provider the type's catalog does
-not list is rejected, since the API would accept it and build that same empty
-audience.
+is almost always what you want. The CLI reads that catalog first, and a
+--provider it does not list is rejected before anything is created, since the
+API would accept it and build an audience that completes with zero devices.
 
---dry-run prints the body those flags produce and sends nothing, so it doubles
-as a starting point for the file form:
+--dry-run prints the body those flags produce and creates nothing. It still
+resolves names and reads the signal-provider catalog, so it needs a token. It
+doubles as a starting point for the file form:
 
     intuizi audiences create --type POI ... --dry-run > audience.json
 
 Two datasets need an operator, and refine, crossvisitation and crosspurchase
-are nested, so those are passed whole instead. The file is forwarded untouched,
-so a field this CLI has never heard of still reaches the API:
+are nested, so those are passed whole instead. So are the Cohorts,
+Demographics and ProfileAttributes types, which the flags refuse before
+anything is sent: they require fields no flag writes (a cohort_id, a
+demographic filter, profile_attributes rows), and Demographics also rejects
+the dates and signal providers the flags always send. The same goes for any
+other field no flag writes, such as project_id, POI locations, DMAs, the
+analyses block and datastreams. An audience built without the frequency
+analysis cannot have it added later, and Preview Activation needs it. The file
+is forwarded untouched, so a field this CLI has never heard of still reaches
+the API:
 
     intuizi audiences create --file examples/audience-two-datasets.json
     jq '.name = "Q3 rerun"' base.json | intuizi audiences create --file -
 
 Creation is asynchronous: the new audience comes back Initiating with a
 results_count of 0. That is expected. Add --wait to block until the build
-reaches Completed, with --timeout to bound it (default 60m); the final record
-is printed and an audience that fails to build exits non-zero.
+reaches Completed, with --timeout to bound it (default 60m). The last record
+read is printed whether the build completes, fails, the wait times out or it
+gives up after three failed reads in a row, and an audience that fails to
+build, or a wait that times out or gives up, exits non-zero. A wait that times
+out or gives up leaves the build running, and the error names the
+'intuizi audiences show <id> --wait' that resumes it.
 
-A retry of this command reuses its Idempotency-Key, so it cannot create a
-duplicate.`,
+An audience that opts into data stream visualizations reads 109 Visualizing
+data streams while it draws them, before Completed, and the wait goes on
+through it. 107 Additional Info is a failure: the worker could not build the
+audience as asked and stopped, so nothing follows it and the wait exits
+non-zero. The API does not return the reason, but Audience Manager in the
+Intuizi console shows it on the audience - most often a date range outside the
+dataset's data coverage. Fix the request and create the audience again.
+
+The request carries an Idempotency-Key, and a retry after a 429 reuses it.
+Running the command again sends a fresh key and can create a second audience.
+When a create gets no response at all, stderr prints the key it used: rerun
+with --idempotency-key <key> to retry it without risking a duplicate.`,
 		Args: cobra.NoArgs,
 	}
 	waitOpts := waitFlags(cmd)
@@ -128,7 +170,17 @@ duplicate.`,
 		}
 
 		if dryRun && wait {
-			return usageErr("--dry-run sends nothing, so there is nothing to --wait for")
+			return usageErr("--dry-run creates nothing, so there is nothing to --wait for")
+		}
+		// The type first: a type the flags cannot build should not send the
+		// caller off to add the dates it would then reject.
+		if flags.Changed("type") {
+			if dsType, err = canonicalType(dsType); err != nil {
+				return err
+			}
+			if err := checkFlagType(dsType); err != nil {
+				return err
+			}
 		}
 		if err := missingFlags(flags, audienceRequired, "a single-dataset audience"); err != nil {
 			return err
@@ -139,22 +191,12 @@ duplicate.`,
 		if err := parseWindow(startDate, endDate); err != nil {
 			return err
 		}
-		dsType, err = canonicalType(dsType)
-		if err != nil {
-			return err
-		}
 		if len(brands)+len(brandAll) > 0 && dsType != "POI" {
-			// AffinityTransactions keeps brands in its own "brands" field, which
-			// no flag writes - so do not point at --category, a different filter.
 			flag := "--brand"
 			if len(brands) == 0 {
 				flag = "--brand-all"
 			}
-			hint := "; use --category"
-			if dsType == "AffinityTransactions" {
-				hint = "; affinity brands need --file"
-			}
-			return usageErr(flag + " applies to --type POI, not " + dsType + hint)
+			return usageErr(flag + " applies to --type POI, not " + dsType + brandHint(dsType))
 		}
 		// Before client(): a type with no category catalog is a usage error
 		// whether or not there is a token.
@@ -174,6 +216,12 @@ duplicate.`,
 			if err := nonEmpty(r.flag, r.values...); err != nil {
 				return err
 			}
+		}
+		// The API requires a country on Origin, and its geography is the
+		// whole filter; a body without one is a 422.
+		if dsType == "Origin" && len(countries) == 0 {
+			return usageErr("--type Origin needs --country; list the covered countries with " +
+				"'intuizi reference common countries --dataset-type Origin'")
 		}
 
 		c, err := client()
@@ -243,6 +291,14 @@ duplicate.`,
 
 		body := audienceBody{Name: name, Datasets: []audienceDataset{ds}}
 
+		if dsType == "Origin" {
+			// The dates stay as typed in the body; the API does the widening.
+			if from, to := originWeeks(startDate, endDate); from != startDate || to != endDate {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Origin data is weekly: the API widens %s..%s "+
+					"to the whole weeks %s..%s\n", startDate, endDate, from, to)
+			}
+		}
+
 		if dryRun {
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
@@ -261,10 +317,11 @@ duplicate.`,
 	f.BoolVar(&dryRun, "dry-run", false,
 		"Print the body the flags produce; creates nothing (names still resolve)")
 	f.StringVar(&dsType, "type", "",
-		"Dataset type, case-insensitive: poi, apps, webdomain, ctv, cohorts,\n"+
-			"affinitytransactions, demographics, deidentified or profileattributes")
+		"Dataset type, case-insensitive: poi, apps, webdomain, ctv,\n"+
+			"affinitytransactions, deidentified or origin (cohorts, demographics\n"+
+			"and profileattributes need --file)")
 	f.StringVar(&name, "name", "", "Name for the audience")
-	completeValues(cmd, "type", sortedKeys(datasetTypes))
+	completeValues(cmd, "type", flagTypes())
 	f.StringVar(&startDate, "start-date", "", "First day of the window, YYYY-MM-DD")
 	f.StringVar(&endDate, "end-date", "", "Last day of the window, YYYY-MM-DD")
 	// StringArray, not StringSlice: a city name may contain a comma.
@@ -289,6 +346,22 @@ duplicate.`,
 	return cmd
 }
 
+// brandHint points a --brand on another type at what that type does take.
+// AffinityTransactions keeps brands in its own "brands" field, which no flag
+// writes, and --category is only a way out for a type that has a catalog.
+func brandHint(dsType string) string {
+	switch dsType {
+	case "AffinityTransactions":
+		return "; affinity brands need --file"
+	case "Origin":
+		return "; Origin filters on geography only (--country, --state, --city, --zipcode)"
+	}
+	if _, ok := categoryCatalogs[dsType]; ok {
+		return "; use --category"
+	}
+	return ""
+}
+
 // audienceFields are the body-building flags, for --file to reject.
 var audienceFields = []string{
 	"type", "name", "start-date", "end-date",
@@ -302,7 +375,8 @@ var audienceRequired = []string{"type", "name", "start-date", "end-date"}
 // --------------------------------------------------------------------------------- show
 
 // audiencesShowCommand is the generic showCommand plus --wait, so a build can be
-// followed to Completed before it is activated. 108 Modeling is waited through.
+// followed to Completed before it is activated. 108 Modeling and 109
+// Visualizing data streams are waited through; 107 Additional Info ends it.
 func audiencesShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id>",
@@ -310,10 +384,19 @@ func audiencesShowCommand() *cobra.Command {
 		Long: `Show one audience.
 
 With --wait, keep polling until the build reaches Completed or fails, printing
-each status change to stderr. A lookalike in 108 Modeling is still training and
-is waited through:
+each status change to stderr and the last record read to stdout, and exiting
+non-zero if it fails, --timeout runs out or three reads in a row fail. A
+lookalike in 108 Modeling is still training, and an audience in 109
+Visualizing data streams is drawing its data stream visualizations, so both
+are waited through. A cancelled lookalike reads 108 for good, so a wait on one
+only ends at --timeout:
 
-    intuizi audiences show 1377 --wait`,
+    intuizi audiences show 1377 --wait
+
+107 Additional Info is a failure: the build stopped and will not continue, so
+the wait exits non-zero at once, and waiting again cannot change that. The
+API does not return the reason, but Audience Manager in the Intuizi console
+shows it on the audience.`,
 		Args: cobra.ExactArgs(1),
 	}
 	waitOpts := waitFlags(cmd)
@@ -348,11 +431,13 @@ func audiencesLookalikeCommand() *cobra.Command {
 		Long: `Build and cancel Lookalike Model audiences.
 
 A Lookalike Model trains on a completed seed audience and produces a new
-audience of similar devices. It is a gated feature: without the permission the
-create is rejected with 403.
+audience of similar devices. The Lookalike commands, create and cancel alike,
+require additional permissions which need to be approved by your Account
+Manager; a 403 means they are not enabled for the account.
 
-Training shows as status 108 Modeling, which is not terminal - keep polling
-'audiences show <id>' until it reads Completed.`,
+Training shows as status 108 Modeling, which is not terminal - follow it with
+'intuizi audiences show <id> --wait' until it reads Completed. A cancelled run
+never does: see 'intuizi audiences lookalike cancel --help'.`,
 	}
 
 	create := lookalikeCreateCommand()
@@ -362,8 +447,17 @@ Training shows as status 108 Modeling, which is not terminal - keep polling
 		Short: "Cancel a lookalike run in progress",
 		Long: `Cancel a lookalike run in progress.
 
-The job stops at its next checkpoint rather than immediately, so the audience
-may sit in its current status for a short while after this returns.`,
+The run stops at its next checkpoint and reports no further status, so from
+then on the audience keeps reading 108 Modeling and never reaches Completed.
+Do not follow a cancelled run with 'intuizi audiences show <id> --wait': it
+polls until --timeout and exits non-zero. A cancel that arrives once the
+result is already being published is ignored, and the run completes. A run
+that has already finished cannot be cancelled. Remove a cancelled run with
+'intuizi audiences delete <id>'.
+
+Takes the id 'lookalike create' returned, not the seed's. Like create, it
+requires additional permissions which need to be approved by your Account
+Manager; a 403 means they are not enabled for the account.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseID(args[0], "audience")
@@ -371,7 +465,9 @@ may sit in its current status for a short while after this returns.`,
 				return err
 			}
 			return postID(cmd, audiencesPrefix+"/cancel-lookalike", id,
-				fmt.Sprintf("cancellation requested for audience %d", id))
+				fmt.Sprintf("cancellation requested for audience %d - once it stops it keeps "+
+					"reading 108 Modeling, so do not --wait on it; remove it with "+
+					"'intuizi audiences delete %d'", id, id))
 		},
 	}
 
@@ -396,10 +492,12 @@ type lookalikeConfig struct {
 	ContrastAudienceID int          `json:"contrast_audience_id,omitempty"`
 }
 
+// lookalikeBody always carries notification: the API defaults it to true, so
+// omitting a false would send the email anyway.
 type lookalikeBody struct {
 	Name             string          `json:"name"`
 	SourceAudienceID int             `json:"source_audience_id"`
-	Notification     bool            `json:"notification,omitempty"`
+	Notification     bool            `json:"notification"`
 	Config           lookalikeConfig `json:"config"`
 }
 
@@ -457,23 +555,30 @@ repeated for more than one. web and ctv are withdrawn and rejected.
 
 --exclude-seed-devices and --expand-eids default to false and are always sent,
 because the API requires both fields. --contrast-audience-id names a Completed,
-non-lookalike audience to contrast the seed against. --dry-run prints the body
+non-lookalike audience other than the seed to contrast the seed against; the
+seed's own id is refused before anything is sent. --dry-run prints the body
 and sends nothing.
+
+When the run completes, the API emails the user who created it. --notify is on
+by default and always sent; pass --notify=false to skip the email.
 
 Anything the API grows that these flags do not model goes through the whole
 body instead, with --file:
 
     intuizi audiences lookalike create --file lookalike.json
 
-Training shows as status 108 Modeling, which is not terminal - keep polling.
-Requires the Lookalike capability; a 403 means it is not enabled.`,
+Training shows as status 108 Modeling, which is not terminal - follow it with
+'intuizi audiences show <id> --wait'. The Lookalike commands require
+additional permissions which need to be approved by your Account Manager; a
+403 means they are not enabled for the account.`,
 		Args: cobra.NoArgs,
 	}
 
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		flags := cmd.Flags()
 		path := audiencesPrefix + "/create-lookalike"
-		next := "training - status 108 Modeling is not terminal, keep polling"
+		next := "training - status 108 Modeling is not terminal; run " +
+			"'intuizi audiences show <id> --wait' to follow it"
 
 		if file != "" {
 			if err := rejectBodyFlags(flags, lookalikeFields); err != nil {
@@ -516,6 +621,11 @@ Requires the Lookalike capability; a 403 means it is not enabled.`,
 		}
 		if err := positiveID(flags, "contrast-audience-id", contrastID); err != nil {
 			return err
+		}
+		// The API's rule: a model cannot contrast the seed with itself.
+		if flags.Changed("contrast-audience-id") && contrastID == sourceID {
+			return usageErr(fmt.Sprintf("--contrast-audience-id %d is the seed; "+
+				"contrast it against a different Completed, non-lookalike audience", contrastID))
 		}
 
 		body := lookalikeBody{
@@ -562,10 +672,22 @@ Requires the Lookalike capability; a 403 means it is not enabled.`,
 	f.BoolVar(&expandEIDs, "expand-eids", false,
 		"Expand matched devices to their EIDs")
 	f.IntVar(&contrastID, "contrast-audience-id", 0,
-		"Completed, non-lookalike audience to contrast against")
-	f.BoolVar(&notify, "notify", false,
-		"Notify the account owner when the run finishes")
+		"Completed, non-lookalike audience other than the seed, to contrast\nagainst")
+	f.BoolVar(&notify, "notify", true,
+		"Email the user who created the run when it completes\n(--notify=false to skip)")
 	// No MarkFlagsOneRequired("file", "source-audience-id"): see audiencesCreateCommand.
+	return cmd
+}
+
+// audiencesDeleteCommand is the shared delete, with the two things deleting an
+// audience also does, per the API's delete service.
+func audiencesDeleteCommand() *cobra.Command {
+	cmd := deleteCommand("audience", audiencesPrefix)
+	cmd.Long += `
+
+A cohort created from a regular audience with 'intuizi cohorts create
+--audience-id' is deleted with it; cohorts created from a Lookalike Model are
+not. Deleting a Lookalike Model that is still modelling stops the run.`
 	return cmd
 }
 
@@ -587,7 +709,7 @@ func init() {
 	audiencesCmd.AddCommand(
 		audiencesListCommand(),
 		audiencesShowCommand(),
-		deleteCommand("audience", audiencesPrefix),
+		audiencesDeleteCommand(),
 		audiencesCreateCommand(), audiencesLookalikeCommand(),
 	)
 	rootCmd.AddCommand(audiencesCmd)

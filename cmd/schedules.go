@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -12,6 +13,8 @@ import (
 	_ "time/tzdata"
 
 	"github.com/spf13/cobra"
+
+	"github.com/intuizi/intuizi-cli/internal/output"
 )
 
 const schedulesPrefix = "/analyses/schedules"
@@ -32,6 +35,10 @@ var schedulesCmd = &cobra.Command{
 A schedule rebuilds a completed audience on a recurring data window, and can
 re-export it every cycle. The audience definition is snapshotted when the
 schedule is created, so later edits to the original do not change it.
+
+Schedules require additional permissions which need to be approved by your
+Account Manager. Every schedules command needs them, list and show included;
+a 403 means they are not enabled for the account.
 
 Each cycle produces its own audience, named "<name> - #<cycle>".
 
@@ -76,6 +83,32 @@ var scheduleRequired = []string{"name", "audience-id", "start", "timezone", "fre
 // Mirrors the server rule, so a rejected name costs no round trip.
 var scheduleName = regexp.MustCompile(`^[a-zA-Z0-9_\- ]+$`)
 
+// apiZoneRegions are the areas PHP files its current zone names under. The
+// API validates --timezone with Laravel's timezone:all, which is PHP's
+// DateTimeZone::ALL list: UTC and the names under these, and no
+// backward-compatible ones. So US/Eastern, GMT, EST5EDT and every Etc/ name,
+// all of which Go loads, are sure 422s. A legacy link filed under a region,
+// such as Asia/Calcutta for Asia/Kolkata, still passes here: telling it apart
+// needs PHP's own list.
+var apiZoneRegions = []string{
+	"Africa/", "America/", "Antarctica/", "Arctic/", "Asia/", "Atlantic/",
+	"Australia/", "Europe/", "Indian/", "Pacific/",
+}
+
+// apiZoneName reports whether the API's zone list can hold tz: UTC, or a name
+// under one of apiZoneRegions.
+func apiZoneName(tz string) bool {
+	if tz == "UTC" {
+		return true
+	}
+	for _, r := range apiZoneRegions {
+		if strings.HasPrefix(tz, r) {
+			return true
+		}
+	}
+	return false
+}
+
 // scheduleFrequencies are the catalog's values: lowercase, unlike the labels
 // the console shows.
 var scheduleFrequencies = map[string]string{
@@ -108,7 +141,7 @@ The recurrence block is one level deep, so it can be built from flags:
 
     intuizi schedules create --name "Weekly coffee refresh" --audience-id 88 \
       --start "2027-09-15 06:00:00" --timezone America/New_York \
-      --frequency weekly --window 2
+      --frequency weekly --window 4
 
 --frequency, --window and --ending take values from the catalogs:
 
@@ -116,17 +149,26 @@ The recurrence block is one level deep, so it can be built from flags:
     intuizi reference common schedule-windows
     intuizi reference common schedule-endings
 
+--timezone takes a region-based IANA name such as America/New_York or
+Asia/Kolkata, or UTC. The API rejects legacy and Etc/ names. US/Eastern, GMT
+or Etc/UTC is refused here before anything is sent, but a legacy name filed
+under a region, such as Asia/Calcutta, passes this check, --dry-run
+included, and the API rejects it with a 422.
+
 --start must be in the future and is read in --timezone. --window 3 is Custom
 and also needs --window-days. --ending defaults to 1 Never; 2 Recurrences needs
---after-recurrences and 3 Custom Date needs --end-date.
+--after-recurrences and 3 Custom Date needs --end-date, on or after the
+--start date.
 
 An activation block for auto-export is nested, so a schedule that exports every
 cycle is passed whole instead:
 
     intuizi schedules create --file schedule.json
 
-A retry of this command reuses its Idempotency-Key, so it cannot create a
-duplicate schedule.`,
+The request carries an Idempotency-Key, and a retry after a 429 reuses it.
+Running the command again sends a fresh key and can create a second schedule.
+When a create gets no response at all, stderr prints the key it used: rerun
+with --idempotency-key <key> to retry it without risking a duplicate.`,
 		Args: cobra.NoArgs,
 	}
 
@@ -162,6 +204,10 @@ duplicate schedule.`,
 			return usageErr(fmt.Sprintf(
 				"--name %q may use only letters, digits, spaces, _ and -", name))
 		}
+		// The API's cap; the characters above are ASCII, so bytes are characters.
+		if len(name) > 255 {
+			return usageErr(fmt.Sprintf("--name is %d characters; the most a schedule name takes is 255", len(name)))
+		}
 
 		freq, ok := scheduleFrequencies[strings.ToLower(frequency)]
 		if !ok {
@@ -179,6 +225,10 @@ duplicate schedule.`,
 		if err != nil {
 			return usageErr("unknown --timezone " + timezone + "; use an IANA name like America/New_York")
 		}
+		if !apiZoneName(timezone) {
+			return usageErr("--timezone " + timezone + " is a legacy or Etc/ name, which the API " +
+				"rejects; use UTC or a region-based name such as America/New_York")
+		}
 		startAt, err := time.ParseInLocation(startLayout, start, loc)
 		if err != nil {
 			return usageErr(fmt.Sprintf(`--start must be "YYYY-MM-DD HH:MM:SS", not %q`, start))
@@ -187,9 +237,10 @@ duplicate schedule.`,
 			return usageErr("--start " + start + " must be in the future in " + timezone)
 		}
 
-		// Each rule carries its own field, and sending the wrong one is not
-		// rejected - it is ignored, leaving a schedule that never stops. An
-		// explicit 0 is a mistake to name, so these go by Changed, not value.
+		// Each rule carries its own field, and the API answers the wrong one
+		// with a 422 (prohibited_unless); checked here to name the mistake
+		// without a round trip. An explicit 0 is a mistake to name too, so
+		// these go by Changed, not value.
 		switch ending {
 		case 1:
 			if flags.Changed("after-recurrences") || flags.Changed("end-date") {
@@ -209,8 +260,16 @@ duplicate schedule.`,
 			if !flags.Changed("end-date") {
 				return usageErr("--ending 3 is Custom Date and needs --end-date")
 			}
-			if _, err := time.Parse(dateLayout, endDate); err != nil {
+			end, err := time.Parse(dateLayout, endDate)
+			if err != nil {
 				return usageErr("--end-date must be YYYY-MM-DD, not " + endDate)
+			}
+			// Neither the API nor the run count rejects an earlier end date:
+			// the gap is counted forward from --start, so the schedule would
+			// run for that many days instead of not at all.
+			if first := startAt.Format(dateLayout); end.Format(dateLayout) < first {
+				return usageErr(fmt.Sprintf("--end-date %s is before the --start date %s; "+
+					"the schedule ends on or after the day it starts", endDate, first))
 			}
 			if flags.Changed("after-recurrences") {
 				return usageErr("--after-recurrences belongs to --ending 2, not 3")
@@ -269,7 +328,9 @@ duplicate schedule.`,
 	f.IntVar(&projectID, "project-id", 0, "Project to file the schedule under")
 	f.StringVar(&start, "start", "",
 		`First run, "YYYY-MM-DD HH:MM:SS", read in --timezone; must be in the future`)
-	f.StringVar(&timezone, "timezone", "", "IANA timezone, e.g. America/New_York")
+	f.StringVar(&timezone, "timezone", "",
+		"Region-based IANA zone such as America/New_York, or UTC; the API\n"+
+			"rejects legacy names (US/Eastern, Asia/Calcutta) and Etc/ names")
 	f.StringVar(&frequency, "frequency", "",
 		"daily, weekly, bi-weekly or monthly (case-insensitive)")
 	f.IntVar(&window, "window", 0,
@@ -280,7 +341,10 @@ duplicate schedule.`,
 	f.IntVar(&after, "after-recurrences", 0, "Number of runs before stopping (--ending 2)")
 
 	completeValues(cmd, "frequency", sortedKeys(scheduleFrequencies))
-	f.StringVar(&endDate, "end-date", "", "Last run date, YYYY-MM-DD (--ending 3)")
+	f.StringVar(&endDate, "end-date", "",
+		"Date the schedule ends, YYYY-MM-DD (--ending 3), on or after the --start\n"+
+			"date; counted as whole cycles from --start to 00:00 on that date, so it\n"+
+			"is not always a run date")
 	return cmd
 }
 
@@ -302,6 +366,101 @@ func toggleCommand(verb, path, done, long string) *cobra.Command {
 				fmt.Sprintf("%s schedule %d", done, id))
 		},
 	}
+}
+
+// schedulesActivateCommand is toggleCommand's activate, plus a look at the
+// schedule it returns: activating one whose ending was already met sets it
+// Active but arms no further run, and nothing in the response says so.
+func schedulesActivateCommand() *cobra.Command {
+	cmd := toggleCommand("activate", "activate", "activated",
+		`Activate a schedule.
+
+Resumes the recurrence. The next cycle runs at the next scheduled time after
+now. A run the pause spanned is not backfilled, but it is not used up either:
+a Recurrences or Custom Date schedule still makes every run it counted at
+creation, which carries a Custom Date schedule past its end date by about as
+long as it was paused.
+
+Activating a Fulfilled schedule, one whose ending was met, sets it Active, but
+it does not run again; stderr says so when the schedule returned shows every
+counted run made. Create a new schedule to keep refreshing.`)
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		id, err := parseID(args[0], "schedule")
+		if err != nil {
+			return err
+		}
+		c, err := client()
+		if err != nil {
+			return err
+		}
+
+		// Raw, so --json prints the server's envelope as postID does.
+		raw, err := c.PostRaw(cmd.Context(), schedulesPrefix+"/activate", map[string]int{"id": id})
+		if err != nil {
+			if jsonOutput {
+				printErrorEnvelope(cmd, err)
+			}
+			return err
+		}
+		if jsonOutput {
+			if err := output.JSON(cmd.OutOrStdout(), raw); err != nil {
+				return err
+			}
+		} else {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "activated schedule %d\n", id)
+		}
+		if spentSchedule(raw) {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: schedule %d has already made every run its "+
+				"ending allows, so it reads Active but will not run again; create a new schedule "+
+				"to keep refreshing\n", id)
+		}
+		return nil
+	}
+	return cmd
+}
+
+// spentSchedule reports whether the schedule in an activate response has made
+// every run its ending counted, the API's own test for arming no next run:
+// cycles.available not above cycles.done, on any ending but 1 Never. Anything
+// missing or unreadable reads as not spent, so this can only add a note.
+func spentSchedule(envelope []byte) bool {
+	var env struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(envelope, &env) != nil {
+		return false
+	}
+	data := bytes.TrimSpace(env.Data)
+	if len(data) > 0 && data[0] == '[' {
+		var list []json.RawMessage
+		if json.Unmarshal(data, &list) != nil || len(list) == 0 {
+			return false
+		}
+		data = list[0]
+	}
+	var rec struct {
+		Recurrence *struct {
+			Ending *struct {
+				Type float64 `json:"type"`
+			} `json:"ending"`
+			Cycles *struct {
+				Done      *float64 `json:"done"`
+				Available *float64 `json:"available"`
+			} `json:"cycles"`
+		} `json:"recurrence"`
+	}
+	if json.Unmarshal(data, &rec) != nil {
+		return false
+	}
+	r := rec.Recurrence
+	if r == nil || r.Ending == nil || r.Cycles == nil || r.Cycles.Done == nil || r.Cycles.Available == nil {
+		return false
+	}
+	if r.Ending.Type == 1 {
+		return false // Never: there is no count to use up
+	}
+	return *r.Cycles.Available <= *r.Cycles.Done
 }
 
 // cases upper-cases the first letter, for a Short that must start capitalised.
@@ -333,11 +492,7 @@ func init() {
 		deleteCommand("schedule", schedulesPrefix),
 
 		schedulesCreateCommand(),
-		toggleCommand("activate", "activate", "activated",
-			`Activate a schedule.
-
-Resumes the recurrence. The next cycle runs at the next scheduled time; a
-missed window while it was paused is not backfilled.`),
+		schedulesActivateCommand(),
 		toggleCommand("deactivate", "deactivate", "deactivated",
 			`Deactivate a schedule.
 

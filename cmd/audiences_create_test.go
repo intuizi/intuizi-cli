@@ -143,6 +143,30 @@ func TestAudiencesCreateChecksProvidersAgainstTheCatalog(t *testing.T) {
 	})
 }
 
+// A WebDomain --category name resolves to the IAB category's id, which is what
+// iab_category_codes takes; the code in the row's value is rejected with a 422.
+func TestAudiencesCreateWebDomainCategoryResolvesToTheID(t *testing.T) {
+	srv, got := stubSeq(t,
+		reply{body: `{"status":"success","code":200,"message":"ok","data":[` +
+			`{"value":"IAB2","text":"IAB2 - Automotive","id":2}]}`},
+		reply{body: providersPOI})
+
+	body := dryRunBody(t, audiencesCreateCommand(), srv,
+		"--type", "webdomain", "--category", "Automotive", "--country", "USA",
+		"--start-date", "2026-09-02", "--end-date", "2026-09-09", "--name", "Auto")
+
+	if len(got.paths) == 0 || got.paths[0] != "/api/v2"+referencePrefix+"web/iab-categories" {
+		t.Errorf("paths = %v, want the IAB category catalog read first", got.paths)
+	}
+	ds := firstDataset(t, body)
+	if raw, _ := json.Marshal(ds["iab_category_codes"]); string(raw) != "[2]" {
+		t.Errorf("iab_category_codes = %s, want [2]", raw)
+	}
+	if _, ok := ds["categories"]; ok {
+		t.Errorf("WebDomain wrote categories too: %v", ds)
+	}
+}
+
 // Changed is true for --name "" and --country "", so the required-flag check
 // passed and the API was sent "" and [""] entries.
 func TestAudiencesCreateRejectsEmptyValues(t *testing.T) {
@@ -196,5 +220,187 @@ func TestAudiencesCreateWithoutTypeOrFileIsAUsageError(t *testing.T) {
 	wantUsageErr(t, err, "--type", "--file")
 	if len(got.paths) != 0 {
 		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
+// originFlags is a complete Origin audience. Wednesday to Wednesday, so the
+// API widens it to two whole weeks.
+var originFlags = []string{"--type", "origin", "--name", "LA residents",
+	"--start-date", "2026-09-02", "--end-date", "2026-09-09", "--country", "USA"}
+
+// The keys the API's Origin rules accept: the shared dataset keys and the
+// location block, nothing type-specific.
+var (
+	originDatasetKeys  = map[string]bool{"type": true, "start_date": true, "end_date": true, "signal_providers": true, "location": true}
+	originLocationKeys = map[string]bool{"countries": true, "states": true, "cities": true, "zipcodes": true, "dmas": true}
+)
+
+// Origin is in production and in Get Dataset Types, but the CLI refused it.
+// Its body must pass the API's rules: signal providers and countries
+// required, geographic filters only.
+func TestAudiencesCreateOriginDryRunBuildsAnAcceptableBody(t *testing.T) {
+	srv, got := stub(t, providersPOI)
+
+	out, errb, err := run(t, audiencesCreateCommand(), srv, append(append([]string(nil), originFlags...),
+		"--state", "CA", "--city", "Los Angeles", "--zipcode", "90001", "--dry-run")...)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(out), &body); err != nil {
+		t.Fatalf("dry-run output is not a JSON body: %v\n%s", err, out)
+	}
+
+	if len(got.paths) != 1 || !strings.Contains(got.queries[0], "dataType=Origin") {
+		t.Errorf("providers should be read for Origin: paths = %v, queries = %v", got.paths, got.queries)
+	}
+	ds := firstDataset(t, body)
+	if ds["type"] != "Origin" || ds["start_date"] != "2026-09-02" || ds["end_date"] != "2026-09-09" {
+		t.Errorf("dataset = %v", ds)
+	}
+	for k := range ds {
+		if !originDatasetKeys[k] {
+			t.Errorf("the API rejects %q on an Origin dataset: %v", k, ds)
+		}
+	}
+	if raw, _ := json.Marshal(ds["signal_providers"]); string(raw) != `["aaa","bbb"]` {
+		t.Errorf("signal_providers = %s, want every Origin provider", raw)
+	}
+	loc, _ := ds["location"].(map[string]any)
+	for k := range loc {
+		if !originLocationKeys[k] {
+			t.Errorf("the API rejects location.%s: %v", k, loc)
+		}
+	}
+	if raw, _ := json.Marshal(loc["countries"]); string(raw) != `["USA"]` {
+		t.Errorf("location.countries = %s", raw)
+	}
+
+	// The window the API scans is not the one typed, so say which it is.
+	if !strings.Contains(errb, "2026-08-31") || !strings.Contains(errb, "2026-09-13") {
+		t.Errorf("stderr should give the widened window, got %q", errb)
+	}
+}
+
+// A window already made of whole weeks is scanned as typed: nothing to say.
+func TestAudiencesCreateOriginWholeWeeksNeedNoNote(t *testing.T) {
+	srv, _ := stub(t, providersPOI)
+
+	_, errb, err := run(t, audiencesCreateCommand(), srv, append(swap(swap(originFlags,
+		"--start-date", "2026-08-31"), "--end-date", "2026-09-13"), "--dry-run")...)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if strings.Contains(errb, "widen") {
+		t.Errorf("no widening to report, got %q", errb)
+	}
+}
+
+// The API requires countries on Origin; without one the body is a 422. It is
+// a usage error, so it must not wait for a token to be found.
+func TestAudiencesCreateOriginNeedsACountry(t *testing.T) {
+	args := []string{"--type", "origin", "--name", "x", "--start-date", "2026-09-02", "--end-date", "2026-09-09"}
+
+	err := runLoggedOut(t, audiencesCreateCommand(), args...)
+
+	wantUsageErr(t, err, "--country", "Origin")
+	if strings.Contains(err.Error(), "not logged in") {
+		t.Errorf("reported as a login problem: %v", err)
+	}
+}
+
+// The --brand hint names what each type does take: its own brands field for
+// AffinityTransactions, geography for Origin, --category only for a type with
+// a category catalog, and nothing for the rest, which refuse --category too.
+func TestAudiencesCreateBrandHintPerType(t *testing.T) {
+	hints := map[string]string{
+		"AffinityTransactions": "; affinity brands need --file",
+		"Origin":               "; Origin filters on geography only (--country, --state, --city, --zipcode)",
+		"Apps":                 "; use --category",
+		"WebDomain":            "; use --category",
+		"CTV":                  "",
+		"Deidentified":         "",
+	}
+	for _, typ := range datasetTypes {
+		// The file-only types are refused before --brand is looked at.
+		if _, fileOnly := fileOnlyTypes[typ]; typ == "POI" || fileOnly {
+			continue
+		}
+		hint, ok := hints[typ]
+		if !ok {
+			t.Errorf("no expected --brand hint for %s; add it here", typ)
+			continue
+		}
+		t.Run(typ, func(t *testing.T) {
+			err := runLoggedOut(t, audiencesCreateCommand(), "--type", typ, "--name", "x",
+				"--start-date", "2026-09-01", "--end-date", "2026-09-07", "--country", "USA", "--brand", "coffee")
+
+			wantUsageErr(t, err)
+			if want := "--brand applies to --type POI, not " + typ + hint; err.Error() != want {
+				t.Errorf("err = %q\nwant  %q", err, want)
+			}
+		})
+	}
+}
+
+// Cohorts, Demographics and ProfileAttributes each require a field no flag
+// writes, so every body the flags could build is a 422. They are refused
+// before anything is read or sent, --dry-run included, and before the
+// missing-flag check, which would otherwise ask for dates Demographics
+// rejects.
+func TestAudiencesCreateRefusesTheTypesFlagsCannotBuild(t *testing.T) {
+	for typ, field := range map[string]string{
+		"cohorts":           "cohort_id",
+		"Demographics":      "demographic filter",
+		"PROFILEATTRIBUTES": "profile_attributes",
+	} {
+		for _, args := range [][]string{
+			{"--type", typ},
+			{"--type", typ, "--name", "x", "--start-date", "2026-09-01", "--end-date", "2026-09-07",
+				"--country", "USA", "--dry-run"},
+		} {
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				srv, got := stub(t, providersPOI)
+				_, _, err := run(t, audiencesCreateCommand(), srv, args...)
+				wantUsageErr(t, err, "cannot be built from flags", field, "--file")
+				if len(got.bodies) != 0 || len(got.paths) != 0 {
+					t.Errorf("nothing should be sent, got %v %v", got.paths, got.bodies)
+				}
+			})
+		}
+	}
+	if !strings.Contains(fileOnlyTypes["Demographics"], "rejects the dates and signal providers") {
+		t.Error("the Demographics refusal should say why the flag body is always rejected")
+	}
+}
+
+// Completion offers only the types the flag path builds.
+func TestFlagTypesLeavesOutTheFileOnlyTypes(t *testing.T) {
+	got := strings.Join(flagTypes(), ",")
+	if want := "affinitytransactions,apps,ctv,deidentified,origin,poi,webdomain"; got != want {
+		t.Errorf("flagTypes() = %s, want %s", got, want)
+	}
+}
+
+// Origin filters on geography only. The --brand hint used to point at
+// --category, which Origin refuses too.
+func TestAudiencesCreateOriginRejectsBrandAndCategory(t *testing.T) {
+	for _, tc := range []struct {
+		flag string
+		want []string
+	}{
+		{"--brand", []string{"--brand", "Origin", "geography"}},
+		{"--brand-all", []string{"--brand-all", "Origin", "geography"}},
+		{"--category", []string{"--category", "Origin"}},
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
+			err := runLoggedOut(t, audiencesCreateCommand(),
+				append(append([]string(nil), originFlags...), tc.flag, "coffee")...)
+
+			wantUsageErr(t, err, tc.want...)
+			if strings.Contains(err.Error(), "use --category") {
+				t.Errorf("points at a flag Origin also refuses: %v", err)
+			}
+		})
 	}
 }

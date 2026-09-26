@@ -64,8 +64,11 @@ func (e endpoint) command(group string) *cobra.Command {
 	flags := cmd.Flags()
 
 	if !e.noSearch {
-		flags.StringVar(&search, "search", "",
-			"Case-insensitive contains match on the item label")
+		help := e.searchHelp
+		if help == "" {
+			help = "Case-insensitive contains match on the item label"
+		}
+		flags.StringVar(&search, "search", "", help)
 	}
 	if e.paged {
 		flags.Var(&page, "page", "Page to fetch (default 1)")
@@ -133,6 +136,11 @@ func (e endpoint) command(group string) *cobra.Command {
 			case num:
 				query.Set(p.name, strconv.Itoa(*numVal[p.name]))
 			case strs:
+				if p.oneKind {
+					if err := oneKindOnly(flagName(p.name), *strsVal[p.name]); err != nil {
+						return err
+					}
+				}
 				for _, s := range *strsVal[p.name] {
 					query.Add(p.name+"[]", s)
 				}
@@ -147,6 +155,26 @@ func (e endpoint) command(group string) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// oneKindOnly refuses a list that mixes numeric ids with codes. The API
+// decides from the first value which kind all of them are, as PHP's
+// is_numeric does, and drops the others without a word.
+func oneKindOnly(flag string, values []string) error {
+	var ids, codes []string
+	for _, v := range values {
+		if _, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			ids = append(ids, v)
+		} else {
+			codes = append(codes, v)
+		}
+	}
+	if len(ids) == 0 || len(codes) == 0 {
+		return nil
+	}
+	return usageErr(fmt.Sprintf("--%s mixes ids (%s) and codes (%s); the API reads them all as "+
+		"the kind of the first and drops the rest, so pass one kind", flag,
+		strings.Join(ids, ", "), strings.Join(codes, ", ")))
 }
 
 // flagName: category_ids -> category-ids, datasetType -> dataset-type.
@@ -182,6 +210,7 @@ func runReference(cmd *cobra.Command, path string, query url.Values) error {
 	if jsonOutput {
 		raw, err := c.GetRaw(cmd.Context(), path, query)
 		if err != nil {
+			printErrorEnvelope(cmd, err)
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
@@ -208,9 +237,31 @@ func runReference(cmd *cobra.Command, path string, query url.Values) error {
 		return nil
 	}
 
-	if err := output.Table(cmd.OutOrStdout(), items); err != nil {
+	if err := output.Table(cmd.OutOrStdout(), inlineScalarLists(items)); err != nil {
 		return err
 	}
 	output.Footer(cmd.ErrOrStderr(), pg)
 	return nil
+}
+
+// inlineScalarLists joins each list of scalars into one cell, so a datastream's
+// dataset_types reads "poi, competitors" rather than "[2 items]". Only that:
+// unlike flatten it leaves {id, name} objects alone, and lists of objects stay
+// counted - --json has them in full.
+func inlineScalarLists(items []output.Record) []output.Record {
+	rows := make([]output.Record, len(items))
+	for i, item := range items {
+		row := make(output.Record, len(item))
+		for k, v := range item {
+			if list, ok := v.([]any); ok {
+				if s, ok := joinScalars(list); ok {
+					row[k] = s
+					continue
+				}
+			}
+			row[k] = v
+		}
+		rows[i] = row
+	}
+	return rows
 }

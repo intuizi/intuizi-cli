@@ -129,11 +129,21 @@ func client() (*api.Client, error) {
 		return nil, errors.New("not logged in - run 'intuizi auth login', or set " +
 			config.EnvToken + " for CI")
 	}
-	if stored := trimURL(cfg.BaseURL); stored != "" && stored != trimURL(base) {
-		return nil, fmt.Errorf("the stored token belongs to %s, not %s - run "+
-			"'intuizi auth login --base-url %s' or set %s", stored, base, base, config.EnvToken)
+	if err := otherConsole(cfg.BaseURL, base); err != nil {
+		return nil, err
 	}
 	return api.New(base, token), nil
+}
+
+// otherConsole refuses a stored token minted for another console than base:
+// pairing it with another --base-url would hand the credential to whatever
+// host is named. An empty stored base predates per-console scoping.
+func otherConsole(stored, base string) error {
+	if stored = trimURL(stored); stored != "" && stored != trimURL(base) {
+		return fmt.Errorf("the stored token belongs to %s, not %s - run "+
+			"'intuizi auth login --base-url %s' or set %s", stored, base, base, config.EnvToken)
+	}
+	return nil
 }
 
 // storeUnavailable reports a store that did not answer. A locked keychain is

@@ -20,18 +20,25 @@ func usageCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "usage",
-		Short: "Show this month's data-scan usage",
+		Short: "Show data-scan usage for a month",
 		Long: `Show your company's data-scan usage for a calendar month.
 
 Reports the total bytes scanned, a breakdown by operation type - audience
-build, refresh, lookalike, cohort and activation - and your monthly limit.
-Defaults to the current month.
+build, scheduled refresh, lookalike, cohort, activation and size estimate - and
+your monthly limit. Defaults to the current month.
 
     intuizi usage
     intuizi usage --month 2026-06
 
-No cost figures are exposed through the API. Usage requires a permission your
-Account Manager enables; without it the read is rejected.`,
+The response also carries your organization's build budget (build_budget: the
+hourly and daily build limits and the live counts). The table leaves it out,
+and its enforced row is the data-scan limit's, so read the budget with --json:
+
+    intuizi usage --json | jq .data.build_budget
+
+No cost figures are exposed through the API. Usage data requires additional
+permissions which need to be approved by your Account Manager; without them
+the read is rejected.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// A report has no id to print.
@@ -55,6 +62,7 @@ Account Manager enables; without it the read is rejected.`,
 			if jsonOutput {
 				raw, err := c.GetRaw(cmd.Context(), "/usage", query)
 				if err != nil {
+					printErrorEnvelope(cmd, err)
 					return err
 				}
 				return output.JSON(cmd.OutOrStdout(), raw)

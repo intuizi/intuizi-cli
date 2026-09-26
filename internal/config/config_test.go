@@ -17,6 +17,10 @@ func isolate(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
 	t.Setenv(EnvToken, "")
+	// A caller who exports INTUIZI_NO_KEYRING=1, as DOCS.md offers, would
+	// otherwise turn off the fake store every test swaps in. Tests that want
+	// the file path set it again after this.
+	t.Setenv(EnvNoKeyring, "")
 	swapKeyring(t)
 	return dir
 }
@@ -832,5 +836,161 @@ func TestClearTokenReportsAStoreTimeout(t *testing.T) {
 	}
 	if had {
 		t.Error("claimed to have removed a token it could not read")
+	}
+}
+
+// The account email is not secret: it stays in the file beside the base URL
+// and expiry, whichever of the two holds the token.
+func TestSaveKeepsTheEmailInTheFile(t *testing.T) {
+	isolate(t)
+
+	if err := Save(&Config{BaseURL: "https://example.com", Token: "secret", Email: "you@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	into := readStoredJSON(t)
+	if into["email"] != "you@example.com" {
+		t.Fatalf("email missing from the file: %v", into)
+	}
+	if _, ok := into["token"]; ok {
+		t.Fatalf("the secret was written to the file as well: %v", into)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Email != "you@example.com" {
+		t.Fatalf("email did not round trip: %+v", cfg)
+	}
+}
+
+// An older file has no email; nothing is written for it.
+func TestSaveOmitsAnEmptyEmail(t *testing.T) {
+	isolate(t)
+
+	if err := Save(&Config{BaseURL: "https://example.com", Token: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if into := readStoredJSON(t); into["email"] != nil {
+		t.Fatalf("email should be omitted when empty: %v", into)
+	}
+}
+
+// The email names whose token it was. Once the token is gone it names
+// nothing, so logout forgets it too - wherever the token was held.
+func TestClearTokenForgetsTheEmail(t *testing.T) {
+	const base = "https://example.com"
+	for name, cfg := range map[string]*Config{
+		"token in the store": {BaseURL: base, Token: "secret", Email: "you@example.com"},
+		"token in the file":  {BaseURL: base, Token: "secret", Email: "you@example.com"},
+		"email alone":        {BaseURL: base, Email: "you@example.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			if name == "token in the file" {
+				t.Setenv(EnvNoKeyring, "1")
+			}
+			if err := Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := ClearToken(base); err != nil {
+				t.Fatal(err)
+			}
+
+			after, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.Email != "" || after.Token != "" {
+				t.Errorf("after logout: %+v", after)
+			}
+			if after.BaseURL != base {
+				t.Errorf("base_url lost: %+v", after)
+			}
+		})
+	}
+}
+
+// Another console's account is not ours to forget.
+func TestClearTokenKeepsAnotherConsolesEmail(t *testing.T) {
+	isolate(t)
+	if err := Save(&Config{BaseURL: "https://b.example.com", Token: "token-b", Email: "you@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ClearToken("https://a.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Email != "you@example.com" {
+		t.Errorf("another console's email was cleared: %+v", cfg)
+	}
+}
+
+// Login says where the token went, so Save has to report it: the store when it
+// took the secret, the file otherwise, and nothing when there was no token.
+func TestSaveWhereReportsWhereTheTokenWent(t *testing.T) {
+	isolate(t)
+
+	where, err := SaveWhere(&Config{BaseURL: "https://example.com", Token: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if where != SourceKeyring {
+		t.Errorf("with a store: where = %q, want %q", where, SourceKeyring)
+	}
+
+	fakeKeyringFor(t).fail = true
+	where, err = SaveWhere(&Config{BaseURL: "https://example.com", Token: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if where != SourceConfig {
+		t.Errorf("with no store: where = %q, want %q", where, SourceConfig)
+	}
+
+	fakeKeyringFor(t).fail = false
+	t.Setenv(EnvNoKeyring, "1")
+	where, err = SaveWhere(&Config{BaseURL: "https://example.com", Token: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if where != SourceConfig {
+		t.Errorf("with %s set: where = %q, want %q", EnvNoKeyring, where, SourceConfig)
+	}
+
+	where, err = SaveWhere(&Config{BaseURL: "https://example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if where != SourceNone {
+		t.Errorf("with no token: where = %q, want %q", where, SourceNone)
+	}
+}
+
+// INTUIZI_NO_KEYRING=0 used to switch the store off like any other non-empty
+// value, so someone saying "not no-keyring" lost sight of a stored token and
+// the next login spent one of the account's ten slots. A value that reads as
+// false leaves the store on; anything else still switches it off.
+func TestNoKeyringFalseValuesLeaveTheStoreOn(t *testing.T) {
+	isolate(t)
+	for value, enabled := range map[string]bool{
+		"":      true,
+		"0":     true,
+		"false": true,
+		"FALSE": true,
+		"f":     true,
+		" 0 ":   true,
+		"1":     false,
+		"true":  false,
+		"yes":   false,
+		"on":    false,
+	} {
+		t.Setenv(EnvNoKeyring, value)
+		if got := keyringEnabled(); got != enabled {
+			t.Errorf("%s=%q: store enabled = %v, want %v", EnvNoKeyring, value, got, enabled)
+		}
 	}
 }

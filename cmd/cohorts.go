@@ -29,7 +29,17 @@ cloud file or an upload, or built from a completed audience. Once imported it
 becomes a dataset an audience can be built from.
 
 Cohort status ids are their own scale, not the audience one: 1 Uploading,
-2 Initiating, 3 Processing, 4 Completed, 5 Not Available.`,
+2 Initiating, 3 Processing, 4 Completed. A failed import reports an error code
+outside 1 to 4 instead, which the table shows as Unknown; 5 Not Available is
+reserved and never reported. No cohort command takes --wait, so re-run
+'intuizi cohorts show <id>' until the status is 4, and stop on any status
+outside 1 to 4. With --json the id is .data.status.id: a cohort read returns
+the record itself, not an array of one.
+
+After a failed import, fix the cause and create the cohort again. An
+--upload-reference is used up by the failed create, so upload the file again
+for a new one. A regular audience keeps its failed cohort, and makes at most
+one, so run 'intuizi cohorts delete <id>' before creating from it again.`,
 }
 
 // --------------------------------------------------------------------------------- create
@@ -48,11 +58,12 @@ var cohortRequired = []string{
 	"name", "file-format", "identifier-type", "identifier-column",
 }
 
-// cohortAudienceOnly describe a file import. The API ignores them on an
-// audience source rather than rejecting them, so name the mistake here.
+// cohortAudienceOnly describe a file import, or what an audience source takes
+// from the audience itself. The API ignores them on an audience source rather
+// than rejecting them, so name the mistake here.
 var cohortAudienceOnly = []string{
 	"name", "file-format", "identifier-type", "identifier-column",
-	"metadata-columns", "ip-enrichment",
+	"metadata-columns", "ip-enrichment", "project-id",
 }
 
 // The server's accepted sets, checked here so a typo is named with the values
@@ -110,23 +121,38 @@ from flags:
       --identifier-column email_sha256
 
 A file_uri ending .csv, .gz or .parquet is read as a single file; anything else
-is read as a folder.
+is read as a folder. The match is case-sensitive, so Q3.CSV imports as a
+folder.
 
 The other two sources are flat too. From a file you uploaded, swap --file-uri
-for the reference 'intuizi uploads reserve' handed back:
+for the reference 'intuizi uploads put --purpose cohort' printed:
 
     intuizi cohorts create --name "Q3 customers" \
       --upload-reference upl_abc123 --file-format csv \
       --identifier-type hem_sha256 --identifier-column email_sha256
 
+The same suffix rule decides an upload, by the name it was uploaded under: the
+'uploads put' file name, or 'uploads reserve --filename'. The API keeps the
+first 100 characters of that name, so a longer one loses its suffix. Name the
+file .csv, .gz or .parquet before uploading it; 'cohorts preview' reads an
+upload whatever its name, so a clean preview does not show which way it will
+import.
+
 From a Completed audience, --audience-id is the only flag needed; the cohort
-takes the audience's own name, so --name is rejected:
+takes the audience's own name and project, so --name is rejected, and so is
+--project-id:
 
     intuizi cohorts create --audience-id 88 --device-limit 1000
 
-An audience makes at most one live cohort. Capping by visit frequency or by
-distance instead of a device count needs freq_limit or distance_limit and their
-bounds, so those go through the whole body:
+A regular audience makes at most one cohort; a Lookalike Model audience can
+make several.
+
+--device-limit is the only limit with a flag. Capping an audience cohort by
+visit frequency (freq_limit with freq_min and freq_max), by distance
+(distance_limit with distance) or, for a Lookalike Model audience, by score
+range (score_limit with min_score and max_score) goes through the whole body,
+and so does Match Strictness (max_devices_per_ip, 1 to 5) on an SCID file
+import:
 
     intuizi cohorts create --file cohort.json
 
@@ -134,13 +160,21 @@ bounds, so those go through the whole body:
 
 Check the column mapping before importing with 'intuizi cohorts preview'.
 
-A retry of this command reuses its Idempotency-Key, so it cannot create a
-duplicate import.`,
+The request carries an Idempotency-Key, and a retry after a 429 reuses it.
+Running the command again sends a fresh key and can create a second import.
+When a create gets no response at all, stderr prints the key it used: rerun
+with --idempotency-key <key> to retry it without risking a duplicate.
+
+With --upload-reference, only the per-minute rate limiter's 429 is retried.
+The build budget can refuse the create after the reference is claimed, so its
+429 is not retried: the refused attempt has used the reference up, and the
+file has to be uploaded again for a new one once the budget has room.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()
 
-			next := "importing - run 'intuizi cohorts show <id>' for its status"
+			next := "importing - re-run 'intuizi cohorts show <id>' until its status is 4 Completed; " +
+				"a status outside 1 to 4 means the import failed"
 
 			if file != "" {
 				// Mixing the two would beg the question of which wins.
@@ -173,8 +207,11 @@ duplicate import.`,
 				for _, f := range cohortAudienceOnly {
 					if flags.Changed(f) {
 						why := " describes a file import"
-						if f == "name" {
+						switch f {
+						case "name":
 							why = " is ignored: the cohort takes the audience's name"
+						case "project-id":
+							why = " is ignored: the cohort is filed under the audience's project"
 						}
 						return usageErr("--" + f + why +
 							"; drop it when the source is --audience-id")
@@ -252,7 +289,7 @@ duplicate import.`,
 	flags.StringVar(&fileURI, "file-uri", "",
 		"The file to import: s3://bucket/path or gs://bucket/path")
 	flags.StringVar(&uploadRef, "upload-reference", "",
-		"An upload_reference from 'intuizi uploads reserve', instead of --file-uri")
+		"An upload_reference from 'intuizi uploads put --purpose cohort',\ninstead of --file-uri")
 	flags.IntVar(&audienceID, "audience-id", 0,
 		"Build from this Completed audience instead of a file")
 	flags.StringVar(&fileFormat, "file-format", "",
@@ -264,11 +301,12 @@ duplicate import.`,
 	flags.StringArrayVar(&metadata, "metadata-columns", nil,
 		"A column to keep alongside the identifier (repeat the flag for more than one)")
 	flags.BoolVar(&ipEnrich, "ip-enrichment", false,
-		"Resolve IP addresses to devices")
+		"Also add devices seen on the same IP addresses as the cohort's\ndevices (Enrich by Household in Audience Manager)")
 	flags.IntVar(&deviceLimit, "device-limit", 0,
 		"Cap the devices imported")
 	flags.IntVar(&projectID, "project-id", 0,
-		"The project to create the cohort in")
+		"The project to create the cohort in, for a file or upload source (an\n"+
+			"audience source takes the audience's project, so it is rejected there)")
 
 	completeValues(cmd, "file-format", cohortFileFormats)
 	completeValues(cmd, "identifier-type", identifierTypes)
@@ -328,8 +366,9 @@ three scalars, so it can be built from flags:
     intuizi cohorts preview --file-uri s3://example-bucket/cohorts/q3.csv
     intuizi cohorts preview --upload-reference upl_abc123 --file-format csv
 
-Give exactly one of --file-uri or --upload-reference. --file-format is
-optional; the file is sniffed when it is left off.
+Give exactly one of --file-uri or --upload-reference. --file-format defaults
+to csv - the format is not detected - so pass --file-format gzip for a gzip
+file.
 
 Parquet files cannot be previewed - only csv and gzip.
 
@@ -394,9 +433,9 @@ The whole body still works if you prefer:
 	flags.StringVar(&fileURI, "file-uri", "",
 		"The file to preview: s3://bucket/path or gs://bucket/path")
 	flags.StringVar(&uploadRef, "upload-reference", "",
-		"An upload_reference from 'intuizi uploads reserve', instead of --file-uri")
+		"An upload_reference from 'intuizi uploads put --purpose cohort',\ninstead of --file-uri")
 	flags.StringVar(&fileFormat, "file-format", "",
-		"How the file is encoded: csv or gzip (parquet cannot be previewed)")
+		"How the file is encoded: csv (the default) or gzip; parquet\ncannot be previewed")
 	completeValues(cmd, "file-format", previewFileFormats)
 	return cmd
 }
@@ -414,6 +453,7 @@ func previewCohort(cmd *cobra.Command, body any) error {
 	if jsonOutput {
 		raw, err := c.PostRaw(cmd.Context(), path, body)
 		if err != nil {
+			printErrorEnvelope(cmd, err)
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)

@@ -18,12 +18,14 @@ serve versions from v0.1.0, the first public release.
 ## Authenticate
 
 ```bash
-intuizi auth login     # exchanges credentials for an API token, stored in ~/.config/intuizi/
-intuizi auth status    # shows the logged-in account
+intuizi auth login     # exchanges credentials for an API token and stores it
+intuizi auth status    # shows the token in use and the account it belongs to
 intuizi auth logout    # forgets the stored token
 ```
 
-The token can also be supplied per-call with the `INTUIZI_API_TOKEN`
+The token goes to the OS credential store when there is one, otherwise to
+the config file; see [Where the token is stored](#where-the-token-is-stored).
+It can also be supplied per-call with the `INTUIZI_API_TOKEN`
 environment variable, which wins over the stored one. `auth logout` forgets the
 token locally; it does not revoke it on the server.
 
@@ -34,17 +36,65 @@ echo "$PASSWORD" | intuizi auth login --email you@example.com
 ```
 
 A token is bound to the console that minted it, and the config file stores the
-base URL alongside it. `auth login` reuses a stored token that still works for
-the same console, since accounts are capped at 10 active tokens; logging in
-with a different `--base-url` mints a new token there and replaces the stored
-base URL and token together. The file and its directory are checked before
-anything is minted, so a corrupt file, an unwritable directory or a credential
-store that does not answer fails without spending a token slot, and `auth
-login`, `auth status` and `auth logout` all name the file when it cannot be
-read. `auth status --verify` makes one request
-to confirm the token is still accepted. Login and logout print commentary on
+base URL and the account email alongside it. `auth login` reuses a stored token
+that still works for the same console and the same account, since accounts are
+capped at 10 active tokens, and says on stderr which account is logged in.
+Without `--email` the stored token is kept. An `--email` that differs from the
+stored account's, compared ignoring case, mints a token for that account and
+replaces the stored one; the replaced token stays valid on the server until it
+expires or is revoked at My Account > API Tokens. A token stored before the
+account was recorded (v0.1.3 and earlier) cannot be matched, so the first
+`auth login --email` after upgrading mints a new token and records the account,
+and stderr says it replaced the stored token and whether that token was still
+valid; `auth login` without `--email` keeps it.
+
+Logging in with a different `--base-url` mints a token for that console and
+makes it the one in use, with its account. In the config file that replaces
+the previous console's token. In the OS credential store the previous
+console's token stays stored under that console: a plain `auth logout` does
+not remove it, `auth status` does not show it, and logging back in to that
+console mints another rather than reusing it. Remove it with
+`intuizi --base-url <previous console> auth logout`, as
+[Where the token is stored](#where-the-token-is-stored) shows. Either way it
+stays valid on the server until it expires or is revoked at My Account > API
+Tokens.
+
+The file and its directory are checked before anything is minted, so a
+corrupt file or an unwritable directory fails without spending a token slot,
+and `auth login`, `auth status` and `auth logout` all name the file when it
+cannot be read. When the credential store
+does not answer within two seconds and the config file names a console but
+does not hold the token itself, `auth login` fails before it mints anything;
+unlock the store and try again. A login that mints while the store is not
+answering, such as the first login on a machine, saves the new token to the
+config file instead and says so on stderr. `auth status --verify` makes one
+request to confirm the token is still accepted. Login and logout print commentary on
 stderr; only `auth status` writes to stdout. Ctrl-C at a prompt exits 130 and
 leaves the terminal as it found it.
+
+`auth status` prints an `Account:` line. It names the stored token's account,
+or says it is unknown for a token stored before accounts were recorded, and
+that `auth login --email <address>` mints a token that records it. When
+`INTUIZI_API_TOKEN` is in effect the account is reported unknown: that token
+was not minted by `auth login`, so nothing local says whose it is, and the
+`--verify` request does not return the user either.
+
+```
+$ intuizi auth status
+Base URL: https://console.intuizi.com
+Token:    present (in the OS credential store)
+Account:  you@example.com
+Expires:  2027-09-26 (in 364 days)
+```
+
+Every command refuses a stored token for a `--base-url` other than the
+console that minted it, rather than send the credential to another host.
+`auth status` does the same: with another console's `--base-url` it prints
+`Token:    none for this console (the stored one belongs to <url>)`, no
+account or expiry, sends nothing even with `--verify`, and exits 1.
+
+`auth logout` forgets the account email with the token, and stays local: it
+never calls the server.
 
 ## Global flags
 
@@ -58,9 +108,21 @@ leaves the terminal as it found it.
 
 ### `--debug`
 
-One line per request and one per response on stderr: method and URL, the
-headers, the status, how long it took, and how many bytes came back. Stdout is
-untouched, so `--debug` composes with `--json` and `--quiet`.
+Each request and response on stderr, one item per line: the method and URL,
+then one line per request header; the status and how long it took, then one
+line per response header, then how many bytes came back. Stdout is untouched,
+so `--debug` composes with `--json` and `--quiet`.
+
+```
+> GET https://console.intuizi.com/api/v2/analyses/reference/poi/brands?search=star
+>   Accept: application/json
+>   Authorization: <redacted>
+>   User-Agent: intuizi-cli/v0.1.4
+< 200 OK in 212ms
+<   Content-Type: application/json
+<   ...
+<   1843 bytes read
+```
 
 Credentials are redacted: the `Authorization` and `Idempotency-Key` headers,
 cookies, every `x-amz-*` header, any userinfo in a URL, and the signature
@@ -78,12 +140,31 @@ command does.
 A transcript is still safe to read before sending it on: it names the host, the
 path and any search terms you passed.
 
+### Rate limits
+
+On a `429` the CLI waits the `Retry-After` the response names and tries again,
+at most twice, and says so on stderr each time
+(`rate limited (429): retrying in 3s (retry 1 of 2)`). A create keeps its
+Idempotency-Key across those retries. A `429` that asks for more than 60
+seconds, such as the organization build budget's, is not waited out: the
+command exits `1` at once, and the error ends with the wait the server asked
+for, as in `(429, Retry-After: 1800s)`. Run it again after that.
+
+A create that claims an upload reference (`cohorts create --upload-reference`,
+`poi submissions create --upload-reference`, or `upload_reference` in a
+`--file` body) is retried only after the per-minute rate limiter's `429`. The
+build budget can refuse a cohort create after the reference is claimed, so a
+retry would fail with `The upload reference has already been used.` and hide
+the refusal. That `429` is returned as it came, and the error says to upload
+the file again for a new reference.
+
 ### Where the token is stored
 
 `auth login` puts the token in the OS credential store when there is one: the
 macOS Keychain, Windows Credential Manager, or the Linux secret service. The
-config file keeps the base URL and the expiry either way, so `auth status` can
-still tell you when the token runs out.
+config file keeps the base URL, the expiry and the account email either way,
+none of them secret, so `auth status` can still tell you when the token runs
+out and whose it is.
 
 Containers, CI runners and SSH sessions have no credential store. There the
 token falls back to the config file, written owner-only. `auth status` says
@@ -98,7 +179,12 @@ intuizi --base-url https://other-console auth logout
 ```
 
 Set `INTUIZI_NO_KEYRING=1` to skip the credential store and keep the token in
-the config file. `INTUIZI_API_TOKEN` still takes precedence over both.
+the config file. Any non-empty value switches the store off except one that
+reads as false: `0` and `false` leave it on, as leaving it unset does. Set
+it before `auth login` and keep it set: while it is set, a token already in the
+credential store is not read, so commands report that you are not logged in,
+and `auth login` mints a new token, which counts toward the account's 10.
+`INTUIZI_API_TOKEN` still takes precedence over both.
 
 The config file is refused if its permissions are looser than 0600: it holds a
 bearer token, and `auth login` always writes it owner-only, so a wider mode
@@ -117,7 +203,7 @@ means something else changed it.
 | `schedules` | Recurring rebuilds, with activate and deactivate |
 | `uploads` | `reserve` a presigned slot, or `put` to upload in one step |
 | `webhooks list` | Inspect webhook endpoints registered in the Console |
-| `usage` | This month's data-scan usage and limits |
+| `usage` | Data-scan usage and limits for a calendar month (`--month YYYY-MM`, default the current month) |
 | `completion <shell>` | Shell completion script |
 
 Deletes prompt for confirmation unless `--yes`.
@@ -131,9 +217,10 @@ resolved silently.
 Two habits make this safe:
 
 - **`--dry-run`** prints the body the flags produce and creates nothing.
-  Redirect it to a file for a starting point in the `--file` form. It still
-  reads the catalogs to resolve names, so it needs a token and counts against
-  the read budget; it cannot be combined with `--wait`.
+  Redirect it to a file for a starting point in the `--file` form. On
+  `audiences create` it still reads the catalogs to resolve names, so it needs
+  a token and counts against the read budget; the other creates send nothing
+  and need no token. It cannot be combined with `--wait`.
 - **Names resolve, ids do not.** A name is looked up and must match exactly one
   entry. The lookup matches substrings, so when several come back and exactly
   one is labelled with the name itself, ignoring case, that one is taken:
@@ -189,7 +276,9 @@ jq --argjson p "$providers" '.datasets[0].signal_providers = $p' base.json \
 
 Ready-made payloads for every command live in `examples/`. Every id in them is
 a placeholder: replace each one with a value read from the account in use, or
-the audience will build against ids that account does not have.
+the audience will build against ids that account does not have. The dates are
+examples too: a `WebDomain` start date must fall within the last 45 days, and
+a schedule's start must be in the future.
 
 `--file` cannot be combined with a flag that builds a body, or with
 `--dry-run`, since the file already carries one. `--wait`, `--timeout`,
@@ -210,15 +299,19 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--brand-all` | a search, taking every match; POI only | `reference poi brands` |
 | `--category` | name or id, repeatable | one catalog per type, below |
 | `--provider` | id, repeatable | `reference common signal-providers --data-type <type>` |
-| `--country` | ISO-3 code, repeatable | `reference common countries` |
+| `--country` | ISO-3 code, repeatable; the API requires it for every type except Cohorts, AffinityTransactions and ProfileAttributes, and the CLI checks it before sending only on Origin | `reference common countries` |
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--city` | city name, repeatable | `reference common cities --states CA` |
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
 | `--dry-run` `--wait` `--timeout` | - | - |
 
-`--type` is case-insensitive in and canonical out: `poi` sends `POI`. Accepted
-types are POI, Apps, WebDomain, CTV, Cohorts, AffinityTransactions,
-Demographics, Deidentified and ProfileAttributes.
+`--type` is case-insensitive in and canonical out: `poi` sends `POI`. The
+flags build POI, Apps, WebDomain, CTV, AffinityTransactions, Deidentified and
+Origin. Cohorts, Demographics and ProfileAttributes are refused before
+anything is sent, exit 2, and go through `--file`: each requires a field no
+flag writes (a `cohort_id`, at least one demographic filter, or
+`profile_attributes` rows), and Demographics also rejects the dates and signal
+providers the flags always send.
 
 `--category` resolves against a different catalog for each type, and the
 resolved ids go into a different payload field:
@@ -230,15 +323,47 @@ resolved ids go into a different payload field:
 | AffinityTransactions | `reference transactions categories` | `categories` |
 | WebDomain | `reference web iab-categories` | `iab_category_codes` |
 
+An IAB category row carries two identifiers: the IAB code (`IAB2`) as `value`,
+which `reference web domains --category-codes` takes, and the catalog `id`
+(`2`), which is what `iab_category_codes` takes. A WebDomain `--category` name
+resolves to the `id`, and a number passed instead must be that `id`, not the
+code. Its label reads `IAB2 - Automotive`, so the exact-match rule takes the
+row whose code (`IAB1`) or name (`Automotive`) is the one given: `IAB1`
+resolves to IAB1 rather than failing because IAB10 to IAB19 also contain it.
+
 `--brand` is POI only. AffinityTransactions has brands too, in its own
 `brands` field, which no flag writes yet; that filter needs `--file`.
+
+`--type origin` targets devices by their home location rather than the places
+they visited, so its only filters are geographic. `--country` is required,
+because the API requires it: `reference common countries --dataset-type Origin`
+lists the countries with Origin data, and the API rejects a country outside
+that set when the console has Origin coverage configured. `--state`, `--city`
+and `--zipcode` narrow it further; DMAs, which Origin also accepts, need
+`--file`. `--brand`, `--brand-all` and `--category` are refused for Origin
+before anything is sent, exit 2. Signal providers apply as for any other type:
+omitting `--provider` sends every Origin provider.
+
+Origin data is weekly, so the API widens the window to the whole
+Monday-to-Sunday weeks it touches. The body keeps the dates as given, and when
+they are not already whole weeks stderr names the window that is actually
+scanned:
+
+```bash
+intuizi audiences create --type origin --country USA --state CA \
+  --start-date 2026-09-02 --end-date 2026-09-09 --name "CA residents" --dry-run
+```
+
+```
+Origin data is weekly: the API widens 2026-09-02..2026-09-09 to the whole weeks 2026-08-31..2026-09-13
+```
 
 `--brand-all` takes a search and selects every match, where `--brand` insists
 on exactly one. It reports what it selected to stderr, so an expansion is
 visible without polluting a piped payload:
 
 ```bash
-intuizi audiences create --type poi --brand-all coffee \
+intuizi audiences create --type poi --brand-all coffee --country USA \
   --start-date 2026-09-02 --end-date 2026-09-09 --name "Coffee - 1 week" --dry-run
 ```
 
@@ -250,10 +375,11 @@ It combines with `--brand`, so an exact brand plus a whole search is one
 command. A search matching nothing is an error.
 
 Omitting `--provider` includes every provider for the dataset type, which is
-almost always right: a provider left out builds an audience that completes with
-zero devices and no error. Provider sets differ per type, and a `--provider`
-outside the type's catalog is rejected before anything is sent: the API would
-accept it and build that same empty audience.
+almost always what you want. Provider sets differ per type, and a `--provider`
+outside the type's catalog is rejected before anything is created (the CLI
+reads that catalog first, so the check needs a token): the API would accept it
+and build an audience that completes with zero devices. A `--file`
+body lists its own `signal_providers`.
 
 Blank values are rejected before anything is sent, as is a zero or negative
 `--brand` or `--category` id. Beyond that a numeric id is passed through as
@@ -364,16 +490,16 @@ exists for:
   "datasets": [
     {
       "type": "Apps",
-      "start_date": "2026-08-09",
-      "end_date": "2026-08-15",
+      "start_date": "2026-09-13",
+      "end_date": "2026-09-19",
       "signal_providers": ["ef3d56f1305f0f8f28bdf35eb524d729"],
       "categories": [1],
       "location": { "countries": ["USA"] }
     },
     {
       "type": "WebDomain",
-      "start_date": "2026-08-09",
-      "end_date": "2026-08-15",
+      "start_date": "2026-09-13",
+      "end_date": "2026-09-19",
       "signal_providers": ["80791f138dc009b67aabd14f3add93b3"],
       "iab_category_codes": [1],
       "location": { "countries": ["USA"] }
@@ -388,14 +514,27 @@ exists for:
 intuizi audiences create --file two-datasets.json --wait
 ```
 
+Move the dates to a recent week before sending. A `WebDomain` dataset's
+`start_date` must fall within the last 45 days, because older web data is
+archived: the earliest date accepted is today minus 46 days, in UTC, and an
+earlier one is rejected with a 422 that names it. The dates here, and in
+`examples/audience-two-datasets.json`, are illustrations that go stale.
+
 `operator` is `AND`, `OR` or `NOTIN`, from `reference common operators`.
 `NOTIN` is order-sensitive: it subtracts the second dataset from the first.
 
 Note that the selector field differs per type. Apps uses `categories`,
 WebDomain uses `iab_category_codes`, and POI uses `analysisdata` for brands.
 
-Needs `--file`: two datasets with an operator, and the nested `refine`,
-`crossvisitation` and `crosspurchase` blocks.
+Needs `--file`: two datasets with an operator; the nested `refine`,
+`crossvisitation` and `crosspurchase` blocks; the Cohorts, Demographics and
+ProfileAttributes types; and any other field no flag writes, such as
+`project_id` to file the audience under a project, POI `locations`, DMAs, the
+`analyses` block and `datastreams`. An audience built without the frequency
+analysis in `analyses` cannot have it added after the build, and Preview
+Activation needs it, so put it in the body when you plan to preview.
+`datastreams` asks for data stream visualizations, which the audience draws
+as status `109` before it completes.
 
 ```bash
 intuizi audiences create --file examples/audience-two-datasets.json
@@ -413,8 +552,8 @@ intuizi audiences create --file examples/audience-refine-crosspurchase.json
 | `--country` | ISO-3 code, repeatable, required | `reference common countries` |
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--exclude-seed-devices` `--expand-eids` | booleans, default false, always sent | - |
-| `--contrast-audience-id` | Completed, non-lookalike audience | `audiences list` |
-| `--notify` | boolean | - |
+| `--contrast-audience-id` | Completed, non-lookalike audience other than the seed | `audiences list` |
+| `--notify` | boolean, default true, always sent | - |
 | `--file` | the whole payload as JSON, or `-` for stdin | for fields the flags do not model |
 | `--dry-run` | - | - |
 
@@ -422,15 +561,34 @@ The seed for `--source-audience-id` must be Completed, must not itself be a
 lookalike, and must hold at least 1,000 devices.
 
 Checked before anything is sent: `--name` is not blank, the two audience ids
-are positive, `--target-size` is between 1 and 4,000,000, and no `--signal`,
-`--country` or `--state` is blank. A repeated `--signal` is sent once.
+are positive and differ, `--target-size` is between 1 and 4,000,000, and no
+`--signal`, `--country` or `--state` is blank. A repeated `--signal` is sent
+once.
 `--file` takes the whole body instead, forwarded untouched, for anything the
 flags do not model.
 
 `--signal` takes `poi`, `apps`, `demographics`, `transactions` or
 `profile_attributes`. `web` and `ctv` were withdrawn and are rejected.
 
-Requires the Lookalike capability; a 403 means it is not enabled.
+When the run completes, the API emails the user who created it. `--notify` is
+on by default and always sent as `notification`, so `--notify=false` is what
+turns the email off.
+
+The Lookalike commands, `lookalike create` and `lookalike cancel` alike,
+require additional permissions which need to be approved by your Account
+Manager; a 403 means they are not enabled for the account.
+
+Training shows as status `108` Modeling, which is not terminal;
+`audiences show <id> --wait` follows the new audience through it to Completed.
+
+`audiences lookalike cancel <id>` takes the id `lookalike create` returned, not
+the seed's. The run stops at its next checkpoint and reports no further
+status, so from then on the audience keeps reading `108` Modeling and never
+reaches Completed: do not follow a cancelled run with `show <id> --wait`,
+which would poll until `--timeout` and exit `1`. A cancel that arrives once
+the result is already being published is ignored, and the run completes. A
+run that has already finished cannot be cancelled. Remove a cancelled run
+with `audiences delete <id>`.
 
 ```bash
 intuizi audiences lookalike create \
@@ -445,6 +603,7 @@ intuizi audiences lookalike create \
 | `--audience-id` | Completed audience | `audiences list` |
 | `--endpoint-connection-id` | destination connection | `reference common endpoint-connections` |
 | `--pricing-model-id` | pricing model for the export | `reference common pricing-models` |
+| `--datastream` | datastream id, repeatable or comma-separated | `reference common datastreams` |
 | `--description` | any string | - |
 | `--project-id` | project id | `projects list` |
 | `--dry-run` | - | - |
@@ -456,11 +615,24 @@ body the flags produce, sends nothing, and needs no token. Not with `--wait` or
 
 Pricing models are per partner: `reference common pricing-models --partner-id
 <id>`. Endpoint partners come from `reference common endpoint-partners`, their
-datastreams from `reference common datastreams --partner-id <id>`.
+datastreams from `reference common datastreams --partner-id <id>`. The partner
+of a connection is its `partner.id` in `reference common endpoint-connections
+--json`.
+
+A datastream is one of the partner's delivery outputs, and only an enabled one
+uploads anything. Each `--datastream` is sent as `{"id": <id>, "status": true}`
+in `datastreams`; a repeated id is sent once, and a zero or negative one is
+refused, exit 2. Without `--datastream` the activation still reaches Completed
+but delivers nothing, so the flag form prints a one-line warning on stderr,
+`--dry-run` included. A `--file` body is sent as written, without the warning.
+Per-stream `inputs`, `compression` or `service_account` need `--file`.
+
+With `--wait`, a Completed activation whose record lists no datastreams exits
+0 but notes on stderr that nothing was delivered.
 
 ```bash
 intuizi activations create --audience-id 88 \
-  --endpoint-connection-id 4 --pricing-model-id 3 --wait
+  --endpoint-connection-id 4 --pricing-model-id 3 --datastream 7 --wait
 
 # or the whole body, for fields these flags do not model
 intuizi activations create --file examples/activation.json --wait
@@ -474,15 +646,15 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 | --- | --- | --- |
 | `--name` | any string; rejected for an audience source | - |
 | `--file-uri` | `s3://bucket/path` or `gs://bucket/path` | - |
-| `--upload-reference` | reference from a reserved upload | `uploads reserve`, or `uploads put` |
+| `--upload-reference` | reference from an upload with `--purpose cohort` | `uploads put`, or `uploads reserve` |
 | `--audience-id` | Completed audience | `audiences list` |
 | `--file-format` | `csv`, `gzip` or `parquet` | - |
 | `--identifier-type` | one of nine, below | - |
 | `--identifier-column` | column name: letters, digits, `_` and `-` | `cohorts preview` |
 | `--metadata-columns` | column name, repeatable | `cohorts preview` |
-| `--ip-enrichment` | boolean | - |
+| `--ip-enrichment` | boolean: also add devices seen on the same IP addresses as the cohort's devices (Enrich by Household) | - |
 | `--device-limit` | device cap | - |
-| `--project-id` | project id | `projects list` |
+| `--project-id` | project id, for a file or upload source; rejected for an audience source, which takes the audience's project | `projects list` |
 | `--dry-run` | - | - |
 
 `--identifier-type` takes `eid`, `eid_md5`, `maid`, `ip`, `hem_plaintext`,
@@ -490,9 +662,18 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 
 A `file_uri` ending `.csv`, `.gz` or `.parquet` is read as a single file;
 anything else is read as a folder, and whitespace anywhere in it is refused.
-An audience makes at most one live cohort, and the cohort takes the audience's
-own name, so `--name` is rejected alongside `--audience-id` rather than sent
-to be ignored.
+The match is case-sensitive, so `Q3.CSV` imports as a folder. The same rule
+decides an `--upload-reference` import, by the name the file was uploaded
+under: the `uploads put` file name, or `--filename` on `uploads reserve`. The
+API keeps the first 100 characters of that name, so a longer one loses its
+suffix. Name the file `.csv`, `.gz` or `.parquet` before uploading it:
+`cohorts preview` reads an upload whatever its name, so a clean preview does
+not show which way it will import.
+
+A regular audience makes at most one cohort, and a Lookalike Model audience
+can make several. An audience cohort takes the audience's own name and
+project, so `--name` and `--project-id` are rejected alongside `--audience-id`
+rather than sent to be ignored.
 
 ```bash
 # from a cloud file
@@ -509,14 +690,24 @@ intuizi cohorts create --name "Q3 customers" \
 intuizi cohorts create --audience-id 88 --device-limit 1000
 ```
 
+With `--upload-reference`, the organization build budget's `429` and the
+monthly data-scan limit's `422` both refuse the create after it has claimed
+the reference, so a create refused by either has used the reference up, and
+the CLI does not retry that `429`. Upload the file again for a new reference
+once there is room. See [Rate limits](#rate-limits).
+
+A create returns as soon as the import is queued; follow it with
+`cohorts show <id>` as [The async model](#the-async-model) describes.
+
 Needs `--file`: capping an audience cohort by visit frequency (`freq_limit`
-with `freq_min`/`freq_max`) or by distance (`distance_limit` with `distance` in
-meters) instead of a device count.
+with `freq_min`/`freq_max`), by distance (`distance_limit` with `distance` in
+meters) or, for a Lookalike Model audience, by score range (`score_limit` with
+`min_score`/`max_score`) instead of a device count, and Match Strictness
+(`max_devices_per_ip`, 1 to 5) on an SCID file import.
 
 ```bash
 cat > freq-capped.json <<'EOF'
 {
-  "name": "Frequent visitors",
   "source": "audience",
   "audience_id": 88,
   "freq_limit": true,
@@ -536,8 +727,8 @@ express directly as `--audience-id 88 --device-limit 1000`.
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
 | `--file-uri` | `s3://bucket/path` or `gs://bucket/path` | - |
-| `--upload-reference` | reference from a reserved upload | `uploads reserve`, or `uploads put` |
-| `--file-format` | `csv` or `gzip`; sniffed if omitted | - |
+| `--upload-reference` | reference from an upload with `--purpose cohort` | `uploads put`, or `uploads reserve` |
+| `--file-format` | `csv` (the default) or `gzip`; the format is not detected, so pass `gzip` for a compressed file | - |
 
 Exactly one of `--file-uri` or `--upload-reference`. Parquet cannot be
 previewed. `--quiet` does not apply: a preview returns sample rows, not an id.
@@ -557,34 +748,47 @@ cd34          Los Angeles  90001
 
 ### schedules create
 
+Schedules require additional permissions which need to be approved by your
+Account Manager. Every `schedules` command needs them, `list` and `show`
+included; a 403 means they are not enabled for the account.
+
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
-| `--name` | letters, digits, spaces, `_` and `-` | - |
+| `--name` | letters, digits, spaces, `_` and `-`, up to 255 characters | - |
 | `--audience-id` | audience to rebuild each cycle | `audiences list` |
 | `--project-id` | project id | `projects list` |
 | `--start` | `"YYYY-MM-DD HH:MM:SS"`, read in `--timezone`, must be in the future | - |
-| `--timezone` | IANA name, e.g. `America/New_York` | - |
+| `--timezone` | `UTC` or a region-based IANA name such as `America/New_York`; not a legacy or `Etc/` name | - |
 | `--frequency` | one of four, case-insensitive | `reference common schedule-frequencies` |
 | `--window` | data window id, `1` to `8` | `reference common schedule-windows` |
 | `--window-days` | `1` to `365`, `--window 3` Custom only | - |
 | `--ending` | `1`, `2` or `3`; default `1` | `reference common schedule-endings` |
 | `--after-recurrences` | run count of `1` or more, `--ending 2` only | - |
-| `--end-date` | `YYYY-MM-DD`, `--ending 3` only | - |
+| `--end-date` | `YYYY-MM-DD`, on or after the `--start` date, `--ending 3` only | - |
 | `--dry-run` | - | - |
 
 `--frequency` takes `daily`, `weekly`, `bi-weekly` or `monthly`. `--ending` is
 `1` Never, `2` Recurrences or `3` Custom Date.
 
-Each ending rule carries its own field, and a mismatch is rejected here because
-the API ignores the wrong one rather than refusing it. `--start` and
-`--timezone` are checked before anything is sent: the zone must be a real IANA
-name, the start must parse in the layout above, and it must still be in the
-future in that zone.
+Each ending rule carries its own field, and a mismatch is rejected before
+anything is sent; the API rejects it as well, with a 422. `--start` and
+`--timezone` are checked before anything is sent: the zone must be `UTC` or a
+region-based IANA name, the start must parse in the layout above, and it must
+still be in the future in that zone. The API accepts only current
+region-based names and `UTC`, so `US/Eastern`, `GMT` or `Etc/UTC` is refused
+before anything is sent. A legacy name filed under a region, such as
+`Asia/Calcutta` for `Asia/Kolkata`, passes that check, `--dry-run` included,
+and the API rejects it with a 422.
+
+An `--end-date` before the `--start` date is rejected too: the API would
+accept it and count the gap forward from `--start`, so the schedule would run
+for that many days instead of not at all. So is a `--name`
+over 255 characters.
 
 ```bash
 intuizi schedules create --name "Weekly coffee refresh" --audience-id 88 \
   --start "2027-09-15 06:00:00" --timezone America/New_York \
-  --frequency weekly --window 2
+  --frequency weekly --window 4
 ```
 
 Needs `--file`: the nested activation block that re-exports every cycle.
@@ -593,6 +797,15 @@ Needs `--file`: the nested activation block that re-exports every cycle.
 intuizi schedules create --file examples/schedule.json
 ```
 
+`schedules deactivate <id>` pauses a schedule, and `schedules activate <id>`
+resumes it at the next scheduled time after now. A run the pause spanned is
+not backfilled, but it is not used up either: a Recurrences or Custom Date
+schedule still makes every run it counted at creation, which carries a Custom
+Date schedule past its `--end-date` by about as long as it was paused.
+Activating a Fulfilled schedule, one whose ending was met, sets it Active, but
+it does not run again; stderr says so when the schedule returned shows every
+counted run made. Create a new schedule instead.
+
 ### poi submissions create
 
 | Flag | Takes | Where the value comes from |
@@ -600,41 +813,57 @@ intuizi schedules create --file examples/schedule.json
 | `--name` | any string | - |
 | `--brand-id` | a first-party brand id | `poi brands list` |
 | `--file` | a `.csv` or `.txt` of locations | - |
-| `--list` | JSON body carrying `locations[]`, or `-` for stdin | - |
-| `--upload-reference` | reference from a reserved upload | `uploads put` |
-| `--key` | how to match existing POIs, below | - |
-| `--update` `--remove` | booleans; both need `--key` | - |
+| `--list` | path to a JSON file holding `locations[]` (and `name` and `brand_id` unless the flags give them), or `-` for stdin | - |
+| `--upload-reference` | reference from an upload with `--purpose poi_submission` | `uploads put`, or `uploads reserve` |
+| `--key` | how each listed location is matched to the brand's existing POIs, below | - |
+| `--update` | update the brand's existing POIs that a listed location matches; needs `--key` | - |
+| `--remove` | archive the brand's existing POIs that no listed location matches, keeping the matched ones; needs `--key` | - |
 
 Exactly one of `--file`, `--list` and `--upload-reference`. `--file` and
 `--upload-reference` need `--name` and `--brand-id`; `--list` takes both from
-the body unless the flags override them. Only `--list` reads stdin: `--file -`
-is refused and points at `--list -`.
+the body unless the flags override them, and `--key`, `--update` and
+`--remove` replace the body's `key`, `update` and `remove` the same way, so
+`--remove=false` turns off a `"remove": true` in a reused file. A flag that
+replaces a different value in the body says so on stderr, as in
+`note: --brand-id 12 replaces brand_id 9 from the --list body` or
+`note: --remove=false replaces remove true from the --list body`. Only `--list`
+reads stdin: `--file -` is refused and points at `--list -`.
 
 `--key` takes `location-id`, `gps-coordinates`, `store-id`, `master-id` or
-`external-id`. It travels on every route, so `--list ... --update --key
-store-id` updates the matched POIs rather than inserting duplicates.
+`external-id`, and the API matches on `gps-coordinates` when it is left out.
+A listed location that matches an existing POI is never added a second time:
+`--list ... --update --key store-id` changes the POIs it matches by store id,
+and without `--update` they are left as they are. `--remove` keeps the POIs
+you list and archives the rest of the brand's POIs, so list every location
+the brand should keep, not the ones to drop. Both take effect when Intuizi
+approves the submission.
+
+Only the `--upload-reference` form sends an `Idempotency-Key`. The API reads
+none on the `--file` and `--list` forms, so there `--idempotency-key` has no
+effect and stderr says so.
 
 Submission CSVs need `latitude`, `longitude`, and a country column headed
 `country|alpha_2` or `country|alpha_3`. The taxonomy nests segments >
-categories > brands; create the parent first.
+categories > brands. Segments already exist and cannot be created: pick one
+with `poi segments list`, create categories under it, and brands under those.
 
 #### The rest of poi
 
 | Command | Flags | Notes |
 | --- | --- | --- |
-| `poi segments list` | `--search` | ids come back as `value` |
+| `poi segments list` | `--search` | the available segments; ids come back as `value` |
 | `poi categories list` | `--search` | |
 | `poi categories create` | `--name`, `--segment-id` | parent id from `poi segments list` |
 | `poi brands list` | `--search` | |
 | `poi brands create` | `--name`, `--category-id` | parent id from `poi categories list` |
-| `poi locations list` | `--search`, `--brands`, `--countries`, `--geometry`, `--page`, `--per-page` | `--brands` takes your own brand ids, repeatable or comma-separated; `--countries` repeats; `--geometry` is `polygon` or `coordinates` |
+| `poi locations list` | `--search`, `--brands`, `--countries`, `--geometry`, `--page`, `--per-page` | `--brands` takes your own brand ids, repeatable or comma-separated; `--countries` takes ISO-3 codes such as `USA`, repeatable (locations are stored as ISO-3 even when submitted as alpha-2, so `US` matches nothing); `--geometry` is `polygon` or `coordinates` |
 | `poi locations show <id>` | | |
 | `poi submissions list` | `--search`, `--sort-by`, `--order` | not paginated; `--sort-by` is `name`, `status`, `created_at` or `updated_at`; `--order` is `asc` or `desc` |
 | `poi submissions show <id>` | | where an asynchronous submission is followed |
-| `poi submissions delete <id>` | `--yes` | only a waiting submission can be deleted |
+| `poi submissions delete <id>` | `--yes` | only a `Waiting` submission can be deleted; a new one is `Importing` until its locations have been read |
 
 `--search` on `locations list` matches name, address, city, state, zip, DMA,
-external id and placekey; on the taxonomy lists and `submissions list` it
+external id and placekey, not the store id; on the taxonomy lists and `submissions list` it
 matches the name. A value outside a flag's set - `--key`, `--geometry`,
 `--sort-by`, `--order`, an empty `--name` or a zero parent id on the creates -
 is refused before anything is sent, exit 2.
@@ -644,7 +873,7 @@ is refused before anything is sent, exit 2.
 | Command | Flag | Takes |
 | --- | --- | --- |
 | `reserve` | `--purpose` | `poi_submission` or `cohort` |
-| | `--filename` | original filename |
+| | `--filename` | original filename, which names the stored object; default `upload.csv` |
 | | `--content-length` | exact byte size of the PUT |
 | | `--content-type` | MIME type, default `text/csv` |
 | `put <file>` | `--purpose` | `poi_submission` or `cohort` |
@@ -655,13 +884,26 @@ steps and prints the `upload_reference` alone on stdout; with `--json` it prints
 the reservation envelope instead, once the PUT has succeeded, so
 `.data[0].upload_reference` is the same value either way.
 
+A reservation expires at its `expires_at`, 15 minutes after it is made. The
+PUT and the create that claims the reference both have to happen before then:
+a create after it is refused even when the PUT succeeded. A reference is
+claimed once, so a create refused after claiming it has used it up; upload the
+file again for a new one.
+
+The filename matters twice, and `put` sends the file's own name. A
+`poi_submission` name must end `.csv` or `.txt`, or the reservation is
+refused. A `cohort` name decides how `cohorts create` imports the file: one
+ending `.csv`, `.gz` or `.parquet`, case-sensitive and within its first 100
+characters, is read as one file, and anything else as a folder. Rename the
+file before uploading it.
+
 ```bash
 ref=$(intuizi uploads put customers.csv --purpose cohort)
 intuizi uploads put customers.csv --purpose cohort --json | jq -r '.data[0].upload_reference'
 ```
 
-Every header the reservation lists is sent on the PUT, since all of them are
-signed; `--content-type` replaces `Content-Type` alone. An empty file is
+Every header the reservation lists is sent on the PUT; `--content-type`
+replaces `Content-Type` alone. An empty file is
 refused before a slot is reserved, a `--purpose` outside the two values before
 anything is sent, and a redirect from the storage host is reported as an error
 rather than followed.
@@ -675,6 +917,12 @@ label is needed as well as the value. The one exception is
 `profile-attributes recency-limits`: it takes no parameters, and its rows are
 `{start_limit, end_limit}` with nothing `--quiet` could print, so `--quiet` is
 refused there (exit 2) - read it with `--json`.
+
+Most catalogs match `--search` on the label. The demographics `genders`,
+`marital-statuses` and `incomes` match the code in the `value` column instead,
+not the text label (`--search F`, not `female`, for genders, and `M`, not
+`married`, for marital statuses), `apps bundle-ids` matches the app name, and
+`poi locations` matches the name or the address.
 
 - **common** - dataset-types, countries, states, cities, dmas, zipcodes,
   operators, languages, signal-providers, endpoint-partners,
@@ -693,9 +941,35 @@ refused there (exit 2) - read it with `--json`.
 - **deidentified** - fields
 - **cohorts** - list
 
-The geography catalogs cascade: countries, then states, then cities, then
-zipcodes. Each level takes the level above it. The POI taxonomy cascades the
-same way: segments, then categories, then brands, then locations.
+Several catalogs cascade: a child read takes values from the level above to
+narrow its list.
+
+Geography requires the parent. `states` needs `--countries`, `dmas` needs
+`--countries`, `cities` needs `--states`, and `zipcodes` needs `--cities`.
+Their other flags only narrow the list: `dmas` takes `--states` and
+`--cities`, `cities` takes `--dmas`, and `zipcodes` takes `--states`, `--dmas`
+and `--countries`.
+
+In every other cascade the parent is optional, and leaving it out returns the
+catalog unfiltered:
+
+- **poi** - `segments`, then `categories` (`--segments`), then `brands`
+  (`--categories`), then `locations` (`--brands`).
+- **transactions** - `categories`, then `subcategories` (`--categories`), then
+  `brands` (`--categories`, `--subcategories`).
+- **profile-attributes** - `categories`, then `keys` (`--category-ids`), then
+  `values` (`--category-ids`, `--key`).
+- **web** - `iab-categories`, then `iab-subcategories` (`--category-ids`,
+  which takes ids or IAB codes, one kind per call: the API reads every value
+  as the kind of the first and drops the rest, so a mix is refused before it
+  is sent). `domains` narrows by either level (`--category-codes`,
+  `--subcategory-codes`). An `iab-categories` row's `value` is the IAB code,
+  which `--quiet` prints and `domains --category-codes` takes; a WebDomain
+  audience's `iab_category_codes` takes the number in its `id` column instead.
+
+Table cells show a list of plain values inline, such as a datastream's
+`dataset_types`; a list of objects shows as a count, and `--json` has it in
+full.
 
 Paginated reads return one page per call; ask for more with `--page` and
 `--per-page`. Both must be 1 or more: the API rejects 0 rather than treating it
@@ -720,12 +994,26 @@ They do different jobs and cannot be combined; asking for both is an error.
 | `--quiet` | bare ids on stdout, one per line | capturing a value, or feeding a loop |
 | `--json` | the raw response envelope | reaching any field the table does not show |
 
-Both are global, so they apply to every command: reads, creates and deletes
-alike. `--quiet` prints one scalar per record, so it cannot reach a nested
-field. Anything deeper needs `--json` and `jq`.
+Both are global and apply to reads, creates and deletes alike, with these
+exceptions:
+
+- `auth`, `version` and `completion` print text and ignore either flag.
+- `usage`, `cohorts preview` and `reference profile-attributes
+  recency-limits` return no ids, so they refuse `--quiet`; use `--json`.
+- `uploads put` prints the bare upload reference, which is also what
+  `--quiet` prints; `--json` prints the reservation envelope.
+- Deletes, `audiences lookalike cancel`, and `schedules activate` and
+  `deactivate` print their confirmation on stderr and nothing on stdout,
+  `--quiet` or not; `--json` prints the response envelope.
+- `--dry-run` prints the request body as JSON whichever flag is set: `--json`
+  adds no envelope, and `--quiet` prints no ids.
+
+`--quiet` prints one scalar per record, so it cannot reach a nested field.
+Anything deeper needs `--json` and `jq`.
 
 ```bash
 id=$(intuizi audiences create --type poi --brand starbucks \
+       --country USA --state CA --city "San Francisco" \
        --start-date 2026-09-02 --end-date 2026-09-09 \
        --name "Starbucks - SF" --wait --quiet)
 
@@ -738,14 +1026,26 @@ Commentary always goes to stderr: status changes while `--wait` polls, the
 On a failure `--json` still prints what the server sent: the error envelope
 goes to stdout, the one-line error goes to stderr as usual, and the exit code
 is 1. A script can therefore read a 422's field errors from the same place it
-reads a success:
+reads a success. The CLI refuses a blank name itself, so this example sends a
+name longer than the API's 255 characters to get a 422 back:
 
 ```bash
-out=$(intuizi projects create --name "" --json) || jq '.data.errors' <<<"$out"
+long=$(printf 'x%.0s' {1..256})
+out=$(intuizi projects create --name "$long" --json) || jq '.data.errors' <<<"$out"
 ```
 
-A failure whose body is not JSON, such as an HTML error page from a proxy,
-prints nothing on stdout; only the stderr line explains it.
+Stdout stays empty, and only the stderr line explains the failure, in four
+cases: a body that is not JSON, such as an HTML error page from a proxy; a
+failure before anything is sent, such as a usage error (exit 2), a missing
+token or an unreadable `--file`; a failed catalog read while
+`audiences create` resolves a name or the default providers; and a failed PUT
+to the storage host on `uploads put`.
+
+A `--wait` that fails, times out or gives up is different: the record it
+prints was read successfully, so stdout carries the success envelope that
+record came in, while the exit code is 1. A `--wait` that ends on a `401`,
+`403` or `404` prints that refusal's error envelope, like any other request.
+See [The async model](#the-async-model).
 
 ### Envelope shapes
 
@@ -756,6 +1056,7 @@ path returns nothing.
 | Read | Path to the records |
 | --- | --- |
 | `show <id>` | `.data[0]` - an array of one, so the index is required |
+| `cohorts show <id>`, `projects show <id>` | `.data` - the record itself, with no array around it |
 | `list` | `.data.items[]`, with `.data.pagination` alongside |
 | `reference`, unpaged catalog | `.data[]` - a bare array |
 | `reference`, paged catalog | `.data.items[]` |
@@ -777,29 +1078,40 @@ intuizi reference apps categories --search "Food & Drink" --quiet    # 23
 
 ### Checking what the API accepted
 
-A `--file` body is forwarded as written. A field the API does not recognise is
-ignored rather than rejected, so a mistyped key or an unsupported filter
-produces a Completed resource that quietly does not mean what was intended.
+A `--file` body is forwarded as written, and the API validates the fields it
+defines. On an audience, a key the dataset type does not support inside a
+dataset block or its `location`, or an unknown key inside the top-level
+`analyses` block, is rejected with a 422 that names the key, so a mistyped
+filter fails the create rather than building something unintended. Top-level
+keys are not checked by name: a misspelt top-level block such as
+`crosspurchse` is ignored, and the audience builds without it.
 
-`normalized_payload` on an audience is the API's own record of what it kept.
-Reading it back is the only way to confirm a filter applied:
+`normalized_payload` on an audience is the canonical copy of the `name`,
+`operator` and `datasets` it was created from. The audience's `recipe_hash`
+(`.data[0].recipe_hash`, beside `normalized_payload` rather than inside it) is
+computed from the `operator` and `datasets` only, so the name does not change
+it. `normalized_payload` echoes what was sent, so a per-dataset filter, such as the brand or the
+country, that is missing from it was not sent:
 
 ```bash
 intuizi audiences show <id> --json | jq '.data[0].normalized_payload.datasets[0].location'
 ```
 
-A filter missing from the response was dropped. An implausible `results_count`
-is the other symptom: a signal provider id outside the account's catalog is not
-rejected, and the audience completes with zero devices.
+Top-level blocks such as `crossvisitation`, `crosspurchase` and `analyses` are
+never part of it, even when they were applied. An implausible `results_count`
+is the symptom to watch: a signal provider id outside the account's catalog is
+not rejected, and the audience completes with zero devices.
 
 Three things to know about the field:
 
 - It is spelled `normalized_payload`, with underscores.
-- It reflects what was stored, not what is valid to send. A single-dataset
-  audience reads back with `"operator": "Single"`, but `Single` is not a value
-  the operators catalog accepts on the way in, so do not copy it into a new
-  payload.
-- It is only populated on recently created records; older audiences return null.
+- It is the request in canonical form, not a guide to what is valid to send.
+  A single-dataset audience reads back with `"operator": "Single"`, but
+  `Single` is not a value the operators catalog accepts on the way in, so do
+  not copy it into a new payload.
+- Only an API create sets it. It is `null` for audiences built in Audience
+  Manager, for Lookalike Model results, for the audiences a schedule builds
+  each cycle, and for audiences created before the field existed.
 
 Building creates from flags avoids most of this: names are resolved against the
 catalogs before anything is sent, and the payload is assembled from typed fields
@@ -810,37 +1122,110 @@ rather than free-form JSON.
 Creates return immediately and the resource completes in the background.
 `audiences create`, `audiences show`, `activations create` and
 `activations show` take `--wait` with an optional `--timeout` (default 60m).
-Waiting polls every 15 seconds, prints status changes to stderr and the final
-record to stdout, and exits non-zero on failure.
+Waiting polls every 15 seconds, prints status changes to stderr and the record
+the wait ended on to stdout, and exits non-zero on failure.
 
-Audience and activation status ids share one scale, where `104` is Completed.
-`108` Modeling, seen during a lookalike run, is not terminal.
+The record is printed whether the wait succeeded, failed, or was abandoned,
+and the exit code alone says which: 0 for Completed, 1 for a failed state, a
+failed datastream, a timeout, or three failed reads in a row. When the wait
+is abandoned - timed out, or given up after three failed reads - the record is
+the last one read, so it shows where the job stood; the job keeps running
+server-side, and the error names the `show <id> --wait` command that resumes
+the wait. The exit code is the one to branch on.
+
+With `--json` stdout is always the server's envelope, so read the job's status
+as `.data[0].status.id` whatever the outcome. A failed wait exits 1 with a
+`"status": "success"` envelope on stdout, whose `.status` says nothing about
+the job. A Completed or failed record is re-read once the wait ends, tried up
+to three times after a success and once after a failure; if that re-read
+fails, the envelope the record was last polled in is printed instead, and
+stderr says `printing the envelope as last polled: re-reading it failed
+(...)`. An abandoned wait makes no request once it ends, so a timed-out
+command exits at `--timeout`, and stdout carries the envelope last polled,
+which holds the record the error names. With `--quiet` only the id is printed,
+whatever the outcome.
+
+No record is printed when the wait ends with none to show: a timeout or three
+failed reads before any status was read, a 401, 403 or 404 while polling, or
+Ctrl-C. With `--json` a wait that ends on a failed read still prints that
+read's error envelope, as any other command does: the 401, 403 or 404, or the
+last of the three failed reads.
+
+Audience and activation status ids share one scale, where `104` Completed is
+the only success. A wait polls on through `100` Initiating, `101` Processing,
+`102` Analyzing, `103` Decryption Requested, `105` DataStreaming, `108`
+Modeling and `109` Visualizing data streams. `105` comes before `104`, not
+after it. `108` is a Lookalike Model training. `109` is an audience drawing
+the data stream visualizations it opted into, before `105` and `104`. Any
+other id ends the wait with exit 1: `106` Expired, `107` Additional Info, the
+`4xx` errors, and any id the CLI does not know.
+
+`107` Additional Info means the worker could not run the request as given, so
+it stopped and nothing follows. The error says the build (or, for an
+activation, the export) stopped with Additional Info, and names no
+`show <id> --wait` to resume it: waiting again stops on the same status at
+once. The API does not return the reason, but Audience Manager in the
+Intuizi console shows it on the audience or activation. For an audience it is
+most often a date range outside the dataset's data coverage, or a filter the
+dataset needs. Fix the request and create it again.
 
 Cohort status ids are their own scale: `1` Uploading, `2` Initiating,
-`3` Processing, `4` Completed, `5` Not Available.
+`3` Processing, `4` Completed. A failed import reports an error code outside
+`1` to `4` instead, which the table shows as `Unknown`; `5` Not Available is
+reserved and never reported. No cohort command takes `--wait`, so re-run
+`cohorts show <id>` until the status is `4`, and stop on any status outside
+`1` to `4`. With `--json` the id is `.data.status.id`: a cohort read returns
+the record itself, not an array of one. After a failed import, fix the cause
+and create the cohort again. An `--upload-reference` is used up by the failed
+create, so upload the file again for a new one. A regular audience keeps its
+failed cohort and makes at most one, so run `cohorts delete <id>` before
+creating from it again.
 
 Everything else is followed with `show <id>`, or by a webhook registered in the
-Console.
+Console. A webhook is a notification, not a source of truth: keep a
+low-frequency `show <id>` poll as the fallback for a delivery that exhausts
+its retries, and for the end states no webhook reports. An audience or
+activation that stops on `107` Additional Info sends none, and nor does a
+failed cohort import, whose error code is not the `5` that `cohort.failed`
+fires on.
 
 ## Shell completion
 
-Cobra generates a completion script for each shell:
+A Homebrew install, on macOS or Linux, includes the completion scripts for
+bash, zsh and fish. After a binary or npm install, load the script the CLI
+generates for your shell:
 
 ```bash
-intuizi completion zsh > "${fpath[1]}/_intuizi"
-exec zsh
-```
-
-Zsh needs its completion system switched on for this, or any other, completion
-to load. If `intuizi aud<TAB>` does nothing, add to `~/.zshrc`:
-
-```bash
+# zsh: add to ~/.zshrc
 autoload -U compinit && compinit
+source <(intuizi completion zsh)
+
+# bash, with the bash-completion package: add to ~/.bashrc
+source <(intuizi completion bash)
+
+# fish: run once
+mkdir -p ~/.config/fish/completions
+intuizi completion fish > ~/.config/fish/completions/intuizi.fish
 ```
 
-Completion covers commands, flag names, and the values of flags that take a
-fixed set: `--type`, `--signal`, `--file-format`, `--identifier-type`,
-`--frequency` and `--purpose`.
+For PowerShell, add this line to your profile (`$PROFILE`):
+
+```powershell
+intuizi completion powershell | Out-String | Invoke-Expression
+```
+
+Zsh loads no completion, the Homebrew one included, until its completion
+system is switched on, which is what the `compinit` line does: if
+`intuizi aud<TAB>` does nothing, that line is missing from `~/.zshrc`. To
+install a script file instead of loading it at startup,
+`intuizi completion <shell> --help` gives the Linux and macOS (Homebrew)
+locations.
+
+Completion covers commands, flag names, and the values of `--type`,
+`--signal`, `--file-format`, `--identifier-type`, `--frequency` and
+`--purpose`. Other flags that take a fixed set, such as `poi submissions list
+--sort-by` and `--order`, `poi locations list --geometry` and `poi submissions
+create --key`, complete no values; their help lists them.
 
 ## Typical workflows
 
@@ -851,7 +1236,7 @@ id=$(intuizi audiences create --type poi --brand starbucks \
        --name "Starbucks visitors - 1 week" --wait --quiet)
 
 intuizi activations create --audience-id "$id" \
-  --endpoint-connection-id 4 --pricing-model-id 3 --wait
+  --endpoint-connection-id 4 --pricing-model-id 3 --datastream 7 --wait
 
 # Cohort from a cloud file, columns confirmed first
 intuizi cohorts preview --file-uri s3://example-bucket/cohorts/q3.csv

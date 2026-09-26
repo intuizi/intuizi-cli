@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -269,6 +270,8 @@ func TestCanonicalType(t *testing.T) {
 		"webdomain":            "WebDomain",
 		"affinitytransactions": "AffinityTransactions",
 		"profileattributes":    "ProfileAttributes",
+		"origin":               "Origin",
+		"ORIGIN":               "Origin",
 	} {
 		got, err := canonicalType(in)
 		if err != nil {
@@ -319,6 +322,92 @@ func TestCatalogValueReadsEitherKey(t *testing.T) {
 	}
 	if _, err := catalogValue(output.Record{"text": "no id here"}, "/x"); err == nil {
 		t.Error("catalogValue accepted a row with neither key")
+	}
+}
+
+// IAB category rows carry the code as value and the catalog id as id, and
+// Create Audience takes the id: iab_category_codes are integers. Every other
+// catalog's value is the id itself.
+func TestCatalogValueTakesTheIDForIABCategories(t *testing.T) {
+	row := output.Record{"value": "IAB2", "text": "IAB2 - Automotive", "id": 2}
+
+	got, err := catalogValue(row, referencePrefix+"web/iab-categories")
+	if err != nil {
+		t.Fatalf("catalogValue: %v", err)
+	}
+	if raw, _ := json.Marshal(got); string(raw) != "2" {
+		t.Errorf("IAB category resolved to %s, want the id 2", raw)
+	}
+
+	got, err = catalogValue(row, brandsPath)
+	if err != nil {
+		t.Fatalf("catalogValue: %v", err)
+	}
+	if got != "IAB2" {
+		t.Errorf("another catalog resolved to %v, want its value", got)
+	}
+}
+
+// The "pass an id" list must show what --category takes, so an IAB category
+// lists its id, not the code.
+func TestResolveOneAmbiguityListsIABCategoryIDs(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":"IAB2","text":"IAB2 - Automotive","id":2},`+
+		`{"value":"IAB20","text":"IAB20 - Travel","id":20}]}`)
+
+	_, err := resolveOne(context.Background(), c, referencePrefix+"web/iab-categories", "IAB", "categories")
+	if err == nil {
+		t.Fatal("resolveOne picked one of several matches")
+	}
+	for _, want := range []string{"\n  2 ", "\n  20 ", "IAB2 - Automotive", "IAB20 - Travel"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error omits %q: %v", want, err)
+		}
+	}
+	for _, code := range []string{"\n  IAB2 ", "\n  IAB20 "} {
+		if strings.Contains(err.Error(), code) {
+			t.Errorf("error lists the code %q where the id belongs: %v", code, err)
+		}
+	}
+}
+
+// An IAB category is labelled "CODE - name", so neither its code nor its name
+// is ever the whole label. A code that other codes contain, such as IAB1, and
+// a name that other names contain used to fail with a match list; the row
+// whose code or name is exactly the one given is taken instead.
+func TestResolveOneTakesAnExactIABCodeOrName(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":"IAB1","text":"IAB1 - Arts & Entertainment","id":1},`+
+		`{"value":"IAB10","text":"IAB10 - Home & Garden","id":10},`+
+		`{"value":"IAB3","text":"IAB3 - Business","id":3},`+
+		`{"value":"IAB13","text":"IAB13 - Business Finance","id":13}]}`)
+
+	for search, want := range map[string]string{
+		"IAB1":     "1",
+		"iab1":     "1",
+		"Business": "3",
+		"business": "3",
+	} {
+		got, err := resolveOne(context.Background(), c, iabCategoriesPath, search, "categories")
+		if err != nil {
+			t.Errorf("%q: %v", search, err)
+			continue
+		}
+		if fmt.Sprint(got) != want {
+			t.Errorf("%q resolved to %v, want the id %s", search, got, want)
+		}
+	}
+}
+
+// The code and name rule is the IAB label's alone: elsewhere a " - " is part
+// of the name, and only the whole label is an exact match.
+func TestResolveOneSplitsOnlyIABLabels(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":7,"text":"Example Coffee - Downtown"},`+
+		`{"value":8,"text":"Example Tea - Downtown"}]}`)
+
+	if _, err := resolveOne(context.Background(), c, brandsPath, "Downtown", "brands"); err == nil {
+		t.Fatal("a brand was picked by the part of its label after ' - '")
 	}
 }
 
@@ -521,5 +610,23 @@ func TestResolveOneKeepsAmbiguityWithoutAnExactLabel(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "narrow the search") {
 		t.Errorf("error changed shape: %v", err)
+	}
+}
+
+// Origin data is weekly: the API widens any window to the whole Monday-to-Sunday
+// weeks it touches. 2026-09-02 and 2026-09-09 are both Wednesdays.
+func TestOriginWeeks(t *testing.T) {
+	for _, tc := range []struct{ start, end, wantStart, wantEnd string }{
+		{"2026-09-02", "2026-09-09", "2026-08-31", "2026-09-13"},
+		{"2026-08-31", "2026-09-06", "2026-08-31", "2026-09-06"}, // already whole
+		{"2026-09-06", "2026-09-06", "2026-08-31", "2026-09-06"}, // a Sunday alone
+		{"2026-09-07", "2026-09-07", "2026-09-07", "2026-09-13"}, // a Monday alone
+		{"2026-12-30", "2027-01-01", "2026-12-28", "2027-01-03"}, // across the year
+	} {
+		gotStart, gotEnd := originWeeks(tc.start, tc.end)
+		if gotStart != tc.wantStart || gotEnd != tc.wantEnd {
+			t.Errorf("originWeeks(%s, %s) = %s, %s; want %s, %s",
+				tc.start, tc.end, gotStart, gotEnd, tc.wantStart, tc.wantEnd)
+		}
 	}
 }

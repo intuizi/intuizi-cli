@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -409,6 +410,38 @@ func TestBuilderOmitsSearchWhenNoSearch(t *testing.T) {
 	}
 }
 
+// --search is a contains match on the label for most catalogs, but a few
+// search another column, and a user searching the label there gets "no
+// results". Their flag help says which column instead.
+func TestSearchHelpNamesTheColumnSearched(t *testing.T) {
+	for _, tc := range []struct {
+		group, item, want string
+	}{
+		{"demographics", "genders", "value code"},
+		{"demographics", "marital-statuses", "value code"},
+		{"demographics", "incomes", "value code"},
+		{"apps", "bundle-ids", "app name"},
+		{"poi", "locations", "name or address"},
+		// ages carries its name as both value and label.
+		{"demographics", "ages", "item label"},
+		{"poi", "brands", "item label"},
+	} {
+		e := findEndpoint(t, tc.group, tc.item)
+		flag := e.command(tc.group).Flags().Lookup("search")
+		if flag == nil {
+			t.Errorf("%s %s has no --search", tc.group, tc.item)
+			continue
+		}
+		if !strings.Contains(flag.Usage, tc.want) {
+			t.Errorf("%s %s --search help = %q, want it to name %q", tc.group, tc.item, flag.Usage, tc.want)
+		}
+		// The gender example says nothing about a marital or income code.
+		if tc.item != "genders" && strings.Contains(flag.Usage, "female") {
+			t.Errorf("%s %s --search help borrows the gender example: %q", tc.group, tc.item, flag.Usage)
+		}
+	}
+}
+
 // recency-limits rows are {start_limit, end_limit}: nothing output.ID can
 // print, so --quiet used to fail after the round trip with "response carried
 // no id" and exit 1. It is refused up front instead, pointing at --json.
@@ -561,3 +594,81 @@ func TestNoAllFlagIsRegistered(t *testing.T) {
 }
 
 const pagedEnvelopeMultiPage = `{"status":"success","code":200,"message":"ok","data":{"items":[{"value":"X","text":"X"}],"pagination":{"current_page":1,"per_page":500,"total":3881310,"last_page":7763}}}`
+
+// A short list of scalars, like a datastream's dataset_types, reads inline as
+// it does in the resource lists; a list of objects, or an empty one, is still
+// counted, and an {id, name} object is left as it was.
+func TestReferenceTableShowsScalarListsInline(t *testing.T) {
+	srv, _ := serve(t, `{"status":"success","code":200,"message":"ok","data":[
+		{"id":7,"name":"Match File","dataset_types":["poi","competitors"]},
+		{"id":8,"name":"Audience File","dataset_types":[]}]}`)
+
+	out := runCmd(t, "common", findEndpoint(t, "common", "datastreams"), srv.URL, "--partner-id", "3")
+
+	if !strings.Contains(out, "poi, competitors") {
+		t.Errorf("dataset_types not inline:\n%s", out)
+	}
+	if strings.Contains(out, "[2 items]") {
+		t.Errorf("a list of two strings is still counted:\n%s", out)
+	}
+	if !strings.Contains(out, "[0 items]") {
+		t.Errorf("an empty list should still say it is empty:\n%s", out)
+	}
+
+	srv, _ = serve(t, `{"status":"success","code":200,"message":"ok","data":[
+		{"id":12,"name":"Acme Production","partner":{"id":3,"name":"Acme DSP"},
+		 "tags":[{"id":1,"text":"a"},{"id":2,"text":"b"}]}]}`)
+
+	out = runCmd(t, "common", findEndpoint(t, "common", "endpoint-connections"), srv.URL)
+
+	if !strings.Contains(out, "[2 items]") {
+		t.Errorf("a list of objects should be counted:\n%s", out)
+	}
+	if !strings.Contains(out, "{...}") || strings.Contains(out, "Acme DSP") {
+		t.Errorf("an {id, name} object should render as before:\n%s", out)
+	}
+}
+
+// iab-subcategories reads --category-ids as ids or as codes by the first
+// value alone and silently drops every value of the other kind, so a mix is
+// refused before anything is sent. One kind, either kind, still goes through.
+func TestIabSubcategoriesRefusesMixedIdsAndCodes(t *testing.T) {
+	e := findEndpoint(t, "web", "iab-subcategories")
+
+	for _, args := range [][]string{
+		{"--category-ids", "12", "--category-ids", "19"},
+		{"--category-ids", "IAB2", "--category-ids", "IAB3"},
+	} {
+		srv, queries := serve(t, flatBody)
+		runCmd(t, "web", e, srv.URL, args...)
+		if len(*queries) != 1 {
+			t.Errorf("%v: got %d requests, want 1", args, len(*queries))
+		}
+	}
+
+	srv, queries := serve(t, flatBody)
+	t.Setenv("INTUIZI_API_TOKEN", "test-token")
+	previous := baseURLFlag
+	baseURLFlag = srv.URL
+	t.Cleanup(func() { baseURLFlag = previous })
+
+	cmd := e.command("web")
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--category-ids", "12", "--category-ids", "IAB3"})
+	cmd.SetContext(context.Background())
+	err := cmd.Execute()
+
+	var ue usageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("err = %v, want a usageError", err)
+	}
+	for _, want := range []string{"--category-ids", "12", "IAB3"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+	if len(*queries) != 0 {
+		t.Errorf("a mixed list must cost no round trip, got %v", *queries)
+	}
+}

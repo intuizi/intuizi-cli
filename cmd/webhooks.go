@@ -13,9 +13,14 @@ var webhooksCmd = &cobra.Command{
 	Short: "Inspect webhook endpoints",
 	Long: `Inspect the webhook endpoints registered for your company.
 
-Webhooks are the push alternative to polling: audience.completed and
-activation.completed carry the finished resource to your receiver, so a long
-build does not need a poll loop.
+Webhooks are the efficient completion signal: audience.completed and
+activation.completed push the finished resource to your receiver, and
+audience.failed and activation.failed a build that ended in a 4xx error
+state. They are a notification channel, not a source of truth, so keep a
+low-frequency poll ('show <id>') as the fallback: for a delivery that
+exhausts its retries, and for the end states no webhook reports - an audience
+or activation that stops on 107 Additional Info, and a cohort import that
+fails, which stores an error code cohort.failed does not fire on.
 
 Registering and editing endpoints is console-only - the API exposes this read
 and nothing else.`,

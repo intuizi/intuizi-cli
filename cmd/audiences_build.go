@@ -16,8 +16,9 @@ import (
 // Catalogs the create flags resolve against, mirroring the equivalent
 // 'intuizi reference <group> <item>'.
 const (
-	brandsPath    = referencePrefix + "poi/brands"
-	providersPath = referencePrefix + "common/signal-providers"
+	brandsPath        = referencePrefix + "poi/brands"
+	providersPath     = referencePrefix + "common/signal-providers"
+	iabCategoriesPath = referencePrefix + "web/iab-categories"
 )
 
 // categoryCatalog is where --category resolves and where the ids then go.
@@ -32,7 +33,7 @@ var categoryCatalogs = map[string]categoryCatalog{
 	"POI":                  {referencePrefix + "poi/categories", "categories"},
 	"Apps":                 {referencePrefix + "apps/categories", "categories"},
 	"AffinityTransactions": {referencePrefix + "affinity-transactions/categories", "categories"},
-	"WebDomain":            {referencePrefix + "web/iab-categories", "iab_category_codes"},
+	"WebDomain":            {iabCategoriesPath, "iab_category_codes"},
 }
 
 // categoryFor rejects types with no category catalog, rather than sending a
@@ -72,7 +73,7 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 		// "Example Coffee Reserve". One exact label is the one that was meant,
 		// but only if every match came back: its twin may be on the next page.
 		partial := pg != nil && pg.Total > len(items)
-		if exact := exactMatches(items, search); len(exact) == 1 && !partial {
+		if exact := exactMatches(items, search, path); len(exact) == 1 && !partial {
 			return catalogValue(exact[0], path)
 		}
 		// Ids too: the fix is usually to pass one.
@@ -86,7 +87,7 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 				len(items), what, search)
 		}
 		for _, it := range items {
-			fmt.Fprintf(&b, "\n  %-8v %v", catalogID(it), catalogLabel(it))
+			fmt.Fprintf(&b, "\n  %-8v %v", catalogID(it, path), catalogLabel(it))
 		}
 		return nil, usageErr(b.String())
 	}
@@ -94,12 +95,30 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 
 // exactMatches returns rows whose label equals the search, ignoring case and
 // space. Duplicates return all hits, so the caller still lists them.
-func exactMatches(items []output.Record, search string) []output.Record {
+//
+// An IAB category's label is "CODE - name", so there the code in its value,
+// or the name after the separator, is exact too: IAB1 is otherwise a contains
+// match for IAB10 to IAB19 as well, and no label is ever just "IAB1".
+func exactMatches(items []output.Record, search, path string) []output.Record {
 	want := strings.ToLower(strings.TrimSpace(search))
+	same := func(v any) bool {
+		s, ok := v.(string)
+		return ok && strings.ToLower(strings.TrimSpace(s)) == want
+	}
 	var hits []output.Record
 	for _, it := range items {
-		if label, ok := catalogLabel(it).(string); ok &&
-			strings.ToLower(strings.TrimSpace(label)) == want {
+		label := catalogLabel(it)
+		match := same(label)
+		if !match && path == iabCategoriesPath {
+			name := ""
+			if s, ok := label.(string); ok {
+				if _, after, found := strings.Cut(s, " - "); found {
+					name = after
+				}
+			}
+			match = same(it["value"]) || same(name)
+		}
+		if match {
 			hits = append(hits, it)
 		}
 	}
@@ -108,8 +127,8 @@ func exactMatches(items []output.Record, search string) []output.Record {
 
 // catalogID is catalogValue for a listing, where a row with no id is still
 // worth showing rather than aborting the message.
-func catalogID(r output.Record) any {
-	v, err := catalogValue(r, "")
+func catalogID(r output.Record, path string) any {
+	v, err := catalogValue(r, path)
 	if err != nil {
 		return "?"
 	}
@@ -128,9 +147,15 @@ func catalogLabel(r output.Record) any {
 
 // catalogValue reads a row's id. Catalogs answer with value/text or id/name,
 // and a missing one would marshal as null - which the API ignores, leaving an
-// audience that completes with no devices.
+// audience that completes with no devices. IAB category rows carry both: the
+// code (IAB2) as value, for 'reference web domains --category-codes', and the
+// catalog id as id, which is what iab_category_codes takes. The code is a 422.
 func catalogValue(r output.Record, path string) (any, error) {
-	for _, k := range []string{"value", "id"} {
+	keys := []string{"value", "id"}
+	if path == iabCategoriesPath {
+		keys = []string{"id", "value"}
+	}
+	for _, k := range keys {
 		if v := r[k]; v != nil {
 			return v, nil
 		}
@@ -153,8 +178,8 @@ func resolveOrID(ctx context.Context, c *api.Client, path, flag, value, what str
 	return resolveOne(ctx, c, path, value, what)
 }
 
-// allProviders backs the --provider default. A provider left out is the
-// quietest way to get an empty audience. Sets differ per type, so no cache.
+// allProviders backs the --provider default: every provider for the type.
+// Sets differ per type, so no cache.
 func allProviders(ctx context.Context, c *api.Client, dataType string) ([]any, error) {
 	query := url.Values{}
 	query.Set("dataType", dataType)
@@ -215,6 +240,40 @@ var datasetTypes = map[string]string{
 	"demographics":         "Demographics",
 	"deidentified":         "Deidentified",
 	"profileattributes":    "ProfileAttributes",
+	"origin":               "Origin",
+}
+
+// fileOnlyTypes are the types no flag set can build, with what stops them.
+// Each requires a field no flag writes, and Demographics also rejects the
+// dates and signal providers the flag path always sends, so every body the
+// flags could produce is a sure 422. They go through --file instead.
+var fileOnlyTypes = map[string]string{
+	"Cohorts":           "it needs a cohort_id, which no flag writes",
+	"Demographics":      "it needs at least one demographic filter (genders, ages, marital_statuses or incomes), which no flag writes, and it rejects the dates and signal providers the flags always send",
+	"ProfileAttributes": "it needs profile_attributes rows (category_id, key and value_ids), which no flag writes",
+}
+
+// flagTypes are the --type values the flag path builds: every dataset type
+// but fileOnlyTypes. Completion offers these, so a completed value is never
+// one the command then refuses.
+func flagTypes() []string {
+	var out []string
+	for _, k := range sortedKeys(datasetTypes) {
+		if _, fileOnly := fileOnlyTypes[datasetTypes[k]]; !fileOnly {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// checkFlagType refuses a type the flags cannot build, before any catalog is
+// read, pointing at --file.
+func checkFlagType(dsType string) error {
+	if why, ok := fileOnlyTypes[dsType]; ok {
+		return usageErr("--type " + dsType + " cannot be built from flags: " + why +
+			"; pass the whole body with --file")
+	}
+	return nil
 }
 
 // canonicalType makes --type case-insensitive and rejects unknown ones.
@@ -260,7 +319,8 @@ func resolveAll(ctx context.Context, c *api.Client, path, search, what string) (
 	return ids, nil
 }
 
-// audienceLocation omits dmas, which the API rejects.
+// audienceLocation has no dmas: no flag writes them. POI and Origin accept
+// location.dmas, so a body that needs them goes through --file.
 type audienceLocation struct {
 	Countries []string `json:"countries,omitempty"`
 	States    []string `json:"states,omitempty"`
@@ -292,6 +352,18 @@ type audienceBody struct {
 // dateLayout is the payload's format. The summary "dataset" field renders
 // MM/DD/YYYY on read; normalized_payload echoes this one.
 const dateLayout = "2006-01-02"
+
+// originWeeks is the window an Origin audience actually scans. Its data is
+// weekly, so the API widens any dates to the whole Monday-to-Sunday weeks they
+// touch. Both dates are already checked by parseWindow.
+func originWeeks(start, end string) (string, string) {
+	s, _ := time.Parse(dateLayout, start)
+	e, _ := time.Parse(dateLayout, end)
+	// Weekday counts from Sunday = 0; the week here starts on Monday.
+	back := (int(s.Weekday()) + 6) % 7
+	ahead := (7 - int(e.Weekday())) % 7
+	return s.AddDate(0, 0, -back).Format(dateLayout), e.AddDate(0, 0, ahead).Format(dateLayout)
+}
 
 // parseWindow catches a transposed pair, which otherwise builds an empty
 // audience with nothing to explain why.

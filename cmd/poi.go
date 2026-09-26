@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"path/filepath"
 	"strconv"
@@ -16,7 +16,8 @@ import (
 
 // My POI Data is your company's own places, not the shared POI catalog that
 // 'intuizi reference poi' reads. The taxonomy is segments -> categories ->
-// brands -> locations, and locations arrive through a submission.
+// brands -> locations: segments are a fixed list to pick from, categories and
+// brands are the company's own, and locations arrive through a submission.
 //
 // It does not use the resource table: these reads hang off /my-data/pois, the
 // indexes take different parameters, and submissions have three create modes.
@@ -29,11 +30,13 @@ var poiCmd = &cobra.Command{
 	Long: `Manage your company's own points of interest.
 
 The taxonomy nests: segments hold categories, categories hold brands, and
-brands hold the locations you submit. Create the parent before the child.
+brands hold the locations you submit. Segments already exist and cannot be
+created: pick one with 'intuizi poi segments list', create categories under
+it, and brands under those.
 
 Locations are not created one by one - they arrive in a submission, from a CSV
-file, an upload reference, or an inline list. A submission is processed
-asynchronously; watch it with 'intuizi poi submissions show <id>'.
+file, an upload reference, or a JSON file of locations. A submission is
+processed asynchronously; watch it with 'intuizi poi submissions show <id>'.
 
 This is your own data. The shared catalog every audience is built from is read
 with 'intuizi reference poi'.`,
@@ -125,7 +128,8 @@ func poiLocationsCommand() *cobra.Command {
 		Long: `List your own POI locations.
 
 --search matches across name, address, city, state, zip, DMA, external id and
-placekey, so a store number finds its location as readily as a name.`,
+placekey. It does not match store_id, so a store number is found only when it
+is also in one of those fields.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()
@@ -162,8 +166,11 @@ placekey, so a store number finds its location as readily as a name.`,
 	flags.Var(&page, "page", "Page to fetch (default 1)")
 	flags.Var(&perPage, "per-page", "Items per page (server default 25, capped at 500)")
 	flags.IntSliceVar(&brands, "brands", nil, "Your own brand ids to filter by (repeatable, or comma-separated)")
-	flags.StringArrayVar(&countries, "countries", nil, "Country codes to filter by (repeat the flag for more than one)")
-	flags.StringVar(&geometry, "geometry", "", "Only locations stored as polygon or coordinates")
+	flags.StringArrayVar(&countries, "countries", nil,
+		"Country codes to filter by, ISO-3 (e.g. USA); locations are stored as\n"+
+			"ISO-3 even when submitted as alpha-2, so US matches nothing\n"+
+			"(repeat the flag for more than one)")
+	flags.StringVar(&geometry, "geometry", "", "Filter by how the location is stored: polygon or coordinates")
 
 	show := &cobra.Command{
 		Use:   "show <id>",
@@ -197,11 +204,14 @@ Three ways to send the same thing, differing only in where the locations come
 from:
 
   create --file locations.csv        a CSV posted directly (up to 50 MB)
-  create --upload-reference <ref>    a file already sent with 'intuizi uploads put'
-  create --list locations.json       an inline JSON list, for a handful of places
+  create --upload-reference <ref>    a file already sent with
+                                     'intuizi uploads put --purpose poi_submission'
+  create --list locations.json       a JSON file of locations, or - for stdin,
+                                     for a handful of places
 
-All three take --name and --brand-id. Processing is asynchronous; follow it
-with 'intuizi poi submissions show <id>'.`,
+All three take --name and --brand-id; with --list they may come from the file
+instead. Processing is asynchronous; follow it with
+'intuizi poi submissions show <id>'.`,
 	}
 
 	var (
@@ -276,10 +286,12 @@ func poiSubmissionDeleteCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete a waiting POI submission",
-		Long: `Delete a POI submission that has not been processed yet.
+		Long: `Delete a POI submission whose status is Waiting.
 
-Only a waiting submission can be deleted; once processing has started the
-locations are already being ingested.`,
+A new submission starts as Importing and reaches Waiting once Intuizi has read
+its locations, so a delete sent straight after the create is refused: check
+'intuizi poi submissions show <id>' first. An imported or disabled submission
+cannot be deleted.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseID(args[0], "submission")
@@ -322,10 +334,28 @@ func poiSubmissionCreateCommand() *cobra.Command {
 Exactly one source:
 
     --file locations.csv          post the CSV directly (up to 50 MB)
-    --upload-reference upl_...    claim a file sent with 'intuizi uploads put'
-    --list locations.json         an inline JSON body carrying locations[]
+    --upload-reference upl_...    claim a file sent with
+                                  'intuizi uploads put --purpose poi_submission'
+    --list locations.json         a JSON file holding locations[], or - to read
+                                  it from stdin
 
---update and --remove need --key to say how existing POIs are matched.`,
+With --list, the file's name and brand_id are sent unless --name and
+--brand-id override them, and --key, --update and --remove replace the
+file's key, update and remove (--update=false and --remove=false turn off
+a true in the file). stderr notes each flag that replaces a different
+value in the file.
+
+Each listed location is matched to the brand's existing POIs on --key
+(the API uses gps-coordinates when it is omitted). A location that matches
+is never added a second time: --update changes the POI it matches, and
+without --update that POI is left as it is. --remove archives the brand's
+existing POIs that no listed location matches and keeps the matched ones, so
+list every location the brand should keep, not the ones to drop. Both take
+effect when Intuizi approves the submission, and both need --key.
+
+Only the --upload-reference form sends an Idempotency-Key, so only it can be
+retried safely with --idempotency-key; the API reads none on the --file and
+--list forms, and the CLI says the flag has no effect there.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()
@@ -342,7 +372,9 @@ Exactly one source:
 			if (update || remove) && key == "" {
 				return usageErr("--update and --remove need --key to match on")
 			}
-			if key != "" && !matchKeys[key] {
+			// Changed, not key != "": an empty --key would otherwise be
+			// dropped as if it had not been given.
+			if flags.Changed("key") && !matchKeys[key] {
 				return usageErr(fmt.Sprintf("--key must be %s, not %q", matchKeyList, key))
 			}
 			if flags.Changed("file") {
@@ -382,12 +414,25 @@ Exactly one source:
 				if err != nil {
 					return err
 				}
-				body, err := mergeSubmissionFields(payload, name, brandID, flags.Changed("name"), flags.Changed("brand-id"))
+				stderr := cmd.ErrOrStderr()
+				body, err := mergeSubmissionFields(stderr, payload, name, brandID,
+					flags.Changed("name"), flags.Changed("brand-id"))
 				if err != nil {
 					return err
 				}
-				// JSON like create-by-upload, so the booleans are real ones.
-				addMatchFields(body, update, remove, key)
+				// The match flags replace the body's fields the same way,
+				// decided by Changed so --remove=false turns off a remove:true
+				// in a reused file. JSON like create-by-upload, so the
+				// booleans are real ones.
+				for _, f := range []struct {
+					flag  string
+					value any
+				}{{"update", update}, {"remove", remove}, {"key", key}} {
+					if flags.Changed(f.flag) {
+						noteOverride(stderr, body, f.flag, f.value)
+						body[f.flag] = f.value
+					}
+				}
 				return createBody(cmd, poiPrefix+"/submissions/create-by-list", body,
 					submissionColumns, "processing - run 'intuizi poi submissions show <id>'")
 
@@ -411,11 +456,18 @@ Exactly one source:
 	flags.StringVar(&name, "name", "", "The submission name")
 	flags.IntVar(&brandID, "brand-id", 0, "The brand these locations belong to")
 	flags.StringVar(&file, "file", "", "A CSV of locations in the Intuizi ingestion format")
-	flags.StringVar(&uploadRef, "upload-reference", "", "An upload_reference from 'intuizi uploads put'")
-	flags.StringVar(&list, "list", "", `A JSON body carrying locations[], or "-" for stdin`)
-	flags.BoolVar(&update, "update", false, "Update existing matched POIs")
-	flags.BoolVar(&remove, "remove", false, "Remove existing matched POIs")
-	flags.StringVar(&key, "key", "", "How to match existing POIs: "+matchKeyList)
+	flags.StringVar(&uploadRef, "upload-reference", "",
+		"An upload_reference from 'intuizi uploads put --purpose poi_submission'")
+	flags.StringVar(&list, "list", "",
+		"Path to a JSON file holding locations[] (and name and brand_id\n"+
+			`unless the flags give them), or "-" to read it from stdin`)
+	flags.BoolVar(&update, "update", false, "Update the brand's existing POIs that a listed location matches")
+	flags.BoolVar(&remove, "remove", false,
+		"Archive the brand's existing POIs that no listed location matches (matched\n"+
+			"ones are kept); applied when Intuizi approves the submission")
+	flags.StringVar(&key, "key", "",
+		"How listed locations are matched to the brand's existing POIs:\n"+
+			matchKeyList+"\n(the API uses gps-coordinates when omitted)")
 
 	return cmd
 }
@@ -428,6 +480,8 @@ var matchKeys = map[string]bool{
 
 const matchKeyList = "location-id, gps-coordinates, store-id, master-id or external-id"
 
+// addMatchFields writes the match flags into a body that starts empty (the
+// --upload-reference form), so an unset or false flag leaves the API default.
 func addMatchFields(body map[string]any, update, remove bool, key string) {
 	if update {
 		body["update"] = true
@@ -441,16 +495,19 @@ func addMatchFields(body map[string]any, update, remove bool, key string) {
 }
 
 // mergeSubmissionFields lets --name and --brand-id override what the list file
-// carries, so one file can be reused across brands.
-func mergeSubmissionFields(payload []byte, name string, brandID int, setName, setBrand bool) (map[string]any, error) {
+// carries, so one file can be reused across brands. An override of a different
+// value is noted on w.
+func mergeSubmissionFields(w io.Writer, payload []byte, name string, brandID int, setName, setBrand bool) (map[string]any, error) {
 	body, err := decodeObject(payload)
 	if err != nil {
 		return nil, err
 	}
 	if setName {
+		noteOverride(w, body, "name", name)
 		body["name"] = name
 	}
 	if setBrand {
+		noteOverride(w, body, "brand-id", brandID)
 		body["brand_id"] = brandID
 	}
 	if _, ok := body["name"]; !ok {
@@ -462,10 +519,42 @@ func mergeSubmissionFields(payload []byte, name string, brandID int, setName, se
 	return body, nil
 }
 
+// noteOverride says on w when the flag for field is about to replace a
+// different value the --list body already carries. The flag wins, which is
+// the point, but a silent swap would hide a file that names another brand.
+// flag is the flag's name, which is the field's with - for _.
+func noteOverride(w io.Writer, body map[string]any, flag string, value any) {
+	field := strings.ReplaceAll(flag, "-", "_")
+	old, ok := body[field]
+	// Compared as text: the body's numbers decode as json.Number.
+	if !ok || fmt.Sprint(old) == fmt.Sprint(value) {
+		return
+	}
+	given := "--" + flag
+	switch v := value.(type) {
+	case bool:
+		// A bare --remove reads as true; false has to say so.
+		if !v {
+			given += "=false"
+		}
+	default:
+		given += " " + shown(value)
+	}
+	_, _ = fmt.Fprintf(w, "note: %s replaces %s %s from the --list body\n", given, field, shown(old))
+}
+
+// shown quotes a string so an empty or spaced name reads as one value.
+func shown(v any) string {
+	if s, ok := v.(string); ok {
+		return strconv.Quote(s)
+	}
+	return fmt.Sprint(v)
+}
+
 func init() {
 	poiCmd.AddCommand(
-		poiGroup("segments", "Your own POI segments",
-			searchList("list", "List your own POI segments",
+		poiGroup("segments", "The available POI segments",
+			searchList("list", "List the available POI segments",
 				poiPrefix+"/segments/index", "no segments", []string{"value", "text"})),
 
 		poiGroup("categories", "Your own POI categories",
@@ -473,7 +562,7 @@ func init() {
 				poiPrefix+"/categories/index", "no categories", []string{"value", "text"}),
 			poiCreateCommand("create", "Create a POI category",
 				poiPrefix+"/categories/create", "segment-id",
-				"The parent segment id", `Create a POI category under one of your segments.
+				"The parent segment id", `Create a POI category under one of the available segments.
 
 Read the parent ids first with 'intuizi poi segments list'.`, []string{"id", "name"})),
 
@@ -547,12 +636,7 @@ func createSubmissionByFile(cmd *cobra.Command, name string, brandID int, file s
 		raw, err := api.CreateMultipartRaw(cmd.Context(), c,
 			poiPrefix+"/submissions/create-by-file", fields, "locations_file", file)
 		if err != nil {
-			// Same rule as the JSON runners: the error envelope still goes out,
-			// so a script can read the 422 field errors from it.
-			var apiErr *api.Error
-			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
-				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
-			}
+			printErrorEnvelope(cmd, err)
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)

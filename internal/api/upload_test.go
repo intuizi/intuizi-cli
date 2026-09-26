@@ -89,10 +89,10 @@ func TestPutPresignedHonoursContentType(t *testing.T) {
 	}
 }
 
-// Every header the reservation lists is part of the signature, not just
-// Content-Type: a PUT missing one is a 403 from storage, however correct the
-// bytes are.
-func TestPutPresignedSendsEverySignedHeader(t *testing.T) {
+// Every header the reservation lists is sent, not just Content-Type: storage
+// refuses a PUT missing one it signed or requires, however correct the bytes
+// are.
+func TestPutPresignedSendsEveryListedHeader(t *testing.T) {
 	fp := tempFile(t, "x")
 	var got http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -100,15 +100,15 @@ func TestPutPresignedSendsEverySignedHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	signed := map[string]string{
+	listed := map[string]string{
 		"Content-Type":                 "text/csv",
 		"x-amz-server-side-encryption": "AES256",
 		"x-goog-content-length-range":  "0,1048576",
 	}
-	if err := PutPresigned(context.Background(), srv.URL, signed, fp); err != nil {
+	if err := PutPresigned(context.Background(), srv.URL, listed, fp); err != nil {
 		t.Fatalf("PutPresigned: %v", err)
 	}
-	for k, want := range signed {
+	for k, want := range listed {
 		if got.Get(k) != want {
 			t.Errorf("%s = %q, want %q", k, got.Get(k), want)
 		}
@@ -264,5 +264,57 @@ func TestUploadTimeoutNamesTheFile(t *testing.T) {
 				t.Errorf("error = %q, still leaks the transport wording", err)
 			}
 		})
+	}
+}
+
+// create-by-file is multipart, and the API reads no Idempotency-Key there, so
+// --idempotency-key gets the same no-effect warning as any other unkeyed POST
+// rather than being dropped in silence - once per client, and no header.
+func TestMultipartCreateWarnsThatTheKeyHasNoEffect(t *testing.T) {
+	setKey(t, "abc-123")
+
+	var keys []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		w.Write([]byte(`{"status":"success","code":200,"data":[{"id":1}]}`))
+	}))
+	defer srv.Close()
+
+	fp := tempFile(t, "latitude,longitude\n1,2\n")
+	path := "/my-data/pois/submissions/create-by-file"
+	fields := map[string]string{"name": "Store list", "brand_id": "7"}
+
+	c := New(srv.URL, "t")
+	var warn strings.Builder
+	c.Warn = &warn
+	ctx := context.Background()
+	if _, err := CreateMultipart[map[string]any](ctx, c, path, fields, "locations_file", fp); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := CreateMultipartRaw(ctx, c, path, fields, "locations_file", fp); err != nil {
+		t.Fatalf("create raw: %v", err)
+	}
+
+	want := "--idempotency-key has no effect on " + path
+	if got := warn.String(); strings.Count(got, want) != 1 {
+		t.Errorf("warn = %q, want exactly one %q", got, want)
+	}
+	for i, k := range keys {
+		if k != "" {
+			t.Errorf("request %d sent Idempotency-Key %q; the route reads none", i, k)
+		}
+	}
+
+	// Without the flag there is nothing to warn about.
+	setKey(t, "")
+	c = New(srv.URL, "t")
+	warn.Reset()
+	c.Warn = &warn
+	if _, err := CreateMultipart[map[string]any](ctx, c, path, fields, "locations_file", fp); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if warn.Len() != 0 {
+		t.Errorf("warned with no --idempotency-key: %q", warn.String())
 	}
 }

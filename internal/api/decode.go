@@ -26,6 +26,24 @@ func Read[T any](ctx context.Context, c *Client, path string, query url.Values) 
 	return first[T](raw, path)
 }
 
+// ReadRaw is Read that also returns the whole response body, for a caller
+// that decodes the record and may later print the envelope it came in, as
+// --wait does with --json: the bytes are the server's own, so nothing has to
+// be re-read or re-marshalled to print them.
+func ReadRaw[T any](ctx context.Context, c *Client, path string, query url.Values) (T, []byte, error) {
+	var zero T
+
+	raw, data, err := c.doRaw(ctx, http.MethodGet, path, query, nil)
+	if err != nil {
+		return zero, nil, err
+	}
+	out, err := first[T](data, path)
+	if err != nil {
+		return zero, nil, err
+	}
+	return out, raw, nil
+}
+
 // Create posts a body and decodes the created resource out of data.
 func Create[T any](ctx context.Context, c *Client, path string, body any) (T, error) {
 	var zero T

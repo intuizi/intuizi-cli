@@ -39,6 +39,8 @@ func TestLookalikeCreateRejectsBadValues(t *testing.T) {
 		{"empty country", more("--country", ""), []string{"--country"}},
 		{"empty state", more("--state", ""), []string{"--state"}},
 		{"zero contrast", more("--contrast-audience-id", "0"), []string{"--contrast-audience-id"}},
+		// The API refuses a contrast audience that is the seed itself.
+		{"contrast is the seed", more("--contrast-audience-id", "1381"), []string{"--contrast-audience-id 1381", "seed"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, got := stub(t, created)
@@ -99,5 +101,109 @@ func TestLookalikeCreateHelpNamesTheContrastFlag(t *testing.T) {
 	}
 	if strings.Contains(long, "A contrast audience, or anything") {
 		t.Errorf("help still routes a contrast audience through --file:\n%s", long)
+	}
+}
+
+// The API emails the run's creator on completion unless told otherwise, so
+// the flag defaults on and is always sent: with omitempty, --notify=false went
+// out as nothing and the email was sent anyway.
+func TestLookalikeCreateAlwaysSendsNotification(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra []string
+		want  bool
+	}{
+		{"default on", nil, true},
+		{"--notify", []string{"--notify"}, true},
+		{"--notify=false", []string{"--notify=false"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, created)
+
+			body := dryRunBody(t, lookalikeCreateCommand(), srv,
+				append(append([]string(nil), lookalikeFlags...), tc.extra...)...)
+
+			got, ok := body["notification"]
+			if !ok {
+				t.Fatalf("notification not sent: %v", body)
+			}
+			if got != tc.want {
+				t.Errorf("notification = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// --file carries the whole body, notification included.
+func TestLookalikeCreateRejectsNotifyWithFile(t *testing.T) {
+	srv, got := stub(t, created)
+	path := payloadFile(t, `{"name":"x"}`)
+
+	_, _, err := run(t, lookalikeCreateCommand(), srv, "--file", path, "--notify=false")
+
+	wantUsageErr(t, err, "--file carries the whole body", "--notify")
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
+// "keep polling" named no command. The next step is the one that follows a
+// run through 108 Modeling, on the id just created.
+func TestLookalikeCreateNamesTheCommandThatFollowsTheRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args func(t *testing.T) []string
+	}{
+		{"flags", func(*testing.T) []string { return lookalikeFlags }},
+		{"file", func(t *testing.T) []string { return []string{"--file", payloadFile(t, `{"name":"x"}`)} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, created)
+
+			_, stderr, err := run(t, lookalikeCreateCommand(), srv, tc.args(t)...)
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if !strings.Contains(stderr, "'intuizi audiences show <id> --wait'") {
+				t.Errorf("stderr does not name the follow-up command:\n%s", stderr)
+			}
+		})
+	}
+}
+
+// A cancelled run posts no further status, so the audience reads 108 Modeling
+// for good and a --wait on it only ends at --timeout. The confirmation and
+// the help both say so, and name the delete that removes it.
+func TestLookalikeCancelSaysTheRunNeverCompletes(t *testing.T) {
+	srv, got := stub(t, `{"status":"success","code":200,"message":"Cancellation requested.","data":[]}`)
+
+	_, stderr, err := run(t, audiencesLookalikeCommand(), srv, "cancel", "42")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(got.paths) != 1 || !strings.HasSuffix(got.paths[0], "/cancel-lookalike") {
+		t.Errorf("paths = %v", got.paths)
+	}
+	for _, want := range []string{"cancellation requested for audience 42", "108 Modeling", "--wait",
+		"intuizi audiences delete 42"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr omits %q: %q", want, stderr)
+		}
+	}
+
+	var long string
+	for _, c := range audiencesLookalikeCommand().Commands() {
+		if c.Name() == "cancel" {
+			long = c.Long
+		}
+	}
+	for _, want := range []string{"never reaches Completed", "show <id> --wait", "already finished",
+		"audiences delete <id>"} {
+		if !strings.Contains(long, want) {
+			t.Errorf("cancel help omits %q:\n%s", want, long)
+		}
+	}
+	if strings.Contains(long, "short while") {
+		t.Errorf("cancel help still says the status lingers only briefly:\n%s", long)
 	}
 }

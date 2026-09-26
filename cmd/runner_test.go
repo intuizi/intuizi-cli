@@ -387,6 +387,9 @@ func TestScheduleToggleHitsItsOwnRoute(t *testing.T) {
 		t.Run(tc.verb, func(t *testing.T) {
 			srv, got := stub(t, `{"status":"success","code":200,"data":[]}`)
 			cmd := toggleCommand(tc.verb, tc.verb, tc.verb+"d", "")
+			if tc.verb == "activate" {
+				cmd = schedulesActivateCommand()
+			}
 			if _, _, err := run(t, cmd, srv, "42"); err != nil {
 				t.Fatalf("execute: %v", err)
 			}
