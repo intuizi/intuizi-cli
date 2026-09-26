@@ -19,7 +19,7 @@ serve versions from v0.1.0, the first public release.
 
 ```bash
 intuizi auth login     # exchanges credentials for an API token, stored in ~/.config/intuizi/
-intuizi auth status    # shows the logged-in account
+intuizi auth status    # shows the token in use and the account it belongs to
 intuizi auth logout    # forgets the stored token
 ```
 
@@ -34,10 +34,18 @@ echo "$PASSWORD" | intuizi auth login --email you@example.com
 ```
 
 A token is bound to the console that minted it, and the config file stores the
-base URL alongside it. `auth login` reuses a stored token that still works for
-the same console, since accounts are capped at 10 active tokens; logging in
-with a different `--base-url` mints a new token there and replaces the stored
-base URL and token together. The file and its directory are checked before
+base URL and the account email alongside it. `auth login` reuses a stored token
+that still works for the same console and the same account, since accounts are
+capped at 10 active tokens, and says on stderr which account is logged in.
+Without `--email` the stored token is kept. An `--email` that differs from the
+stored account's, compared ignoring case, mints a token for that account and
+replaces the stored one; the replaced token stays valid on the server until it
+expires or is revoked at My Account > API Tokens. A token stored before the
+account was recorded (v0.1.3 and earlier) cannot be matched, so the first
+`auth login --email` after upgrading mints a new token and records the account;
+`auth login` without `--email` keeps it. Logging in with a different
+`--base-url` mints a new token there and replaces the stored base URL, token
+and account together. The file and its directory are checked before
 anything is minted, so a corrupt file, an unwritable directory or a credential
 store that does not answer fails without spending a token slot, and `auth
 login`, `auth status` and `auth logout` all name the file when it cannot be
@@ -45,6 +53,24 @@ read. `auth status --verify` makes one request
 to confirm the token is still accepted. Login and logout print commentary on
 stderr; only `auth status` writes to stdout. Ctrl-C at a prompt exits 130 and
 leaves the terminal as it found it.
+
+`auth status` prints an `Account:` line. It names the stored token's account,
+or says it is unknown for a token stored before accounts were recorded, and
+that `auth login --email <address>` mints a token that records it. When
+`INTUIZI_API_TOKEN` is in effect the account is reported unknown: that token
+was not minted by `auth login`, so nothing local says whose it is, and the
+`--verify` request does not return the user either.
+
+```
+$ intuizi auth status
+Base URL: https://console.intuizi.com
+Token:    present (in the OS credential store)
+Account:  you@example.com
+Expires:  2027-09-26 (in 365 days)
+```
+
+`auth logout` forgets the account email with the token, and stays local: it
+never calls the server.
 
 ## Global flags
 
@@ -82,8 +108,9 @@ path and any search terms you passed.
 
 `auth login` puts the token in the OS credential store when there is one: the
 macOS Keychain, Windows Credential Manager, or the Linux secret service. The
-config file keeps the base URL and the expiry either way, so `auth status` can
-still tell you when the token runs out.
+config file keeps the base URL, the expiry and the account email either way,
+none of them secret, so `auth status` can still tell you when the token runs
+out and whose it is.
 
 Containers, CI runners and SSH sessions have no credential store. There the
 token falls back to the config file, written owner-only. `auth status` says

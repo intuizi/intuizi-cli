@@ -48,9 +48,11 @@ intuizi reference poi brands --search starbucks
 intuizi audiences list
 ```
 
-`auth login` asks for the email and password of your Intuizi account. In CI,
-set `INTUIZI_API_TOKEN` to a token minted in the console under My Account then
-API Tokens, and skip the login.
+`auth login` asks for the email and password of your Intuizi account, and
+`auth status` shows which account the stored token belongs to. To switch
+accounts, log in again with the other account's `--email`. In CI, set
+`INTUIZI_API_TOKEN` to a token minted in the console under My Account then API
+Tokens, and skip the login.
 
 ## Usage
 

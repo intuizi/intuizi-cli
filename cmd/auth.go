@@ -44,7 +44,8 @@ The CLI looks for a token in two places, highest priority first:
 For CI, mint a token in the console at My Account > API Tokens on a dedicated
 service account, rather than running 'auth login'.
 
-Run 'intuizi auth status' to see which token is in use and where the file lives.`,
+Run 'intuizi auth status' to see which token is in use, which account it
+belongs to and where the file lives.`,
 	}
 	cmd.AddCommand(authLoginCommand(), authStatusCommand(), authLogoutCommand())
 	return cmd
@@ -66,13 +67,18 @@ unattended:
 
     echo "$PASSWORD" | intuizi auth login --email you@example.com
 
-If a working token is already stored for the same console it is reused rather
-than minting another - accounts are capped at 10 active tokens. Run 'intuizi
-auth logout' first if you genuinely need a fresh one. A token is bound to the
-console that minted it, so logging in with a different --base-url mints a new
-one and replaces the stored base URL and token together.
+If a working token is already stored for the same console and the same
+account it is reused rather than minting another - accounts are capped at 10
+active tokens - and stderr names the account it belongs to. Without --email
+the stored token is kept; an --email other than the stored account's, compared
+ignoring case, mints a token for that account and replaces the stored one. Run
+'intuizi auth logout' first if you genuinely need a fresh one. A token is bound
+to the console that minted it, so logging in with a different --base-url mints
+a new one and replaces the stored base URL and token together.
 
-The token is written to the config file with owner-only permissions. It is not
+The token goes to the OS credential store when there is one, otherwise to the
+config file with owner-only permissions; the account email is kept in the
+config file either way, so 'auth status' can name it. The token is not
 affected by logging in elsewhere, and 'auth logout' does not revoke it on the
 server - it only forgets it locally.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -113,12 +119,18 @@ func login(cmd *cobra.Command, email, password string) error {
 	if err := storeUnavailable(from); err != nil {
 		return err
 	}
-	if storedTokenUsable(ctx, cfg, stored, base) {
+	// Another account's token is not reused however live it is: checked
+	// first, so the old token is not even sent to find out.
+	if sameAccount(email, cfg.Email) && storedTokenUsable(ctx, cfg, stored, base) {
 		config.MigrateToken(cfg, from)
-		_, _ = fmt.Fprintf(stderr, "Already logged in to %s\n", base)
-		_, _ = fmt.Fprintln(stderr, "Run 'intuizi auth logout' first if you need a new token.")
+		reportReuse(stderr, base, cfg.Email)
 		warnEnvToken(stderr, "is set and takes precedence over the stored token")
 		return nil
+	}
+	// Whose token this login replaces, when it is another account's here.
+	replaced := ""
+	if stored != "" && cfg.Email != "" && (cfg.BaseURL == "" || sameBase(cfg.BaseURL, base)) {
+		replaced = cfg.Email
 	}
 
 	email, err = readEmail(cmd, email)
@@ -135,21 +147,52 @@ func login(cmd *cobra.Command, email, password string) error {
 		return err
 	}
 
-	// Base and token change together: the token is only good for this base.
+	// Base, token and account change together: the token is only good for
+	// this base, and only names this account.
 	cfg.BaseURL = base
 	cfg.Token = res.Token
 	cfg.ExpiresAt = res.ExpiresAt
+	cfg.Email = strings.TrimSpace(email)
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
 
-	_, _ = fmt.Fprintf(stderr, "Logged in to %s\n", base)
+	_, _ = fmt.Fprintf(stderr, "Logged in to %s as %s\n", base, cfg.Email)
+	if replaced != "" && !sameAccount(cfg.Email, replaced) {
+		_, _ = fmt.Fprintf(stderr, "Replaced the token stored for %s; it stays valid until it expires "+
+			"or you revoke it at My Account > API Tokens.\n", replaced)
+	}
 	_, _ = fmt.Fprintf(stderr, "Token saved to %s\n", path)
 	if exp := formatExpiry(res.ExpiresAt); exp != "" {
 		_, _ = fmt.Fprintf(stderr, "Expires %s\n", exp)
 	}
 	warnEnvToken(stderr, "is set and takes precedence over the token just saved")
 	return nil
+}
+
+// sameAccount reports whether a login for given may keep the token stored
+// for stored. No --email asks for no other account. A stored token with no
+// recorded account cannot be matched to one, so any --email is another.
+func sameAccount(given, stored string) bool {
+	given = strings.TrimSpace(given)
+	if given == "" {
+		return true
+	}
+	return strings.EqualFold(given, strings.TrimSpace(stored))
+}
+
+// reportReuse says which account a kept token belongs to, and how to get
+// another: stderr, like the rest of login.
+func reportReuse(w io.Writer, base, email string) {
+	if email != "" {
+		_, _ = fmt.Fprintf(w, "Already logged in to %s as %s\n", base, email)
+		_, _ = fmt.Fprintln(w, "Pass --email to log in as another account, or run 'intuizi auth logout' "+
+			"first if you need a new token.")
+		return
+	}
+	_, _ = fmt.Fprintf(w, "Already logged in to %s (the account was not recorded for this token)\n", base)
+	_, _ = fmt.Fprintln(w, "'intuizi auth login --email <address>' mints a token that records it; "+
+		"run 'intuizi auth logout' first if you need a new token.")
 }
 
 // storedTokenUsable reports whether cfg holds a token the API at base still
@@ -346,18 +389,15 @@ func status(cmd *cobra.Command, verify bool) error {
 	switch source {
 	case config.SourceEnv:
 		_, _ = fmt.Fprintf(stdout, "Token:    present (from %s)\n", config.EnvToken)
+		// Not the stored token, so the stored account says nothing about it.
+		_, _ = fmt.Fprintf(stdout, "Account:  unknown (the token comes from %s, so the account "+
+			"is not known locally)\n", config.EnvToken)
 	case config.SourceKeyring:
 		_, _ = fmt.Fprintf(stdout, "Token:    present (in the OS credential store)\n")
-		if exp := formatExpiry(cfg.ExpiresAt); exp != "" {
-			_, _ = fmt.Fprintf(stdout, "Expires:  %s\n", exp)
-		}
-		warnNearExpiry(cmd.ErrOrStderr(), cfg.ExpiresAt)
+		printStored(cmd, cfg)
 	case config.SourceConfig:
 		_, _ = fmt.Fprintf(stdout, "Token:    present (from %s)\n", path)
-		if exp := formatExpiry(cfg.ExpiresAt); exp != "" {
-			_, _ = fmt.Fprintf(stdout, "Expires:  %s\n", exp)
-		}
-		warnNearExpiry(cmd.ErrOrStderr(), cfg.ExpiresAt)
+		printStored(cmd, cfg)
 	case config.SourceUnavailable:
 		_, _ = fmt.Fprintln(stdout, "Token:    unknown (the credential store did not answer)")
 		return storeUnavailable(source)
@@ -379,6 +419,22 @@ func status(cmd *cobra.Command, verify bool) error {
 		_, _ = fmt.Fprintln(stdout, "Verified: the API accepted this token")
 	}
 	return nil
+}
+
+// printStored reports the stored token's account and expiry on stdout, with
+// any expiry warning on stderr.
+func printStored(cmd *cobra.Command, cfg *config.Config) {
+	stdout := cmd.OutOrStdout()
+	if cfg.Email != "" {
+		_, _ = fmt.Fprintf(stdout, "Account:  %s\n", cfg.Email)
+	} else {
+		_, _ = fmt.Fprintln(stdout, "Account:  unknown (not recorded for this token; "+
+			"'intuizi auth login --email <address>' mints a token that records it)")
+	}
+	if exp := formatExpiry(cfg.ExpiresAt); exp != "" {
+		_, _ = fmt.Fprintf(stdout, "Expires:  %s\n", exp)
+	}
+	warnNearExpiry(cmd.ErrOrStderr(), cfg.ExpiresAt)
 }
 
 // --------------------------------------------------------------------------------- logout

@@ -148,6 +148,10 @@ func TestLoginStoresTokenBaseAndExpiry(t *testing.T) {
 	if cfg.Token != "fresh-token" || cfg.BaseURL != srv.URL || cfg.ExpiresAt != "2099-01-01T00:00:00+00:00" {
 		t.Errorf("stored config = %+v", cfg)
 	}
+	// The account travels with the token, so status can name it.
+	if cfg.Email != "a@b.com" {
+		t.Errorf("stored email = %q, want a@b.com", cfg.Email)
+	}
 	if runtime.GOOS != "windows" { // owner-only bits are a Unix guarantee
 		fi, err := os.Stat(path)
 		if err != nil {
@@ -162,7 +166,7 @@ func TestLoginStoresTokenBaseAndExpiry(t *testing.T) {
 	if out != "" {
 		t.Errorf("stdout = %q, want empty", out)
 	}
-	for _, want := range []string{"Logged in to " + srv.URL, "Token saved to " + path, "Expires 2099-01-01"} {
+	for _, want := range []string{"Logged in to " + srv.URL + " as a@b.com", "Token saved to " + path, "Expires 2099-01-01"} {
 		if !strings.Contains(errb, want) {
 			t.Errorf("stderr missing %q:\n%s", want, errb)
 		}
@@ -259,14 +263,15 @@ func TestLoginReusesUsableTokenForTheSameBase(t *testing.T) {
 			if tc.stored != "" {
 				stored = strings.ReplaceAll(tc.stored, "%s", srv.URL)
 			}
-			storeAuthConfig(t, path, config.Config{BaseURL: stored, Token: "old-token"})
+			storeAuthConfig(t, path, config.Config{BaseURL: stored, Token: "old-token", Email: "a@b.com"})
 
-			_, errb, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "a@b.com")
+			// The same account, spelled differently: email is case-insensitive.
+			_, errb, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "A@B.com")
 			if err != nil {
 				t.Fatalf("login: %v", err)
 			}
-			if !strings.Contains(errb, "Already logged in to "+srv.URL) {
-				t.Errorf("stderr = %q, want the reuse notice", errb)
+			if !strings.Contains(errb, "Already logged in to "+srv.URL+" as a@b.com") {
+				t.Errorf("stderr = %q, want the reuse notice naming the account", errb)
 			}
 			if got.hits() != 1 || got.paths[0] != "/api/v2"+verifyPath {
 				t.Errorf("requests = %v, want only the verify read", got.paths)
@@ -281,11 +286,102 @@ func TestLoginReusesUsableTokenForTheSameBase(t *testing.T) {
 	}
 }
 
+// Without --email there is no other account asked for, so a live token is
+// kept, and stderr says whose it is.
+func TestLoginWithoutEmailReusesAndNamesTheAccount(t *testing.T) {
+	srv, got := fakeConsole(t, "should-not-mint", 200)
+	path := authEnv(t, srv.URL)
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "old-token", Email: "a@b.com"})
+
+	_, errb, err := runAuth(t, authLoginCommand(), "")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if !strings.Contains(errb, "Already logged in to "+srv.URL+" as a@b.com") {
+		t.Errorf("stderr = %q, want the account named", errb)
+	}
+	if got.hits() != 1 || got.paths[0] != "/api/v2"+verifyPath {
+		t.Errorf("requests = %v, want only the verify read", got.paths)
+	}
+}
+
+// The bug: logging in as another account kept the first account's token.
+// A different --email mints for that account and replaces the stored one,
+// without first sending the old token anywhere.
+func TestLoginAsAnotherAccountMintsAndReplaces(t *testing.T) {
+	srv, got := fakeConsole(t, "their-token", 200)
+	path := authEnv(t, srv.URL)
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "my-token", Email: "a@b.com"})
+
+	_, errb, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "c@d.com")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if strings.Contains(errb, "Already logged in") {
+		t.Fatalf("kept a@b.com's token for c@d.com:\n%s", errb)
+	}
+	if got.hits() != 1 || got.paths[0] != "/api/v2/auth/api-token" {
+		t.Errorf("requests = %v, want exactly the mint", got.paths)
+	}
+	if !strings.Contains(got.bodies[0], `"email":"c@d.com"`) {
+		t.Errorf("mint body = %s", got.bodies[0])
+	}
+	cfg := loadAuthConfig(t, path)
+	if cfg.Token != "their-token" || cfg.Email != "c@d.com" {
+		t.Errorf("stored config = %+v, want c@d.com's token", cfg)
+	}
+	for _, want := range []string{"Logged in to " + srv.URL + " as c@d.com", "a@b.com"} {
+		if !strings.Contains(errb, want) {
+			t.Errorf("stderr missing %q:\n%s", want, errb)
+		}
+	}
+}
+
+// A token stored before accounts were recorded belongs to nobody known, so
+// an --email cannot be matched against it: it mints, and records the account.
+func TestLoginWithEmailOverALegacyTokenMints(t *testing.T) {
+	srv, got := fakeConsole(t, "new-token", 200)
+	path := authEnv(t, srv.URL)
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "old-token"})
+
+	if _, _, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "a@b.com"); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if got.hits() != 1 || got.paths[0] != "/api/v2/auth/api-token" {
+		t.Errorf("requests = %v, want exactly the mint", got.paths)
+	}
+	if cfg := loadAuthConfig(t, path); cfg.Token != "new-token" || cfg.Email != "a@b.com" {
+		t.Errorf("stored config = %+v", cfg)
+	}
+}
+
+// Without --email a legacy token is still reused - minting would spend a
+// slot nobody asked for - and stderr says the account is not recorded.
+func TestLoginWithoutEmailOverALegacyTokenReuses(t *testing.T) {
+	srv, got := fakeConsole(t, "should-not-mint", 200)
+	path := authEnv(t, srv.URL)
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "old-token"})
+
+	_, errb, err := runAuth(t, authLoginCommand(), "")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if got.hits() != 1 || got.paths[0] != "/api/v2"+verifyPath {
+		t.Errorf("requests = %v, want only the verify read", got.paths)
+	}
+	for _, want := range []string{"Already logged in to " + srv.URL, "not recorded", "--email"} {
+		if !strings.Contains(errb, want) {
+			t.Errorf("stderr missing %q:\n%s", want, errb)
+		}
+	}
+}
+
 // A 401 on the verify read means the token is dead; mint a replacement.
 func TestLoginReplacesARejectedToken(t *testing.T) {
 	srv, got := fakeConsole(t, "new-token", 401)
 	path := authEnv(t, srv.URL)
-	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "revoked"})
+	// The same account, so only the verify read can rule the token out.
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "revoked", Email: "a@b.com"})
 
 	if _, _, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "a@b.com"); err != nil {
 		t.Fatalf("login: %v", err)
@@ -517,12 +613,49 @@ func TestStatusWithEnvToken(t *testing.T) {
 	if strings.Contains(out, "from-ci") {
 		t.Errorf("status printed the secret: %q", out)
 	}
+	// The env token is not the stored one, so the stored account is not its.
+	if !strings.Contains(out, "Account:  unknown") || !strings.Contains(out, "not known locally") {
+		t.Errorf("stdout = %q, want the account reported unknown", out)
+	}
+}
+
+// Even when the file names an account: INTUIZI_API_TOKEN is not that token.
+func TestStatusWithEnvTokenIgnoresTheStoredAccount(t *testing.T) {
+	srv, _ := fakeConsole(t, "tok", 200)
+	path := authEnv(t, srv.URL)
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "stored", Email: "a@b.com"})
+	t.Setenv(config.EnvToken, "from-ci")
+
+	out, _, err := runAuth(t, authStatusCommand(), "")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if strings.Contains(out, "a@b.com") {
+		t.Errorf("named the stored account for the env token:\n%s", out)
+	}
+}
+
+// A config written before accounts were recorded: say so, and how to fix it.
+func TestStatusWithoutARecordedAccount(t *testing.T) {
+	srv, _ := fakeConsole(t, "tok", 200)
+	path := authEnv(t, srv.URL)
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "stored"})
+
+	out, _, err := runAuth(t, authStatusCommand(), "")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	for _, want := range []string{"Account:  unknown", "auth login --email"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q:\n%s", want, out)
+		}
+	}
 }
 
 func TestStatusWithConfigToken(t *testing.T) {
 	srv, _ := fakeConsole(t, "tok", 200)
 	path := authEnv(t, srv.URL)
-	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "stored", ExpiresAt: "2099-01-01T00:00:00+00:00"})
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "stored", ExpiresAt: "2099-01-01T00:00:00+00:00", Email: "a@b.com"})
 
 	out, _, err := runAuth(t, authStatusCommand(), "")
 	if err != nil {
@@ -530,6 +663,9 @@ func TestStatusWithConfigToken(t *testing.T) {
 	}
 	if !strings.Contains(out, "present (from "+path+")") {
 		t.Errorf("stdout = %q, want the file as the source", out)
+	}
+	if !strings.Contains(out, "Account:  a@b.com") {
+		t.Errorf("stdout = %q, want the account", out)
 	}
 	if !strings.Contains(out, "Expires:  2099-01-01") {
 		t.Errorf("stdout = %q, want the expiry", out)
@@ -614,7 +750,7 @@ func TestStatusVerify(t *testing.T) {
 func TestLogoutRemovesTheStoredToken(t *testing.T) {
 	srv, got := fakeConsole(t, "tok", 200)
 	path := authEnv(t, srv.URL)
-	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "stored", ExpiresAt: "2099-01-01T00:00:00+00:00"})
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "stored", ExpiresAt: "2099-01-01T00:00:00+00:00", Email: "a@b.com"})
 
 	out, errb, err := runAuth(t, authLogoutCommand(), "")
 	if err != nil {
@@ -627,7 +763,7 @@ func TestLogoutRemovesTheStoredToken(t *testing.T) {
 		t.Errorf("stderr = %q", errb)
 	}
 	cfg := loadAuthConfig(t, path)
-	if cfg.Token != "" || cfg.ExpiresAt != "" {
+	if cfg.Token != "" || cfg.ExpiresAt != "" || cfg.Email != "" {
 		t.Errorf("token not cleared: %+v", cfg)
 	}
 	if cfg.BaseURL != srv.URL {

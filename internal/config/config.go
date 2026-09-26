@@ -36,6 +36,10 @@ type Config struct {
 	// Empty when the store holds the secret: read via StoredToken.
 	Token     string `json:"token,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
+	// The account the token was minted for. Not secret, so it stays in the
+	// file wherever the token is held; empty for a token stored before
+	// accounts were recorded.
+	Email string `json:"email,omitempty"`
 }
 
 func configDir() (string, error) {
@@ -296,7 +300,7 @@ func Token() string {
 }
 
 // ClearToken removes one console's token: its store entry, and the file's
-// token when the file holds that console. It reports whether there was one,
+// token, expiry and account email when the file holds that console. It reports whether there was one,
 // being the only place that looks in both, and keeps the file, which holds the
 // base URL. It does not affect EnvToken - the caller should warn when that is
 // set, since logout cannot unset the caller's environment.
@@ -338,10 +342,12 @@ func ClearToken(base string) (bool, error) {
 	if cfg.Token != "" {
 		had = true
 	}
-	if cfg.Token == "" && cfg.ExpiresAt == "" {
+	if cfg.Token == "" && cfg.ExpiresAt == "" && cfg.Email == "" {
 		return had, nil
 	}
+	// The email names whose token it was, so it goes with it.
 	cfg.Token = ""
 	cfg.ExpiresAt = ""
+	cfg.Email = ""
 	return had, Save(cfg)
 }

@@ -834,3 +834,93 @@ func TestClearTokenReportsAStoreTimeout(t *testing.T) {
 		t.Error("claimed to have removed a token it could not read")
 	}
 }
+
+// The account email is not secret: it stays in the file beside the base URL
+// and expiry, whichever of the two holds the token.
+func TestSaveKeepsTheEmailInTheFile(t *testing.T) {
+	isolate(t)
+
+	if err := Save(&Config{BaseURL: "https://example.com", Token: "secret", Email: "you@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	into := readStoredJSON(t)
+	if into["email"] != "you@example.com" {
+		t.Fatalf("email missing from the file: %v", into)
+	}
+	if _, ok := into["token"]; ok {
+		t.Fatalf("the secret was written to the file as well: %v", into)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Email != "you@example.com" {
+		t.Fatalf("email did not round trip: %+v", cfg)
+	}
+}
+
+// An older file has no email; nothing is written for it.
+func TestSaveOmitsAnEmptyEmail(t *testing.T) {
+	isolate(t)
+
+	if err := Save(&Config{BaseURL: "https://example.com", Token: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if into := readStoredJSON(t); into["email"] != nil {
+		t.Fatalf("email should be omitted when empty: %v", into)
+	}
+}
+
+// The email names whose token it was. Once the token is gone it names
+// nothing, so logout forgets it too - wherever the token was held.
+func TestClearTokenForgetsTheEmail(t *testing.T) {
+	const base = "https://example.com"
+	for name, cfg := range map[string]*Config{
+		"token in the store": {BaseURL: base, Token: "secret", Email: "you@example.com"},
+		"token in the file":  {BaseURL: base, Token: "secret", Email: "you@example.com"},
+		"email alone":        {BaseURL: base, Email: "you@example.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			if name == "token in the file" {
+				t.Setenv(EnvNoKeyring, "1")
+			}
+			if err := Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := ClearToken(base); err != nil {
+				t.Fatal(err)
+			}
+
+			after, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.Email != "" || after.Token != "" {
+				t.Errorf("after logout: %+v", after)
+			}
+			if after.BaseURL != base {
+				t.Errorf("base_url lost: %+v", after)
+			}
+		})
+	}
+}
+
+// Another console's account is not ours to forget.
+func TestClearTokenKeepsAnotherConsolesEmail(t *testing.T) {
+	isolate(t)
+	if err := Save(&Config{BaseURL: "https://b.example.com", Token: "token-b", Email: "you@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ClearToken("https://a.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Email != "you@example.com" {
+		t.Errorf("another console's email was cleared: %+v", cfg)
+	}
+}
