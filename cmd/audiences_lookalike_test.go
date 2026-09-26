@@ -144,3 +144,27 @@ func TestLookalikeCreateRejectsNotifyWithFile(t *testing.T) {
 		t.Errorf("should cost no round trip, got %v", got.paths)
 	}
 }
+
+// "keep polling" named no command. The next step is the one that follows a
+// run through 108 Modeling, on the id just created.
+func TestLookalikeCreateNamesTheCommandThatFollowsTheRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args func(t *testing.T) []string
+	}{
+		{"flags", func(*testing.T) []string { return lookalikeFlags }},
+		{"file", func(t *testing.T) []string { return []string{"--file", payloadFile(t, `{"name":"x"}`)} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, created)
+
+			_, stderr, err := run(t, lookalikeCreateCommand(), srv, tc.args(t)...)
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if !strings.Contains(stderr, "'intuizi audiences show <id> --wait'") {
+				t.Errorf("stderr does not name the follow-up command:\n%s", stderr)
+			}
+		})
+	}
+}

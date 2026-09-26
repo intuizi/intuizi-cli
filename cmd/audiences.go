@@ -521,7 +521,8 @@ additional permissions which need to be approved by your Account Manager; a
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		flags := cmd.Flags()
 		path := audiencesPrefix + "/create-lookalike"
-		next := "training - status 108 Modeling is not terminal, keep polling"
+		next := "training - status 108 Modeling is not terminal; run " +
+			"'intuizi audiences show <id> --wait' to follow it"
 
 		if file != "" {
 			if err := rejectBodyFlags(flags, lookalikeFields); err != nil {
