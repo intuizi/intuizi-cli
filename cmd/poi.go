@@ -336,7 +336,11 @@ Exactly one source:
 With --list, the file's name and brand_id are sent unless --name and
 --brand-id override them.
 
---update and --remove need --key to say how existing POIs are matched.`,
+--update and --remove need --key to say how existing POIs are matched.
+
+Only the --upload-reference form sends an Idempotency-Key, so only it can be
+retried safely with --idempotency-key; the API reads none on the --file and
+--list forms, and the CLI says the flag has no effect there.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()

@@ -76,6 +76,11 @@ func (c *Client) postMultipart(ctx context.Context, path string, fields map[stri
 func (c *Client) postMultipartRaw(ctx context.Context, path string, fields map[string]string, fileField, filePath string) ([]byte, json.RawMessage, error) {
 	target := c.BaseURL + apiPrefix + path
 
+	// The API reads no Idempotency-Key on a multipart create - distinct files
+	// would hash alike - so none is sent, and --idempotency-key is named as
+	// having no effect, as on every other unkeyed POST.
+	c.warnUnkeyed(path)
+
 	// Outside the loop: a per-attempt deadline is not a ceiling.
 	ctx, cancel := context.WithTimeout(ctx, multipartTimeout)
 	defer cancel()

@@ -151,11 +151,8 @@ func (c *Client) doRaw(ctx context.Context, method, path string, query url.Value
 	var key string
 	if isIdempotent(path) {
 		key = nextIdempotencyKey()
-	} else if method == http.MethodPost && IdempotencyKey != "" && !c.warnedKey {
-		// The flag's help says "on create commands"; say so when the route is
-		// not one of the seven that read the header, rather than ignoring it.
-		c.warnedKey = true
-		c.warnf("--idempotency-key has no effect on %s", path)
+	} else if method == http.MethodPost {
+		c.warnUnkeyed(path)
 	}
 
 	target := c.BaseURL + apiPrefix + path
@@ -216,6 +213,18 @@ func retryAfter(header string) time.Duration {
 		return min(max(time.Until(t), 0), maxRetryIn)
 	}
 	return fallbackRetryIn
+}
+
+// warnUnkeyed says --idempotency-key has no effect on a POST to a route that
+// reads no Idempotency-Key, once per client. The flag's help says "on create
+// commands"; a route outside the seven that read the header would otherwise
+// drop it in silence.
+func (c *Client) warnUnkeyed(path string) {
+	if IdempotencyKey == "" || c.warnedKey {
+		return
+	}
+	c.warnedKey = true
+	c.warnf("--idempotency-key has no effect on %s", path)
 }
 
 // warnf writes one line of commentary to Warn, if there is one.
