@@ -285,6 +285,42 @@ func TestAudiencesCreateOriginNeedsACountry(t *testing.T) {
 	}
 }
 
+// The --brand hint names what each type does take: its own brands field for
+// AffinityTransactions, geography for Origin, --category only for a type with
+// a category catalog, and nothing for the rest, which refuse --category too.
+func TestAudiencesCreateBrandHintPerType(t *testing.T) {
+	hints := map[string]string{
+		"AffinityTransactions": "; affinity brands need --file",
+		"Origin":               "; Origin filters on geography only (--country, --state, --city, --zipcode)",
+		"Apps":                 "; use --category",
+		"WebDomain":            "; use --category",
+		"CTV":                  "",
+		"Cohorts":              "",
+		"Demographics":         "",
+		"Deidentified":         "",
+		"ProfileAttributes":    "",
+	}
+	for _, typ := range datasetTypes {
+		if typ == "POI" {
+			continue
+		}
+		hint, ok := hints[typ]
+		if !ok {
+			t.Errorf("no expected --brand hint for %s; add it here", typ)
+			continue
+		}
+		t.Run(typ, func(t *testing.T) {
+			err := runLoggedOut(t, audiencesCreateCommand(), "--type", typ, "--name", "x",
+				"--start-date", "2026-09-01", "--end-date", "2026-09-07", "--country", "USA", "--brand", "coffee")
+
+			wantUsageErr(t, err)
+			if want := "--brand applies to --type POI, not " + typ + hint; err.Error() != want {
+				t.Errorf("err = %q\nwant  %q", err, want)
+			}
+		})
+	}
+}
+
 // Origin filters on geography only. The --brand hint used to point at
 // --category, which Origin refuses too.
 func TestAudiencesCreateOriginRejectsBrandAndCategory(t *testing.T) {
