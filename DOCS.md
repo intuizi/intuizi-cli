@@ -773,6 +773,11 @@ label is needed as well as the value. The one exception is
 `{start_limit, end_limit}` with nothing `--quiet` could print, so `--quiet` is
 refused there (exit 2) - read it with `--json`.
 
+Most catalogs match `--search` on the label. The demographics `genders`,
+`marital-statuses` and `incomes` match the value code instead (`--search F`,
+not `female`), `apps bundle-ids` matches the app name, and `poi locations`
+matches the name or the address.
+
 - **common** - dataset-types, countries, states, cities, dmas, zipcodes,
   operators, languages, signal-providers, endpoint-partners,
   endpoint-connections, pricing-models, datastreams, schedule-frequencies,

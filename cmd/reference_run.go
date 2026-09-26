@@ -64,8 +64,11 @@ func (e endpoint) command(group string) *cobra.Command {
 	flags := cmd.Flags()
 
 	if !e.noSearch {
-		flags.StringVar(&search, "search", "",
-			"Case-insensitive contains match on the item label")
+		help := e.searchHelp
+		if help == "" {
+			help = "Case-insensitive contains match on the item label"
+		}
+		flags.StringVar(&search, "search", "", help)
 	}
 	if e.paged {
 		flags.Var(&page, "page", "Page to fetch (default 1)")

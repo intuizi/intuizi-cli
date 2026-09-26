@@ -33,18 +33,27 @@ type param struct {
 
 // endpoint is one reference read. path is set only where the URL segment differs
 // from the command name. paged adds --page and --per-page; noSearch drops
-// --search, for a read that takes no parameters at all. noID marks rows that
-// carry neither id nor value, so --quiet is refused before the round trip
-// rather than failing after it.
+// --search, for a read that takes no parameters at all. searchHelp replaces
+// the --search help where the API matches a column other than the label.
+// noID marks rows that carry neither id nor value, so --quiet is refused
+// before the round trip rather than failing after it.
 type endpoint struct {
-	item     string
-	path     string
-	short    string
-	paged    bool
-	noSearch bool
-	noID     bool
-	params   []param
+	item       string
+	path       string
+	short      string
+	paged      bool
+	noSearch   bool
+	searchHelp string
+	noID       bool
+	params     []param
 }
+
+// Where --search is not matched on the label.
+const (
+	searchValueCode = "Case-insensitive contains match on the value code (F, not female)"
+	searchAppName   = "Case-insensitive contains match on the app name"
+	searchNameAddr  = "Case-insensitive contains match on the name or address"
+)
 
 // referenceGroup is one URL segment below /analyses/reference: reference <group> <item>.
 // path overrides name as that URL segment, so a group can be typed the way the
@@ -112,7 +121,7 @@ var referenceGroups = []referenceGroup{
 			{item: "brands", short: "POI brands", params: []param{
 				{name: "categories", kind: nums, help: "Category ids to cascade from"},
 			}},
-			{item: "locations", short: "POI locations", paged: true, params: []param{
+			{item: "locations", short: "POI locations", paged: true, searchHelp: searchNameAddr, params: []param{
 				{name: "brands", kind: nums, help: "Brand ids to cascade from"},
 			}},
 		},
@@ -124,7 +133,7 @@ var referenceGroups = []referenceGroup{
 			{item: "categories", short: "App categories", paged: true},
 			{item: "tags", short: "App tags", paged: true},
 			{item: "os", short: "App operating systems"},
-			{item: "bundle-ids", short: "App bundle ids", paged: true, params: []param{
+			{item: "bundle-ids", short: "App bundle ids", paged: true, searchHelp: searchAppName, params: []param{
 				{name: "categories", kind: nums, help: "Category ids to filter by"},
 				{name: "taxonomies", kind: nums, help: "Taxonomy ids to filter by (takes precedence over categories)"},
 			}},
@@ -191,10 +200,12 @@ var referenceGroups = []referenceGroup{
 		name:  "demographics",
 		short: "Gender, age, marital status and income dictionaries",
 		endpoints: []endpoint{
-			{item: "genders", short: "Demographic genders", paged: true},
+			// These three search the value code, not the description shown
+			// as the label; ages carries its name as both.
+			{item: "genders", short: "Demographic genders", paged: true, searchHelp: searchValueCode},
 			{item: "ages", short: "Demographic age ranges", paged: true},
-			{item: "marital-statuses", short: "Demographic marital statuses", paged: true},
-			{item: "incomes", short: "Demographic income ranges", paged: true},
+			{item: "marital-statuses", short: "Demographic marital statuses", paged: true, searchHelp: searchValueCode},
+			{item: "incomes", short: "Demographic income ranges", paged: true, searchHelp: searchValueCode},
 		},
 	},
 	{
@@ -250,9 +261,12 @@ its id column instead.
     intuizi reference apps categories --search fitness
     intuizi reference web domains --category-codes IAB2 --json
 
-Each read accepts --search, a case-insensitive contains match on the item
-label, except profile-attributes recency-limits, which takes no flags of its
-own. Paginated reads add --page and --per-page, and return one page per call.`,
+Each read accepts --search, a case-insensitive contains match, except
+profile-attributes recency-limits, which takes no flags of its own. Most reads
+match the item label. The demographics genders, marital-statuses and incomes
+match the value code instead (--search F, not female), apps bundle-ids matches
+the app name, and poi locations matches the name or address. Paginated reads
+add --page and --per-page, and return one page per call.`,
 }
 
 func init() {

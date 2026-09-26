@@ -409,6 +409,34 @@ func TestBuilderOmitsSearchWhenNoSearch(t *testing.T) {
 	}
 }
 
+// --search is a contains match on the label for most catalogs, but a few
+// search another column, and a user searching the label there gets "no
+// results". Their flag help says which column instead.
+func TestSearchHelpNamesTheColumnSearched(t *testing.T) {
+	for _, tc := range []struct {
+		group, item, want string
+	}{
+		{"demographics", "genders", "value code"},
+		{"demographics", "marital-statuses", "value code"},
+		{"demographics", "incomes", "value code"},
+		{"apps", "bundle-ids", "app name"},
+		{"poi", "locations", "name or address"},
+		// ages carries its name as both value and label.
+		{"demographics", "ages", "item label"},
+		{"poi", "brands", "item label"},
+	} {
+		e := findEndpoint(t, tc.group, tc.item)
+		flag := e.command(tc.group).Flags().Lookup("search")
+		if flag == nil {
+			t.Errorf("%s %s has no --search", tc.group, tc.item)
+			continue
+		}
+		if !strings.Contains(flag.Usage, tc.want) {
+			t.Errorf("%s %s --search help = %q, want it to name %q", tc.group, tc.item, flag.Usage, tc.want)
+		}
+	}
+}
+
 // recency-limits rows are {start_limit, end_limit}: nothing output.ID can
 // print, so --quiet used to fail after the round trip with "response carried
 // no id" and exit 1. It is refused up front instead, pointing at --json.
