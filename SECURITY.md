@@ -29,8 +29,10 @@ older ones.
 ## What the CLI does with your token
 
 `intuizi auth login` exchanges your account credentials for an API token and
-writes it to `~/.config/intuizi/config.json` with owner-only permissions. The
-token is sent only to the console it was minted for, as a bearer header over
-HTTPS, and redirects are refused rather than followed. `INTUIZI_API_TOKEN`
-overrides the stored token for CI. `intuizi auth logout` forgets the token
-locally; revoke it in the console under My Account then API Tokens.
+keeps it in the OS credential store (macOS Keychain, Windows Credential
+Manager or the Linux secret service) when there is one, otherwise in
+`~/.config/intuizi/config.json` with owner-only permissions. The token is
+sent only to the console it was minted for, as a bearer header over HTTPS,
+and redirects are refused rather than followed. `INTUIZI_API_TOKEN` overrides
+the stored token for CI. `intuizi auth logout` forgets the token locally;
+revoke it in the console under My Account then API Tokens.
