@@ -77,9 +77,13 @@ func hang(t *testing.T, onRequest func()) *httptest.Server {
 func TestTimeoutBeforeAnyStatusSaysSo(t *testing.T) {
 	srv := hang(t, nil)
 
-	_, _, err := run(t, waitShow(), srv, "501", "--wait", "--timeout", "30ms")
+	out, _, err := run(t, waitShow(), srv, "501", "--wait", "--timeout", "30ms")
 	if !errors.Is(err, errWaitTimeout) {
 		t.Fatalf("err = %v, want errWaitTimeout", err)
+	}
+	// Nothing was read, so there is no record to print.
+	if out != "" {
+		t.Errorf("stdout = %q, want nothing", out)
 	}
 	if !strings.Contains(err.Error(), "no status was read") {
 		t.Errorf("error should say no status was read, got %v", err)

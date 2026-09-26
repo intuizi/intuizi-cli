@@ -788,6 +788,10 @@ out=$(intuizi projects create --name "" --json) || jq '.data.errors' <<<"$out"
 A failure whose body is not JSON, such as an HTML error page from a proxy,
 prints nothing on stdout; only the stderr line explains it.
 
+A `--wait` that ends in a failed or timed-out state is different: every API
+call succeeded, so stdout carries the record's own success envelope while the
+exit code is 1. See [The async model](#the-async-model).
+
 ### Envelope shapes
 
 Every response shares the `status`, `code`, `message`, `data` envelope, but what
@@ -851,8 +855,21 @@ rather than free-form JSON.
 Creates return immediately and the resource completes in the background.
 `audiences create`, `audiences show`, `activations create` and
 `activations show` take `--wait` with an optional `--timeout` (default 60m).
-Waiting polls every 15 seconds, prints status changes to stderr and the final
-record to stdout, and exits non-zero on failure.
+Waiting polls every 15 seconds, prints status changes to stderr and the record
+the wait ended on to stdout, and exits non-zero on failure.
+
+The record is printed whether the wait succeeded, failed, or timed out, and
+the exit code alone says which: 0 for Completed, 1 for a failed state, a
+failed datastream or a timeout. After a timeout the record is the last one
+read, so it shows where the job stood; the job keeps running server-side. With
+`--json` the record is re-read and printed as the server's own envelope, so a
+failed wait exits 1 with a `"status": "success"` envelope on stdout: branch on
+the exit code or on `.data[0].status.id`, not on `.status`. With `--quiet`
+only the id is printed, whatever the outcome.
+
+Nothing is printed on stdout when the wait ends without a settled record: a
+timeout before any status was read, a 401, 403 or 404 while polling, three
+failed reads in a row, or Ctrl-C.
 
 Audience and activation status ids share one scale, where `104` is Completed.
 `108` Modeling, seen during a lookalike run, is not terminal.

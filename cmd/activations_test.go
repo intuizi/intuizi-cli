@@ -164,8 +164,10 @@ func TestWaitFailsOnErrorStatusWithDatastreamDetail(t *testing.T) {
 			t.Errorf("error missing %q: %v", want, err)
 		}
 	}
-	if out != "" {
-		t.Errorf("stdout should stay clean on failure, got %q", out)
+	// The failed record is still the answer to "what happened": printed, and
+	// the exit code says it failed.
+	if !strings.HasPrefix(out, "id") || !strings.Contains(out, "501") || !strings.Contains(out, "Error") {
+		t.Errorf("stdout should be the failed record:\n%s", out)
 	}
 }
 
@@ -189,9 +191,13 @@ func TestWaitTimesOutWithResumeHint(t *testing.T) {
 	srv, _ := stubSeq(t, activation(101, "Processing"))
 
 	start := time.Now()
-	_, _, err := run(t, activationsShowCommand(), srv, "501", "--wait", "--timeout", "30ms")
+	out, _, err := run(t, activationsShowCommand(), srv, "501", "--wait", "--timeout", "30ms")
 	if !errors.Is(err, errWaitTimeout) {
 		t.Fatalf("err = %v, want errWaitTimeout", err)
+	}
+	// The last record read is printed, so a CI log shows where it stood.
+	if !strings.HasPrefix(out, "id") || !strings.Contains(out, "Processing") {
+		t.Errorf("stdout should be the last polled record:\n%s", out)
 	}
 	for _, want := range []string{"activation 501", "last status Processing", "show 501 --wait"} {
 		if !strings.Contains(err.Error(), want) {
@@ -335,8 +341,8 @@ func TestWaitFailsWhenCompletedWithFailedDatastream(t *testing.T) {
 	if !strings.Contains(errb, "Completed (104)") {
 		t.Errorf("the status change should still be reported on stderr: %q", errb)
 	}
-	if out != "" {
-		t.Errorf("stdout should stay clean on failure, got %q", out)
+	if !strings.HasPrefix(out, "id") || !strings.Contains(out, "614") || !strings.Contains(out, "KLAX Visitors Activation") {
+		t.Errorf("stdout should be the record whose stream failed:\n%s", out)
 	}
 }
 
@@ -608,5 +614,94 @@ func TestWaitNoteNeedsAnEmptyDatastreamList(t *testing.T) {
 				t.Errorf("noted an empty delivery:\n%s", errb)
 			}
 		})
+	}
+}
+
+// failedActivation is a read of activation 501 that ended in an error state.
+var failedActivation = reply{body: `{"status":"success","code":200,"data":[
+ {"id":501,"description":"Q1 retail export","status":{"id":400,"name":"Error"},
+  "datastreams":[{"name":"Match File","status":"failed","error":"partner rejected credentials"}]}]}`}
+
+// create --wait prints the failed record too, after "created activation".
+func TestCreateWaitPrintsTheFailedRecord(t *testing.T) {
+	fast(t)
+	srv, _ := stubSeq(t, createdActivation, activation(101, "Processing"), failedActivation)
+
+	out, errb, err := run(t, activationsCreateCommand(), srv,
+		append(append([]string(nil), threeIDs...), "--datastream", "7", "--wait")...)
+	if !errors.Is(err, errWaitFailed) {
+		t.Fatalf("err = %v, want errWaitFailed", err)
+	}
+	if !strings.Contains(errb, "created activation 501") {
+		t.Errorf("stderr = %q", errb)
+	}
+	if !strings.HasPrefix(out, "id") || !strings.Contains(out, "Error") || strings.Contains(out, "Initiating") {
+		t.Errorf("stdout should be the failed record alone:\n%s", out)
+	}
+}
+
+// With --json the failed record goes out as the server's own envelope, by
+// the same re-read a successful wait makes, and the exit code still fails.
+func TestWaitJSONPrintsTheFailedEnvelope(t *testing.T) {
+	fast(t)
+	srv, got := stubSeq(t, activation(101, "Processing"), failedActivation)
+
+	out, _, err := runJSON(t, activationsShowCommand(), srv, "501", "--wait")
+	if !errors.Is(err, errWaitFailed) {
+		t.Fatalf("err = %v, want errWaitFailed", err)
+	}
+	if len(got.paths) != 3 {
+		t.Errorf("expected two polls and one re-read, got %d calls", len(got.paths))
+	}
+	dec := json.NewDecoder(strings.NewReader(out))
+	var env struct {
+		Code int `json:"code"`
+		Data []struct {
+			Status struct {
+				ID int `json:"id"`
+			} `json:"status"`
+		} `json:"data"`
+	}
+	if err := dec.Decode(&env); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, out)
+	}
+	if env.Code != 200 || len(env.Data) != 1 || env.Data[0].Status.ID != 400 {
+		t.Errorf("not the failed record's envelope:\n%s", out)
+	}
+	if dec.More() {
+		t.Errorf("stdout carries more than one JSON document:\n%s", out)
+	}
+}
+
+// A timed-out --json wait prints the record as it stands at the re-read.
+func TestWaitJSONPrintsTheRecordOnTimeout(t *testing.T) {
+	fast(t)
+	srv, _ := stubSeq(t, activation(101, "Processing"))
+
+	out, _, err := runJSON(t, activationsShowCommand(), srv, "501", "--wait", "--timeout", "30ms")
+	if !errors.Is(err, errWaitTimeout) {
+		t.Fatalf("err = %v, want errWaitTimeout", err)
+	}
+	var env struct {
+		Code int `json:"code"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil || env.Code != 200 || !strings.Contains(out, "Processing") {
+		t.Errorf("stdout should be the record's envelope:\n%s", out)
+	}
+}
+
+// A wait cut short by a hard error has no final state to show: the last read
+// may be long stale, and the error says what went wrong.
+func TestWaitHardErrorPrintsNothing(t *testing.T) {
+	fast(t)
+	gone := reply{status: 404, body: `{"status":"error","code":404,"message":"Activation not found.","data":[]}`}
+	srv, _ := stubSeq(t, activation(101, "Processing"), gone)
+
+	out, _, err := run(t, activationsShowCommand(), srv, "501", "--wait")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("err = %v", err)
+	}
+	if out != "" {
+		t.Errorf("stdout = %q, want nothing", out)
 	}
 }

@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func audience(sid int, name string) reply {
@@ -102,5 +105,50 @@ func TestAudienceWaitNeverNotesAnEmptyDelivery(t *testing.T) {
 	}
 	if strings.Contains(errb, "nothing was delivered") {
 		t.Errorf("an audience is not a delivery:\n%s", errb)
+	}
+}
+
+// A build that fails prints its record on stdout, from create and from show,
+// and still exits non-zero.
+func TestAudiencesWaitPrintsTheFailedRecord(t *testing.T) {
+	createdAudience := reply{body: `{"status":"success","code":201,"data":[{"id":1377,"name":"CLI demo - LAX visitors","status":{"id":100,"name":"Initiating"},"results_count":0}]}`}
+	for name, tc := range map[string]struct {
+		replies []reply
+		args    func(t *testing.T) []string
+		cmd     func() *cobra.Command
+	}{
+		"create": {[]reply{createdAudience, audience(101, "Processing"), audience(106, "Expired")},
+			func(t *testing.T) []string {
+				return []string{"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`), "--wait"}
+			}, audiencesCreateCommand},
+		"show": {[]reply{audience(108, "Modeling"), audience(106, "Expired")},
+			func(*testing.T) []string { return []string{"1377", "--wait"} }, audiencesShowCommand},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fast(t)
+			srv, _ := stubSeq(t, tc.replies...)
+
+			out, _, err := run(t, tc.cmd(), srv, tc.args(t)...)
+			if !errors.Is(err, errWaitFailed) {
+				t.Fatalf("err = %v, want errWaitFailed", err)
+			}
+			if !strings.HasPrefix(out, "id") || !strings.Contains(out, "Expired") || !strings.Contains(out, "1189") {
+				t.Errorf("stdout should be the failed record:\n%s", out)
+			}
+		})
+	}
+}
+
+// A timed-out audience wait prints where the build stood.
+func TestAudiencesWaitPrintsTheLastRecordOnTimeout(t *testing.T) {
+	fast(t)
+	srv, _ := stubSeq(t, audience(108, "Modeling"))
+
+	out, _, err := run(t, audiencesShowCommand(), srv, "1377", "--wait", "--timeout", "30ms")
+	if !errors.Is(err, errWaitTimeout) {
+		t.Fatalf("err = %v, want errWaitTimeout", err)
+	}
+	if !strings.HasPrefix(out, "id") || !strings.Contains(out, "Modeling") {
+		t.Errorf("stdout should be the last polled record:\n%s", out)
 	}
 }

@@ -62,7 +62,7 @@ func waitFlags(cmd *cobra.Command) func() (bool, time.Duration, error) {
 	)
 	flags := cmd.Flags()
 	flags.BoolVar(&wait, "wait", false,
-		"Poll until it completes or fails; exit non-zero on failure")
+		"Poll until it completes or fails, then print the record;\nexit non-zero on failure or timeout")
 	flags.DurationVar(&timeout, "timeout", defaultWaitTimeout,
 		"Give up waiting after this long (with --wait)")
 
@@ -82,6 +82,11 @@ func waitFlags(cmd *cobra.Command) func() (bool, time.Duration, error) {
 // waitAndPrint follows one resource to a terminal status and prints the final
 // state. With --json the envelope is re-read so the bytes printed are the
 // server's own, as every other --json path does.
+//
+// A wait that fails or times out still prints the last record read, then
+// returns its error, so the exit code is unchanged and a CI log shows where
+// the job stood. Any other error - a hard API error, repeated failed reads, a
+// signal - prints nothing: there is no settled state to show.
 func waitAndPrint(cmd *cobra.Command, c *api.Client, prefix, singular string, id int, cols []string, timeout time.Duration) error {
 	path := prefix + "/" + strconv.Itoa(id)
 	final, err := waitFor(cmd, c, path, singular, id, timeout)
@@ -90,9 +95,23 @@ func waitAndPrint(cmd *cobra.Command, c *api.Client, prefix, singular string, id
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), id)
 		return err
 	}
-	if err != nil {
+	if err != nil && (final == nil || !printsRecord(err)) {
 		return err
 	}
+	if perr := printWaited(cmd, c, path, final, cols); perr != nil && err == nil {
+		return perr
+	}
+	return err
+}
+
+// printsRecord reports a wait error that still ends on a record worth
+// printing: a failed state, or a timeout while the job runs on.
+func printsRecord(err error) bool {
+	return errors.Is(err, errWaitFailed) || errors.Is(err, errWaitTimeout)
+}
+
+// printWaited prints the record a wait ended on, in the active output mode.
+func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Record, cols []string) error {
 	if jsonOutput {
 		raw, err := rawAfterWait(cmd, c, path, final)
 		if err != nil {
@@ -103,10 +122,11 @@ func waitAndPrint(cmd *cobra.Command, c *api.Client, prefix, singular string, id
 	return output.Detail(cmd.OutOrStdout(), flatten(final), cols)
 }
 
-// rawAfterWait re-reads the finished record for --json. The wait has already
-// succeeded, so a blip here is retried with the poll's own tolerance and,
-// failing that, the last polled record is printed instead: exit 1 with
-// nothing on stdout would read as the job having failed.
+// rawAfterWait re-reads the record a wait ended on, for --json. The wait is
+// over whatever its outcome, so a blip here is retried with the poll's own
+// tolerance and, failing that, the last polled record is printed instead:
+// after a success, exit 1 with nothing on stdout would read as the job having
+// failed.
 func rawAfterWait(cmd *cobra.Command, c *api.Client, path string, final output.Record) ([]byte, error) {
 	ctx := cmd.Context()
 	var err error
@@ -131,7 +151,8 @@ func rawAfterWait(cmd *cobra.Command, c *api.Client, path string, final output.R
 }
 
 // createAndWait posts a body, reports the new id on stderr, then follows it.
-// stdout carries only the final state, so --json emits one document.
+// stdout carries only the state the wait ended on, so --json emits one
+// document.
 func createAndWait(cmd *cobra.Command, prefix, singular string, body any, cols []string, timeout time.Duration) error {
 	c, err := client()
 	if err != nil {

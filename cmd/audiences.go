@@ -101,8 +101,9 @@ so a field this CLI has never heard of still reaches the API:
 
 Creation is asynchronous: the new audience comes back Initiating with a
 results_count of 0. That is expected. Add --wait to block until the build
-reaches Completed, with --timeout to bound it (default 60m); the final record
-is printed and an audience that fails to build exits non-zero.
+reaches Completed, with --timeout to bound it (default 60m). The last record
+read is printed whatever the outcome, and an audience that fails to build, or
+a wait that times out, exits non-zero.
 
 A retry of this command reuses its Idempotency-Key, so it cannot create a
 duplicate.`,
@@ -343,8 +344,9 @@ func audiencesShowCommand() *cobra.Command {
 		Long: `Show one audience.
 
 With --wait, keep polling until the build reaches Completed or fails, printing
-each status change to stderr. A lookalike in 108 Modeling is still training and
-is waited through:
+each status change to stderr and the last record read to stdout, and exiting
+non-zero if it fails or --timeout runs out. A lookalike in 108 Modeling is
+still training and is waited through:
 
     intuizi audiences show 1377 --wait`,
 		Args: cobra.ExactArgs(1),
