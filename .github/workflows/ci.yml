@@ -80,6 +80,11 @@ jobs:
       - name: Homebrew formula renders and parses
         run: ruby -c dist/homebrew/Formula/intuizi.rb
 
+      # The launcher's own contract: exit codes pass through, and a SIGTERM
+      # sent to the launcher alone reaches the binary.
+      - name: npm launcher tests
+        run: node --test npm/cli/test/launcher.test.mjs
+
       - run: node npm/build.mjs --dist dist --out dist/npm
 
       - name: npm launcher installs from the tarballs and runs the binary

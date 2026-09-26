@@ -181,11 +181,11 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 The signal codes follow the shell's `128 + signal` convention, so a script can
 tell a cancelled run from a failed one.
 
-With the npm package, `intuizi` is a Node launcher that ignores a SIGTERM sent
-to its own process id. Ctrl-C, `timeout`, and a signal to the whole process
-group (`kill -TERM -- -<pgid>`) reach the binary, but a SIGTERM to the
-launcher alone leaves the command running, and it exits with its own code
-rather than `143`.
+With the npm package, `intuizi` is a Node launcher that runs the binary and
+passes its exit code through. A SIGTERM or SIGHUP sent to the launcher alone,
+as Docker, systemd or a CI runner sends one, is passed on to the binary, so
+the command stops and exits as it would without the launcher: `143` for a
+SIGTERM. Ctrl-C reaches the binary through the terminal.
 
 ## Support, issues and contributions
 
@@ -239,8 +239,10 @@ macos-latest. Lint runs on Ubuntu only, since results do not vary by OS.
 
 A separate `package` job runs a goreleaser snapshot on every pull request,
 checks that the rendered Homebrew formula parses, builds the npm packages from
-the snapshot, installs the launcher from the tarballs and runs it. Packaging
-breaks on the PR that causes them, not on the release tag.
+the snapshot, installs the launcher from the tarballs and runs it. It also
+runs the launcher's own tests (`node --test npm/cli/test/launcher.test.mjs`),
+which check that exit codes and SIGTERM pass through it. Packaging breaks on
+the PR that causes them, not on the release tag.
 
 `.github/workflows/codeql.yml` runs CodeQL over the Go code on every pull
 request and weekly. Every action in every workflow is pinned to a commit rather
