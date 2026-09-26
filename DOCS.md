@@ -859,11 +859,12 @@ long=$(printf 'x%.0s' {1..256})
 out=$(intuizi projects create --name "$long" --json) || jq '.data.errors' <<<"$out"
 ```
 
-Stdout stays empty, and only the stderr line explains the failure, in three
+Stdout stays empty, and only the stderr line explains the failure, in four
 cases: a body that is not JSON, such as an HTML error page from a proxy; a
 failure before anything is sent, such as a usage error (exit 2), a missing
-token or an unreadable `--file`; and a failed catalog read while
-`audiences create` resolves a name or the default providers.
+token or an unreadable `--file`; a failed catalog read while
+`audiences create` resolves a name or the default providers; and a failed PUT
+to the storage host on `uploads put`.
 
 A `--wait` that fails, times out or gives up is different: the record it
 prints was read successfully, so stdout carries that record's own success
