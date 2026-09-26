@@ -49,11 +49,15 @@ and stderr says it replaced the stored token and whether that token was still
 valid; `auth login` without `--email` keeps it. Logging in
 with a different `--base-url` mints a new token there and replaces the stored
 base URL, token and account together. The file and its directory are checked
-before anything is minted, so a corrupt file, an unwritable directory or a credential
-store that does not answer fails without spending a token slot, and `auth
-login`, `auth status` and `auth logout` all name the file when it cannot be
-read. `auth status --verify` makes one request
-to confirm the token is still accepted. Login and logout print commentary on
+before anything is minted, so a corrupt file or an unwritable directory fails
+without spending a token slot, and `auth login`, `auth status` and `auth
+logout` all name the file when it cannot be read. When the credential store
+does not answer within two seconds and the config file names a console but
+does not hold the token itself, `auth login` fails before it mints anything;
+unlock the store and try again. A login that mints while the store is not
+answering, such as the first login on a machine, saves the new token to the
+config file instead and says so on stderr. `auth status --verify` makes one
+request to confirm the token is still accepted. Login and logout print commentary on
 stderr; only `auth status` writes to stdout. Ctrl-C at a prompt exits 130 and
 leaves the terminal as it found it.
 
