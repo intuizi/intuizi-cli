@@ -270,11 +270,12 @@ resolved ids go into a different payload field:
 `--type origin` targets devices by their home location rather than the places
 they visited, so its only filters are geographic. `--country` is required,
 because the API requires it: `reference common countries --dataset-type Origin`
-lists the countries with Origin data, and the API rejects one outside that set.
-`--state`, `--city` and `--zipcode` narrow it further; DMAs, which Origin also
-accepts, need `--file`. `--brand`, `--brand-all` and `--category` are refused
-for Origin before anything is sent, exit 2. Signal providers apply as for any
-other type: omitting `--provider` sends every Origin provider.
+lists the countries with Origin data, and the API rejects a country outside
+that set when the console has Origin coverage configured. `--state`, `--city`
+and `--zipcode` narrow it further; DMAs, which Origin also accepts, need
+`--file`. `--brand`, `--brand-all` and `--category` are refused for Origin
+before anything is sent, exit 2. Signal providers apply as for any other type:
+omitting `--provider` sends every Origin provider.
 
 Origin data is weekly, so the API widens the window to the whole
 Monday-to-Sunday weeks it touches. The body keeps the dates as given, and when
