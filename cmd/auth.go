@@ -39,13 +39,14 @@ func authCommand() *cobra.Command {
 The CLI looks for a token in two places, highest priority first:
 
   1. the INTUIZI_API_TOKEN environment variable, intended for CI
-  2. the config file written by 'intuizi auth login'
+  2. the token 'intuizi auth login' stored: in the OS credential store when
+     there is one, otherwise in the config file
 
 For CI, mint a token in the console at My Account > API Tokens on a dedicated
 service account, rather than running 'auth login'.
 
 Run 'intuizi auth status' to see which token is in use, which account it
-belongs to and where the file lives.`,
+belongs to and where it is held.`,
 	}
 	cmd.AddCommand(authLoginCommand(), authStatusCommand(), authLogoutCommand())
 	return cmd
@@ -88,7 +89,8 @@ server - it only forgets it locally.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&email, "email", "", "Account email")
+	cmd.Flags().StringVar(&email, "email", "",
+		"Account email; prompted for on a terminal, and required to mint a\ntoken when stdin is not a terminal")
 	cmd.Flags().StringVar(&password, "password", "",
 		"Account password (discouraged - visible in shell history; pipe it on stdin instead)")
 	return cmd
