@@ -210,7 +210,7 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--brand-all` | a search, taking every match; POI only | `reference poi brands` |
 | `--category` | name or id, repeatable | one catalog per type, below |
 | `--provider` | id, repeatable | `reference common signal-providers --data-type <type>` |
-| `--country` | ISO-3 code, repeatable | `reference common countries` |
+| `--country` | ISO-3 code, repeatable; required for Origin | `reference common countries` |
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--city` | city name, repeatable | `reference common cities --states CA` |
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
@@ -218,7 +218,7 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 
 `--type` is case-insensitive in and canonical out: `poi` sends `POI`. Accepted
 types are POI, Apps, WebDomain, CTV, Cohorts, AffinityTransactions,
-Demographics, Deidentified and ProfileAttributes.
+Demographics, Deidentified, ProfileAttributes and Origin.
 
 `--category` resolves against a different catalog for each type, and the
 resolved ids go into a different payload field:
@@ -232,6 +232,29 @@ resolved ids go into a different payload field:
 
 `--brand` is POI only. AffinityTransactions has brands too, in its own
 `brands` field, which no flag writes yet; that filter needs `--file`.
+
+`--type origin` targets devices by their home location rather than the places
+they visited, so its only filters are geographic. `--country` is required,
+because the API requires it: `reference common countries --dataset-type Origin`
+lists the countries with Origin data, and the API rejects one outside that set.
+`--state`, `--city` and `--zipcode` narrow it further; DMAs, which Origin also
+accepts, need `--file`. `--brand`, `--brand-all` and `--category` are refused
+for Origin before anything is sent, exit 2. Signal providers apply as for any
+other type: omitting `--provider` sends every Origin provider.
+
+Origin data is weekly, so the API widens the window to the whole
+Monday-to-Sunday weeks it touches. The body keeps the dates as given, and when
+they are not already whole weeks stderr names the window that is actually
+scanned:
+
+```bash
+intuizi audiences create --type origin --country USA --state CA \
+  --start-date 2026-09-02 --end-date 2026-09-09 --name "CA residents" --dry-run
+```
+
+```
+Origin data is weekly: the API widens 2026-09-02..2026-09-09 to the whole weeks 2026-08-31..2026-09-13
+```
 
 `--brand-all` takes a search and selects every match, where `--brand` insists
 on exactly one. It reports what it selected to stderr, so an expansion is

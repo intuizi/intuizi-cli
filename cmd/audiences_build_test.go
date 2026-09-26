@@ -269,6 +269,8 @@ func TestCanonicalType(t *testing.T) {
 		"webdomain":            "WebDomain",
 		"affinitytransactions": "AffinityTransactions",
 		"profileattributes":    "ProfileAttributes",
+		"origin":               "Origin",
+		"ORIGIN":               "Origin",
 	} {
 		got, err := canonicalType(in)
 		if err != nil {
@@ -521,5 +523,23 @@ func TestResolveOneKeepsAmbiguityWithoutAnExactLabel(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "narrow the search") {
 		t.Errorf("error changed shape: %v", err)
+	}
+}
+
+// Origin data is weekly: the API widens any window to the whole Monday-to-Sunday
+// weeks it touches. 2026-09-02 and 2026-09-09 are both Wednesdays.
+func TestOriginWeeks(t *testing.T) {
+	for _, tc := range []struct{ start, end, wantStart, wantEnd string }{
+		{"2026-09-02", "2026-09-09", "2026-08-31", "2026-09-13"},
+		{"2026-08-31", "2026-09-06", "2026-08-31", "2026-09-06"}, // already whole
+		{"2026-09-06", "2026-09-06", "2026-08-31", "2026-09-06"}, // a Sunday alone
+		{"2026-09-07", "2026-09-07", "2026-09-07", "2026-09-13"}, // a Monday alone
+		{"2026-12-30", "2027-01-01", "2026-12-28", "2027-01-03"}, // across the year
+	} {
+		gotStart, gotEnd := originWeeks(tc.start, tc.end)
+		if gotStart != tc.wantStart || gotEnd != tc.wantEnd {
+			t.Errorf("originWeeks(%s, %s) = %s, %s; want %s, %s",
+				tc.start, tc.end, gotStart, gotEnd, tc.wantStart, tc.wantEnd)
+		}
 	}
 }

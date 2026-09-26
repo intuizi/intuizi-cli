@@ -73,6 +73,14 @@ and reports to stderr how many it selected. --brand applies to POI.
 resolving against its own catalog. Every selector repeats for more than one
 value.
 
+--type origin targets devices by their home location rather than the places
+they visited, so its only filters are geographic. --country is required, and
+the countries with Origin data come from 'intuizi reference common countries
+--dataset-type Origin'; --state, --city and --zipcode narrow it further, and
+--brand and --category do not apply. Origin data is weekly: the API widens the
+window to the whole Monday-to-Sunday weeks it touches, and the CLI reports the
+widened dates on stderr when they differ from the ones given.
+
 Omitting --provider includes every signal provider for the dataset type, which
 is almost always what you want: a provider left out builds an audience that
 completes with zero devices and no error. A --provider the type's catalog does
@@ -144,17 +152,11 @@ duplicate.`,
 			return err
 		}
 		if len(brands)+len(brandAll) > 0 && dsType != "POI" {
-			// AffinityTransactions keeps brands in its own "brands" field, which
-			// no flag writes - so do not point at --category, a different filter.
 			flag := "--brand"
 			if len(brands) == 0 {
 				flag = "--brand-all"
 			}
-			hint := "; use --category"
-			if dsType == "AffinityTransactions" {
-				hint = "; affinity brands need --file"
-			}
-			return usageErr(flag + " applies to --type POI, not " + dsType + hint)
+			return usageErr(flag + " applies to --type POI, not " + dsType + brandHint(dsType))
 		}
 		// Before client(): a type with no category catalog is a usage error
 		// whether or not there is a token.
@@ -174,6 +176,12 @@ duplicate.`,
 			if err := nonEmpty(r.flag, r.values...); err != nil {
 				return err
 			}
+		}
+		// The API requires a country on Origin, and its geography is the
+		// whole filter; a body without one is a 422.
+		if dsType == "Origin" && len(countries) == 0 {
+			return usageErr("--type Origin needs --country; list the covered countries with " +
+				"'intuizi reference common countries --dataset-type Origin'")
 		}
 
 		c, err := client()
@@ -243,6 +251,14 @@ duplicate.`,
 
 		body := audienceBody{Name: name, Datasets: []audienceDataset{ds}}
 
+		if dsType == "Origin" {
+			// The dates stay as typed in the body; the API does the widening.
+			if from, to := originWeeks(startDate, endDate); from != startDate || to != endDate {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Origin data is weekly: the API widens %s..%s "+
+					"to the whole weeks %s..%s\n", startDate, endDate, from, to)
+			}
+		}
+
 		if dryRun {
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
@@ -262,7 +278,8 @@ duplicate.`,
 		"Print the body the flags produce; creates nothing (names still resolve)")
 	f.StringVar(&dsType, "type", "",
 		"Dataset type, case-insensitive: poi, apps, webdomain, ctv, cohorts,\n"+
-			"affinitytransactions, demographics, deidentified or profileattributes")
+			"affinitytransactions, demographics, deidentified, profileattributes\n"+
+			"or origin")
 	f.StringVar(&name, "name", "", "Name for the audience")
 	completeValues(cmd, "type", sortedKeys(datasetTypes))
 	f.StringVar(&startDate, "start-date", "", "First day of the window, YYYY-MM-DD")
@@ -287,6 +304,22 @@ duplicate.`,
 	// No MarkFlagsOneRequired("file", "type"): cobra checks flag groups after
 	// PersistentPreRunE, so its error exits 1. missingFlags covers --type.
 	return cmd
+}
+
+// brandHint points a --brand on another type at what that type does take.
+// AffinityTransactions keeps brands in its own "brands" field, which no flag
+// writes, and --category is only a way out for a type that has a catalog.
+func brandHint(dsType string) string {
+	switch dsType {
+	case "AffinityTransactions":
+		return "; affinity brands need --file"
+	case "Origin":
+		return "; Origin filters on geography only (--country, --state, --city, --zipcode)"
+	}
+	if _, ok := categoryCatalogs[dsType]; ok {
+		return "; use --category"
+	}
+	return ""
 }
 
 // audienceFields are the body-building flags, for --file to reject.

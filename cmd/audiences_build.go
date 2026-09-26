@@ -215,6 +215,7 @@ var datasetTypes = map[string]string{
 	"demographics":         "Demographics",
 	"deidentified":         "Deidentified",
 	"profileattributes":    "ProfileAttributes",
+	"origin":               "Origin",
 }
 
 // canonicalType makes --type case-insensitive and rejects unknown ones.
@@ -292,6 +293,18 @@ type audienceBody struct {
 // dateLayout is the payload's format. The summary "dataset" field renders
 // MM/DD/YYYY on read; normalized_payload echoes this one.
 const dateLayout = "2006-01-02"
+
+// originWeeks is the window an Origin audience actually scans. Its data is
+// weekly, so the API widens any dates to the whole Monday-to-Sunday weeks they
+// touch. Both dates are already checked by parseWindow.
+func originWeeks(start, end string) (string, string) {
+	s, _ := time.Parse(dateLayout, start)
+	e, _ := time.Parse(dateLayout, end)
+	// Weekday counts from Sunday = 0; the week here starts on Monday.
+	back := (int(s.Weekday()) + 6) % 7
+	ahead := (7 - int(e.Weekday())) % 7
+	return s.AddDate(0, 0, -back).Format(dateLayout), e.AddDate(0, 0, ahead).Format(dateLayout)
+}
 
 // parseWindow catches a transposed pair, which otherwise builds an empty
 // audience with nothing to explain why.
