@@ -30,19 +30,29 @@ const defaultWaitTimeout = 60 * time.Minute
 // statusCompleted is the one terminal success id.
 const statusCompleted = 104
 
-// waiting holds every lifecycle id that means "not finished yet". 105
-// DataStreaming belongs here: the API reports it BEFORE 104 Completed. Anything
-// that is neither waiting nor 104 ends the wait as a failure - 106 Expired, the
-// 4xx error states, and any id this CLI has never heard of - so an unknown code
-// can never hang a CI job for the full timeout.
+// statusAdditionalInfo is the worker's InfoException: it could not run the
+// request as given, so it posts the reason as the status message, with this
+// id, and drops the job. No status follows it, so it ends a wait as a failure,
+// and one that no later 'show --wait' can resume.
+const statusAdditionalInfo = 107
+
+// waiting holds every lifecycle id that means "not finished yet", checked
+// against the worker and the console. 105 DataStreaming and 109 Visualizing
+// data streams belong here: the worker posts both BEFORE 104 Completed, 109
+// while an audience draws its data stream visualizations. Anything that is
+// neither waiting nor 104 ends the wait as a failure - 106 Expired, 107
+// Additional Info, the 4xx error states, and any id this CLI has never heard
+// of - so an unknown code can never hang a CI job for the full timeout. That
+// includes the console's deprecated 200 and 201: no worker posts them now, so
+// a record still reading one will never move.
 var waiting = map[int]bool{
 	100: true, // Initiating
 	101: true, // Processing
 	102: true, // Analyzing
 	103: true, // Decryption Requested
 	105: true, // DataStreaming
-	107: true, // Additional Info
 	108: true, // Modeling
+	109: true, // Visualizing data streams
 }
 
 // Sentinel causes, so a later UX layer can map them to distinct exit codes
@@ -253,6 +263,9 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 			}
 			if !waiting[sid] {
 				_, _, detail := failedDatastreams(rec)
+				if sid == statusAdditionalInfo {
+					return rec, additionalInfoError(singular, id, statusLabel(sid, name), detail)
+				}
 				return rec, fmt.Errorf("%s %d %w: %s%s", singular, id, errWaitFailed,
 					statusLabel(sid, name), detail)
 			}
@@ -298,6 +311,22 @@ func timeoutError(singular string, id int, lastName string, timeout time.Duratio
 	return fmt.Errorf("%w after %s waiting for %s %d: %s; "+
 		"rerun 'intuizi %ss show %d --wait' to keep waiting",
 		errWaitTimeout, timeout, singular, id, seen, singular, id)
+}
+
+// additionalInfoError explains a wait that ended on 107 Additional Info. The
+// worker records why as the status message, which the v2 read does not return,
+// so the error says where the reason can be read and, for an audience, what
+// usually causes it. It names no command to resume: the job is over, and a
+// later 'show --wait' would stop on the same status at once.
+func additionalInfoError(singular string, id int, label, detail string) error {
+	work, next := "export", "fix what it names and create a new activation"
+	if singular == "audience" {
+		work, next = "build", "it is most often a date range outside the dataset's data coverage, "+
+			"or a filter the dataset needs - fix the request and create a new audience"
+	}
+	return fmt.Errorf("%s %d %w: the %s stopped with %s and will not continue; "+
+		"the API does not return the reason, but Audience Manager in the Intuizi console shows it on the %s; %s%s",
+		singular, id, errWaitFailed, work, label, singular, next, detail)
 }
 
 // statusOf reads {id, name} out of the status object. Numbers are json.Number

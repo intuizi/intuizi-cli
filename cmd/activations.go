@@ -31,7 +31,9 @@ and the exit code is non-zero if it fails, if any datastream fails to deliver,
 or --timeout (default 60m) runs out. A wait that fails, times out, or gives up
 after three failed reads in a row still prints the last record it read, then
 exits non-zero. A Completed activation with no datastreams exits 0, and stderr
-says that nothing was delivered.
+says that nothing was delivered. 107 Additional Info is a failure too: the
+export stopped and will not continue. The API does not return the reason, but
+Audience Manager in the Intuizi console shows it on the activation.
 
 An audience must hold at least 500 devices, 1,000 for a Lookalike Model
 result, and pass the other eligibility checks before it can be activated.
@@ -234,7 +236,8 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 
 // activationsShowCommand is the generic showCommand plus --wait. It is its own
 // command rather than a flag on the shared helper because the terminal-state
-// table is per resource: cohorts finish at 4, audiences pass through 108.
+// table is per resource: cohorts finish at 4, audiences pass through 108 and
+// 109.
 func activationsShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id>",
@@ -243,9 +246,11 @@ func activationsShowCommand() *cobra.Command {
 
 With --wait, keep polling until it reaches Completed or fails, printing each
 status change to stderr and the last record read to stdout, and exiting
-non-zero if it fails, --timeout runs out or three reads in a row fail. Use it
-to resume following an export whose create timed out, or as a gate in CI - a
-Completed activation returns at once:
+non-zero if it fails, --timeout runs out or three reads in a row fail. 107
+Additional Info is a failure: the export stopped, and Audience Manager in the
+Intuizi console shows why on the activation. Use --wait to resume following an
+export whose create timed out, or as a gate in CI - a Completed activation
+returns at once:
 
     intuizi activations show 501 --wait --timeout 90m`,
 		Args: cobra.ExactArgs(1),

@@ -115,6 +115,14 @@ read is printed whether the build completes, fails, the wait times out or it
 gives up after three failed reads in a row, and an audience that fails to
 build, or a wait that times out or gives up, exits non-zero.
 
+An audience that opts into data stream visualizations reads 109 Visualizing
+data streams while it draws them, before Completed, and the wait goes on
+through it. 107 Additional Info is a failure: the worker could not build the
+audience as asked and stopped, so nothing follows it and the wait exits
+non-zero. The API does not return the reason, but Audience Manager in the
+Intuizi console shows it on the audience - most often a date range outside the
+dataset's data coverage. Fix the request and create the audience again.
+
 The request carries an Idempotency-Key, and a retry after a 429 reuses it.
 Running the command again sends a fresh key and can create a second audience.
 When a create gets no response at all, stderr prints the key it used: rerun
@@ -348,7 +356,8 @@ var audienceRequired = []string{"type", "name", "start-date", "end-date"}
 // --------------------------------------------------------------------------------- show
 
 // audiencesShowCommand is the generic showCommand plus --wait, so a build can be
-// followed to Completed before it is activated. 108 Modeling is waited through.
+// followed to Completed before it is activated. 108 Modeling and 109
+// Visualizing data streams are waited through; 107 Additional Info ends it.
 func audiencesShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id>",
@@ -358,9 +367,16 @@ func audiencesShowCommand() *cobra.Command {
 With --wait, keep polling until the build reaches Completed or fails, printing
 each status change to stderr and the last record read to stdout, and exiting
 non-zero if it fails, --timeout runs out or three reads in a row fail. A
-lookalike in 108 Modeling is still training and is waited through:
+lookalike in 108 Modeling is still training, and an audience in 109
+Visualizing data streams is drawing its data stream visualizations, so both
+are waited through:
 
-    intuizi audiences show 1377 --wait`,
+    intuizi audiences show 1377 --wait
+
+107 Additional Info is a failure: the build stopped and will not continue, so
+the wait exits non-zero at once, and waiting again cannot change that. The
+API does not return the reason, but Audience Manager in the Intuizi console
+shows it on the audience.`,
 		Args: cobra.ExactArgs(1),
 	}
 	waitOpts := waitFlags(cmd)

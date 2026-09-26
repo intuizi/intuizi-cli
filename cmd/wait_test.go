@@ -241,3 +241,175 @@ func TestWaitJSONFallsBackAtOnceOnAHardError(t *testing.T) {
 		t.Errorf("stdout should be the final record:\n%s", out)
 	}
 }
+
+// The ids a wait polls through, checked against the worker and the console:
+// 100-103 and 105 are build and export progress, 108 is a Lookalike Model
+// training and 109 an audience drawing its data stream visualizations. 104 is
+// the one success. Everything else ends the wait - 106 Expired, 107 Additional
+// Info and the 4xx errors - and so does any id this list does not name.
+func TestWaitingSetIsExactlyTheNonTerminalIDs(t *testing.T) {
+	want := map[int]bool{100: true, 101: true, 102: true, 103: true, 105: true, 108: true, 109: true}
+	for id := 100; id <= 109; id++ {
+		if waiting[id] != want[id] {
+			t.Errorf("waiting[%d] = %v, want %v", id, waiting[id], want[id])
+		}
+	}
+	for id := 400; id <= 405; id++ {
+		if waiting[id] {
+			t.Errorf("waiting[%d] = true, but a 4xx is terminal", id)
+		}
+	}
+	if len(waiting) != len(want) {
+		t.Errorf("waiting has %d ids, want exactly %d: %v", len(waiting), len(want), waiting)
+	}
+}
+
+// createdAudience1377 is the create reply the audience wait tests start from.
+var createdAudience1377 = reply{body: `{"status":"success","code":201,"data":[{"id":1377,"name":"CLI demo - LAX visitors","status":{"id":100,"name":"Initiating"},"results_count":0}]}`}
+
+// An audience that opts into data stream visualizations reports 109 while it
+// draws them, then 105 and 104. The wait used to fail on 109 with the build
+// still running.
+func TestAudienceWaitWaitsThroughVisualizing(t *testing.T) {
+	visualizing := audience(109, "Visualizing data streams")
+	for name, tc := range map[string]struct {
+		cmd     func() *cobra.Command
+		args    func(t *testing.T) []string
+		replies []reply
+	}{
+		"create": {audiencesCreateCommand,
+			func(t *testing.T) []string {
+				return []string{"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`), "--wait", "--timeout", "5s"}
+			},
+			[]reply{createdAudience1377, audience(101, "Processing"), visualizing, visualizing,
+				audience(105, "DataStreaming"), audience(104, "Completed")}},
+		"show": {audiencesShowCommand,
+			func(*testing.T) []string { return []string{"1377", "--wait", "--timeout", "5s"} },
+			[]reply{visualizing, visualizing, audience(105, "DataStreaming"), audience(104, "Completed")}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fast(t)
+			srv, got := stubSeq(t, tc.replies...)
+
+			out, errb, err := run(t, tc.cmd(), srv, tc.args(t)...)
+			if err != nil {
+				t.Fatalf("109 is not an ending: %v\nstderr:\n%s", err, errb)
+			}
+			if len(got.paths) != len(tc.replies) {
+				t.Errorf("expected %d calls, got %d", len(tc.replies), len(got.paths))
+			}
+			if n := strings.Count(errb, "Visualizing data streams (109)"); n != 1 {
+				t.Errorf("109 reported %d times, want once:\n%s", n, errb)
+			}
+			if !strings.Contains(errb, "Completed (104)") {
+				t.Errorf("stderr should end at Completed:\n%s", errb)
+			}
+			if !strings.HasPrefix(out, "id") || !strings.Contains(out, "Completed") {
+				t.Errorf("stdout should be the completed record:\n%s", out)
+			}
+		})
+	}
+}
+
+// 107 Additional Info is the last status the worker posts when it cannot run a
+// request as given (an InfoException): it records the reason and drops the job,
+// and nothing follows. The wait stops there with exit 1 and the record, says
+// where the reason can be read, and offers no command to resume: a later
+// show --wait would stop on the same status at once.
+func TestWaitStopsOnAdditionalInfo(t *testing.T) {
+	stoppedAudience := audience(107, "Additional Info")
+	stoppedActivation := activation(107, "Additional Info")
+	for name, tc := range map[string]struct {
+		cmd      func() *cobra.Command
+		args     func(t *testing.T) []string
+		replies  []reply
+		singular string
+		work     string
+	}{
+		"audiences create": {audiencesCreateCommand,
+			func(t *testing.T) []string {
+				return []string{"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`), "--wait", "--timeout", "1s"}
+			},
+			[]reply{createdAudience1377, audience(101, "Processing"), stoppedAudience}, "audience 1377", "build"},
+		"audiences show": {audiencesShowCommand,
+			func(*testing.T) []string { return []string{"1377", "--wait", "--timeout", "1s"} },
+			[]reply{audience(102, "Analyzing"), stoppedAudience}, "audience 1377", "build"},
+		"activations create": {activationsCreateCommand,
+			func(*testing.T) []string {
+				return append(append([]string(nil), threeIDs...), "--datastream", "7", "--wait", "--timeout", "1s")
+			},
+			[]reply{createdActivation, activation(101, "Processing"), stoppedActivation}, "activation 501", "export"},
+		"activations show": {activationsShowCommand,
+			func(*testing.T) []string { return []string{"501", "--wait", "--timeout", "1s"} },
+			[]reply{activation(103, "Decryption Requested"), stoppedActivation}, "activation 501", "export"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fast(t)
+			srv, got := stubSeq(t, tc.replies...)
+
+			out, errb, err := run(t, tc.cmd(), srv, tc.args(t)...)
+			if !errors.Is(err, errWaitFailed) {
+				t.Fatalf("err = %v, want errWaitFailed", err)
+			}
+			if code := exitCode(err, nil, true); code != 1 {
+				t.Errorf("exit = %d, want 1", code)
+			}
+			// No poll after 107: nothing follows it.
+			if len(got.paths) != len(tc.replies) {
+				t.Errorf("expected %d calls, got %d - the wait went on past 107", len(tc.replies), len(got.paths))
+			}
+			msg := err.Error()
+			for _, want := range []string{tc.singular + " failed",
+				"the " + tc.work + " stopped with Additional Info (107)",
+				"the API does not return the reason", "Intuizi console"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error missing %q: %s", want, msg)
+				}
+			}
+			for _, never := range []string{"--wait", "rerun", "still running", "keep waiting"} {
+				if strings.Contains(msg, never) {
+					t.Errorf("107 is over, so the error must not say %q: %s", never, msg)
+				}
+			}
+			if strings.Contains(errb, "--wait") {
+				t.Errorf("stderr must not suggest waiting again:\n%s", errb)
+			}
+			if strings.HasPrefix(tc.singular, "audience") != strings.Contains(msg, "date range") {
+				t.Errorf("only an audience build hints at its date range: %s", msg)
+			}
+			if !strings.HasPrefix(out, "id") || !strings.Contains(out, "Additional Info") {
+				t.Errorf("stdout should be the record the wait stopped on:\n%s", out)
+			}
+		})
+	}
+}
+
+// With --json a wait that stops on 107 prints the server's envelope, read once
+// more like any failed wait, and still exits 1.
+func TestWaitJSONStopsOnAdditionalInfo(t *testing.T) {
+	fast(t)
+	srv, got := stubSeq(t, audience(101, "Processing"), audience(107, "Additional Info"))
+
+	out, _, err := runJSON(t, audiencesShowCommand(), srv, "1377", "--wait", "--timeout", "1s")
+	if !errors.Is(err, errWaitFailed) {
+		t.Fatalf("err = %v, want errWaitFailed", err)
+	}
+	// Two polls and the one re-read a failed wait gets.
+	if len(got.paths) != 3 {
+		t.Errorf("expected 3 calls, got %d", len(got.paths))
+	}
+	var env struct {
+		Code int `json:"code"`
+		Data []struct {
+			Status struct {
+				ID int `json:"id"`
+			} `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil || env.Code != 200 || len(env.Data) != 1 {
+		t.Fatalf("stdout should be the server envelope (%v):\n%s", err, out)
+	}
+	if env.Data[0].Status.ID != 107 {
+		t.Errorf(".data[0].status.id = %d, want 107", env.Data[0].Status.ID)
+	}
+}

@@ -1008,8 +1008,23 @@ Nothing is printed on stdout when the wait ends with no record to show: a
 timeout or three failed reads before any status was read, a 401, 403 or 404
 while polling, or Ctrl-C.
 
-Audience and activation status ids share one scale, where `104` is Completed.
-`108` Modeling, seen during a lookalike run, is not terminal.
+Audience and activation status ids share one scale, where `104` Completed is
+the only success. A wait polls on through `100` Initiating, `101` Processing,
+`102` Analyzing, `103` Decryption Requested, `105` DataStreaming, `108`
+Modeling and `109` Visualizing data streams. `105` comes before `104`, not
+after it. `108` is a Lookalike Model training. `109` is an audience drawing
+the data stream visualizations it opted into, before `105` and `104`. Any
+other id ends the wait with exit 1: `106` Expired, `107` Additional Info, the
+`4xx` errors, and any id the CLI does not know.
+
+`107` Additional Info means the worker could not run the request as given, so
+it stopped and nothing follows. The error says the build (or, for an
+activation, the export) stopped with Additional Info, and names no
+`show <id> --wait` to resume it: waiting again stops on the same status at
+once. The API does not return the reason, but Audience Manager in the
+Intuizi console shows it on the audience or activation. For an audience it is
+most often a date range outside the dataset's data coverage, or a filter the
+dataset needs. Fix the request and create it again.
 
 Cohort status ids are their own scale: `1` Uploading, `2` Initiating,
 `3` Processing, `4` Completed, `5` Not Available.
