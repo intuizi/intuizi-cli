@@ -208,9 +208,31 @@ func runReference(cmd *cobra.Command, path string, query url.Values) error {
 		return nil
 	}
 
-	if err := output.Table(cmd.OutOrStdout(), items); err != nil {
+	if err := output.Table(cmd.OutOrStdout(), inlineScalarLists(items)); err != nil {
 		return err
 	}
 	output.Footer(cmd.ErrOrStderr(), pg)
 	return nil
+}
+
+// inlineScalarLists joins each list of scalars into one cell, so a datastream's
+// dataset_types reads "poi, competitors" rather than "[2 items]". Only that:
+// unlike flatten it leaves {id, name} objects alone, and lists of objects stay
+// counted - --json has them in full.
+func inlineScalarLists(items []output.Record) []output.Record {
+	rows := make([]output.Record, len(items))
+	for i, item := range items {
+		row := make(output.Record, len(item))
+		for k, v := range item {
+			if list, ok := v.([]any); ok {
+				if s, ok := joinScalars(list); ok {
+					row[k] = s
+					continue
+				}
+			}
+			row[k] = v
+		}
+		rows[i] = row
+	}
+	return rows
 }

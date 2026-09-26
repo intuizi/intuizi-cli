@@ -561,3 +561,37 @@ func TestNoAllFlagIsRegistered(t *testing.T) {
 }
 
 const pagedEnvelopeMultiPage = `{"status":"success","code":200,"message":"ok","data":{"items":[{"value":"X","text":"X"}],"pagination":{"current_page":1,"per_page":500,"total":3881310,"last_page":7763}}}`
+
+// A short list of scalars, like a datastream's dataset_types, reads inline as
+// it does in the resource lists; a list of objects, or an empty one, is still
+// counted, and an {id, name} object is left as it was.
+func TestReferenceTableShowsScalarListsInline(t *testing.T) {
+	srv, _ := serve(t, `{"status":"success","code":200,"message":"ok","data":[
+		{"id":7,"name":"Match File","dataset_types":["poi","competitors"]},
+		{"id":8,"name":"Audience File","dataset_types":[]}]}`)
+
+	out := runCmd(t, "common", findEndpoint(t, "common", "datastreams"), srv.URL, "--partner-id", "3")
+
+	if !strings.Contains(out, "poi, competitors") {
+		t.Errorf("dataset_types not inline:\n%s", out)
+	}
+	if strings.Contains(out, "[2 items]") {
+		t.Errorf("a list of two strings is still counted:\n%s", out)
+	}
+	if !strings.Contains(out, "[0 items]") {
+		t.Errorf("an empty list should still say it is empty:\n%s", out)
+	}
+
+	srv, _ = serve(t, `{"status":"success","code":200,"message":"ok","data":[
+		{"id":12,"name":"Acme Production","partner":{"id":3,"name":"Acme DSP"},
+		 "tags":[{"id":1,"text":"a"},{"id":2,"text":"b"}]}]}`)
+
+	out = runCmd(t, "common", findEndpoint(t, "common", "endpoint-connections"), srv.URL)
+
+	if !strings.Contains(out, "[2 items]") {
+		t.Errorf("a list of objects should be counted:\n%s", out)
+	}
+	if !strings.Contains(out, "{...}") || strings.Contains(out, "Acme DSP") {
+		t.Errorf("an {id, name} object should render as before:\n%s", out)
+	}
+}
