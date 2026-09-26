@@ -285,10 +285,12 @@ func poiSubmissionDeleteCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete a waiting POI submission",
-		Long: `Delete a POI submission that has not been processed yet.
+		Long: `Delete a POI submission whose status is Waiting.
 
-Only a waiting submission can be deleted; once processing has started the
-locations are already being ingested.`,
+A new submission starts as Importing and reaches Waiting once Intuizi has read
+its locations, so a delete sent straight after the create is refused: check
+'intuizi poi submissions show <id>' first. An imported or disabled submission
+cannot be deleted.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseID(args[0], "submission")

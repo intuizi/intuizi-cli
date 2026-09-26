@@ -744,7 +744,7 @@ with `poi segments list`, create categories under it, and brands under those.
 | `poi locations show <id>` | | |
 | `poi submissions list` | `--search`, `--sort-by`, `--order` | not paginated; `--sort-by` is `name`, `status`, `created_at` or `updated_at`; `--order` is `asc` or `desc` |
 | `poi submissions show <id>` | | where an asynchronous submission is followed |
-| `poi submissions delete <id>` | `--yes` | only a waiting submission can be deleted |
+| `poi submissions delete <id>` | `--yes` | only a `Waiting` submission can be deleted; a new one is `Importing` until its locations have been read |
 
 `--search` on `locations list` matches name, address, city, state, zip, DMA,
 external id and placekey, not the store id; on the taxonomy lists and `submissions list` it
