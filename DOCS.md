@@ -842,7 +842,7 @@ is refused before anything is sent, exit 2.
 | Command | Flag | Takes |
 | --- | --- | --- |
 | `reserve` | `--purpose` | `poi_submission` or `cohort` |
-| | `--filename` | original filename |
+| | `--filename` | original filename, which names the stored object; default `upload.csv` |
 | | `--content-length` | exact byte size of the PUT |
 | | `--content-type` | MIME type, default `text/csv` |
 | `put <file>` | `--purpose` | `poi_submission` or `cohort` |
@@ -852,6 +852,19 @@ is refused before anything is sent, exit 2.
 steps and prints the `upload_reference` alone on stdout; with `--json` it prints
 the reservation envelope instead, once the PUT has succeeded, so
 `.data[0].upload_reference` is the same value either way.
+
+A reservation expires at its `expires_at`, 15 minutes after it is made. The
+PUT and the create that claims the reference both have to happen before then:
+a create after it is refused even when the PUT succeeded. A reference is
+claimed once, so a create refused after claiming it has used it up; upload the
+file again for a new one.
+
+The filename matters twice, and `put` sends the file's own name. A
+`poi_submission` name must end `.csv` or `.txt`, or the reservation is
+refused. A `cohort` name decides how `cohorts create` imports the file: one
+ending `.csv`, `.gz` or `.parquet`, case-sensitive and within its first 100
+characters, is read as one file, and anything else as a folder. Rename the
+file before uploading it.
 
 ```bash
 ref=$(intuizi uploads put customers.csv --purpose cohort)
