@@ -93,9 +93,9 @@ intuizi cohorts create --name "Customers" --upload-reference "$ref" \
 # Or turn a completed audience into a cohort
 intuizi cohorts create --audience-id 88 --device-limit 1000
 
-# Rebuild an audience every week
+# Rebuild an audience every week; --start must be in the future in --timezone
 intuizi schedules create --name "Weekly refresh" --audience-id 88 \
-  --start "2026-09-15 06:00:00" --timezone America/New_York \
+  --start "2027-09-15 06:00:00" --timezone America/New_York \
   --frequency weekly --window 2
 ```
 
