@@ -206,7 +206,8 @@ func createAndWait(cmd *cobra.Command, prefix, singular string, body any, cols [
 // waitFor polls GET path until the resource's lifecycle status is terminal.
 // Each status change goes to stderr; the last record read is returned, nil if
 // none was, with how the wait ended, for the caller to print on stdout.
-// singular ("activation") and id only feed messages.
+// singular and id feed messages; singular "activation" also turns on the
+// stderr note for a Completed record with no datastreams.
 func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, timeout time.Duration) (output.Record, error) {
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
