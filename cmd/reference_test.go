@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -621,5 +622,49 @@ func TestReferenceTableShowsScalarListsInline(t *testing.T) {
 	}
 	if !strings.Contains(out, "{...}") || strings.Contains(out, "Acme DSP") {
 		t.Errorf("an {id, name} object should render as before:\n%s", out)
+	}
+}
+
+// iab-subcategories reads --category-ids as ids or as codes by the first
+// value alone and silently drops every value of the other kind, so a mix is
+// refused before anything is sent. One kind, either kind, still goes through.
+func TestIabSubcategoriesRefusesMixedIdsAndCodes(t *testing.T) {
+	e := findEndpoint(t, "web", "iab-subcategories")
+
+	for _, args := range [][]string{
+		{"--category-ids", "12", "--category-ids", "19"},
+		{"--category-ids", "IAB2", "--category-ids", "IAB3"},
+	} {
+		srv, queries := serve(t, flatBody)
+		runCmd(t, "web", e, srv.URL, args...)
+		if len(*queries) != 1 {
+			t.Errorf("%v: got %d requests, want 1", args, len(*queries))
+		}
+	}
+
+	srv, queries := serve(t, flatBody)
+	t.Setenv("INTUIZI_API_TOKEN", "test-token")
+	previous := baseURLFlag
+	baseURLFlag = srv.URL
+	t.Cleanup(func() { baseURLFlag = previous })
+
+	cmd := e.command("web")
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--category-ids", "12", "--category-ids", "IAB3"})
+	cmd.SetContext(context.Background())
+	err := cmd.Execute()
+
+	var ue usageError
+	if !errors.As(err, &ue) {
+		t.Fatalf("err = %v, want a usageError", err)
+	}
+	for _, want := range []string{"--category-ids", "12", "IAB3"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+	if len(*queries) != 0 {
+		t.Errorf("a mixed list must cost no round trip, got %v", *queries)
 	}
 }

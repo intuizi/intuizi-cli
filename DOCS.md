@@ -858,8 +858,10 @@ catalog unfiltered:
   `brands` (`--categories`, `--subcategories`).
 - **profile-attributes** - `categories`, then `keys` (`--category-ids`), then
   `values` (`--category-ids`, `--key`).
-- **web** - `iab-categories`, then `iab-subcategories` (`--category-ids`).
-  `domains` narrows by either level (`--category-codes`,
+- **web** - `iab-categories`, then `iab-subcategories` (`--category-ids`,
+  which takes ids or IAB codes, one kind per call: the API reads every value
+  as the kind of the first and drops the rest, so a mix is refused before it
+  is sent). `domains` narrows by either level (`--category-codes`,
   `--subcategory-codes`). An `iab-categories` row's `value` is the IAB code,
   which `--quiet` prints and `domains --category-codes` takes; a WebDomain
   audience's `iab_category_codes` takes the number in its `id` column instead.

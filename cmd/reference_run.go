@@ -136,6 +136,11 @@ func (e endpoint) command(group string) *cobra.Command {
 			case num:
 				query.Set(p.name, strconv.Itoa(*numVal[p.name]))
 			case strs:
+				if p.oneKind {
+					if err := oneKindOnly(flagName(p.name), *strsVal[p.name]); err != nil {
+						return err
+					}
+				}
 				for _, s := range *strsVal[p.name] {
 					query.Add(p.name+"[]", s)
 				}
@@ -150,6 +155,26 @@ func (e endpoint) command(group string) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// oneKindOnly refuses a list that mixes numeric ids with codes. The API
+// decides from the first value which kind all of them are, as PHP's
+// is_numeric does, and drops the others without a word.
+func oneKindOnly(flag string, values []string) error {
+	var ids, codes []string
+	for _, v := range values {
+		if _, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			ids = append(ids, v)
+		} else {
+			codes = append(codes, v)
+		}
+	}
+	if len(ids) == 0 || len(codes) == 0 {
+		return nil
+	}
+	return usageErr(fmt.Sprintf("--%s mixes ids (%s) and codes (%s); the API reads them all as "+
+		"the kind of the first and drops the rest, so pass one kind", flag,
+		strings.Join(ids, ", "), strings.Join(codes, ", ")))
 }
 
 // flagName: category_ids -> category-ids, datasetType -> dataset-type.

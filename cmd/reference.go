@@ -29,6 +29,11 @@ type param struct {
 	kind     kind
 	required bool
 	help     string
+
+	// oneKind marks a strs param that takes ids or codes but not both at
+	// once: the API reads every value as the kind of the first and silently
+	// drops the rest, so a mix is refused before it is sent.
+	oneKind bool
 }
 
 // endpoint is one reference read. path is set only where the URL segment differs
@@ -164,7 +169,8 @@ var referenceGroups = []referenceGroup{
 		endpoints: []endpoint{
 			{item: "iab-categories", short: "IAB categories"},
 			{item: "iab-subcategories", short: "IAB subcategories", params: []param{
-				{name: "category_ids", kind: strs, help: "Parent IAB category ids or codes"},
+				{name: "category_ids", kind: strs, oneKind: true,
+					help: "Parent IAB category ids or codes, one kind per call"},
 			}},
 			{item: "domains", short: "Web domains", paged: true, params: []param{
 				{name: "category_codes", kind: strs, help: "IAB category codes (e.g. IAB2)"},
