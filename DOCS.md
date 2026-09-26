@@ -735,7 +735,7 @@ included; a 403 means they are not enabled for the account.
 | `--audience-id` | audience to rebuild each cycle | `audiences list` |
 | `--project-id` | project id | `projects list` |
 | `--start` | `"YYYY-MM-DD HH:MM:SS"`, read in `--timezone`, must be in the future | - |
-| `--timezone` | IANA name, e.g. `America/New_York` | - |
+| `--timezone` | `UTC` or a region-based IANA name such as `America/New_York`; not a legacy or `Etc/` name | - |
 | `--frequency` | one of four, case-insensitive | `reference common schedule-frequencies` |
 | `--window` | data window id, `1` to `8` | `reference common schedule-windows` |
 | `--window-days` | `1` to `365`, `--window 3` Custom only | - |
@@ -749,11 +749,17 @@ included; a 403 means they are not enabled for the account.
 
 Each ending rule carries its own field, and a mismatch is rejected before
 anything is sent; the API rejects it as well, with a 422. `--start` and
-`--timezone` are checked before anything is sent: the zone must be a real IANA
-name, the start must parse in the layout above, and it must still be in the
-future in that zone. An `--end-date` before the `--start` date is rejected
-too: the API would accept it and count the gap forward from `--start`, so the
-schedule would run for that many days instead of not at all. So is a `--name`
+`--timezone` are checked before anything is sent: the zone must be `UTC` or a
+region-based IANA name, the start must parse in the layout above, and it must
+still be in the future in that zone. The API accepts only current
+region-based names and `UTC`, so `US/Eastern`, `GMT` or `Etc/UTC` is refused
+before anything is sent. A legacy name filed under a region, such as
+`Asia/Calcutta` for `Asia/Kolkata`, passes that check, `--dry-run` included,
+and the API rejects it with a 422.
+
+An `--end-date` before the `--start` date is rejected too: the API would
+accept it and count the gap forward from `--start`, so the schedule would run
+for that many days instead of not at all. So is a `--name`
 over 255 characters.
 
 ```bash
@@ -767,6 +773,15 @@ Needs `--file`: the nested activation block that re-exports every cycle.
 ```bash
 intuizi schedules create --file examples/schedule.json
 ```
+
+`schedules deactivate <id>` pauses a schedule, and `schedules activate <id>`
+resumes it at the next scheduled time after now. A run the pause spanned is
+not backfilled, but it is not used up either: a Recurrences or Custom Date
+schedule still makes every run it counted at creation, which carries a Custom
+Date schedule past its `--end-date` by about as long as it was paused.
+Activating a Fulfilled schedule, one whose ending was met, sets it Active, but
+it does not run again; stderr says so when the schedule returned shows every
+counted run made. Create a new schedule instead.
 
 ### poi submissions create
 

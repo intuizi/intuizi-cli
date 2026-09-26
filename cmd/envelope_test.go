@@ -203,7 +203,7 @@ func envelopeCases() []envelopeCase {
 		},
 		{
 			name: "schedules activate",
-			cmd:  func() *cobra.Command { return toggleCommand("activate", "activate", "activated", "") },
+			cmd:  schedulesActivateCommand,
 			args: []string{"7"}, path: "/api/v2/analyses/schedules/activate",
 			body: emptyEnvelope, errLabels: []string{"activated schedule 7"},
 		},
