@@ -18,8 +18,9 @@ import (
 // reserve a slot, PUT the bytes to the presigned URL, then hand the
 // upload_reference to the create that claims it.
 //
-// 'uploads put' runs all three. 'uploads reserve' exposes step one alone, for a
-// caller that wants to do its own PUT.
+// 'uploads put' runs the first two and prints the reference; the create is a
+// separate command. 'uploads reserve' exposes step one alone, for a caller that
+// wants to do its own PUT.
 
 const uploadsCreatePath = "/uploads/create"
 
@@ -32,11 +33,14 @@ var uploadsCmd = &cobra.Command{
 
 Uploading is three steps: reserve a slot, PUT the bytes to the presigned URL
 that comes back, then pass the upload_reference to the create that claims it -
-'intuizi cohorts create' or 'intuizi poi submissions create --upload-reference'.
+'intuizi cohorts create --upload-reference' for a cohort upload, or
+'intuizi poi submissions create --upload-reference' for a poi_submission one.
 
-'uploads put' does all three and prints just the reference:
+'uploads put' does the first two and prints just the reference; the create is
+a separate command:
 
     ref=$(intuizi uploads put customers.csv --purpose cohort)
+    intuizi cohorts create --upload-reference "$ref" ...
 
 Caps are per purpose: 50 MB for poi_submission, 1 GB for cohort. A reservation
 that is never used simply expires.`,
