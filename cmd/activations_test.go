@@ -442,3 +442,171 @@ func TestActivationsCreateRejectsNonPositiveIDFlags(t *testing.T) {
 		t.Errorf("a bad id should cost no round trip, got %v", got.paths)
 	}
 }
+
+// The worker uploads only inside its datastreams loop, so an activation with
+// no enabled stream delivers nothing. --datastream enables one, in the shape
+// the API reads: {id, status: true}.
+func TestActivationsCreateSendsDatastreams(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"one", []string{"--datastream", "7"}, `[{"id":7,"status":true}]`},
+		{"repeated", []string{"--datastream", "7", "--datastream", "9"}, `[{"id":7,"status":true},{"id":9,"status":true}]`},
+		{"comma separated", []string{"--datastream", "7,9"}, `[{"id":7,"status":true},{"id":9,"status":true}]`},
+		{"a repeat is sent once", []string{"--datastream", "7", "--datastream", "7"}, `[{"id":7,"status":true}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, `{}`)
+
+			body := dryRunBody(t, activationsCreateCommand(), srv, append(append([]string(nil), threeIDs...), tc.args...)...)
+
+			if raw, _ := json.Marshal(body["datastreams"]); string(raw) != tc.want {
+				t.Errorf("datastreams = %s, want %s", raw, tc.want)
+			}
+		})
+	}
+}
+
+// Sent for real, not just printed.
+func TestActivationsCreatePostsDatastreams(t *testing.T) {
+	srv, got := stub(t, createdActivation.body)
+
+	_, errb, err := run(t, activationsCreateCommand(), srv, append(append([]string(nil), threeIDs...), "--datastream", "7")...)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(got.bodies) != 1 || !strings.Contains(got.bodies[0], `"datastreams":[{"id":7,"status":true}]`) {
+		t.Errorf("bodies = %v", got.bodies)
+	}
+	if strings.Contains(errb, "deliver nothing") {
+		t.Errorf("warned although a datastream was given:\n%s", errb)
+	}
+}
+
+func TestActivationsCreateRejectsNonPositiveDatastream(t *testing.T) {
+	for _, v := range []string{"0", "-3"} {
+		t.Run(v, func(t *testing.T) {
+			srv, got := stub(t, `{}`)
+
+			_, _, err := run(t, activationsCreateCommand(), srv, append(append([]string(nil), threeIDs...), "--datastream", v)...)
+
+			wantUsageErr(t, err, "--datastream", v)
+			if len(got.paths) != 0 {
+				t.Errorf("should cost no round trip, got %v", got.paths)
+			}
+		})
+	}
+}
+
+func TestActivationsCreateRejectsDatastreamWithFile(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	_, _, err := run(t, activationsCreateCommand(), srv,
+		"--file", payloadFile(t, `{"audience_id":88}`), "--datastream", "7")
+
+	wantUsageErr(t, err, "--file carries the whole body", "--datastream")
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
+// Three ids alone build an activation that completes and delivers nothing,
+// so the flag form says so - on the dry run too, where it costs nothing to
+// hear - and names where the ids come from.
+func TestActivationsCreateWarnsWithoutADatastream(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"dry run", []string{"--dry-run"}},
+		{"create", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, createdActivation.body)
+
+			out, errb, err := run(t, activationsCreateCommand(), srv, append(append([]string(nil), threeIDs...), tc.args...)...)
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			for _, want := range []string{"--datastream", "deliver nothing",
+				"intuizi reference common datastreams --partner-id", "endpoint-connections"} {
+				if !strings.Contains(errb, want) {
+					t.Errorf("stderr missing %q:\n%s", want, errb)
+				}
+			}
+			if n := strings.Count(strings.TrimSpace(errb), "\n"); tc.args != nil && n != 0 {
+				t.Errorf("the warning should be one line:\n%s", errb)
+			}
+			if strings.Contains(out, "deliver nothing") {
+				t.Errorf("the warning reached stdout:\n%s", out)
+			}
+		})
+	}
+}
+
+// A --file body is the caller's own; its datastreams are not second-guessed.
+func TestActivationsCreateFromFileDoesNotWarn(t *testing.T) {
+	srv, _ := stub(t, createdActivation.body)
+
+	_, errb, err := run(t, activationsCreateCommand(), srv, "--file", payloadFile(t, `{"audience_id":88}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if strings.Contains(errb, "deliver nothing") {
+		t.Errorf("warned on --file:\n%s", errb)
+	}
+}
+
+// The warning comes before the create, so it precedes "created activation".
+func TestActivationsCreateWaitWarnsFirst(t *testing.T) {
+	fast(t)
+	srv, _ := stubSeq(t, createdActivation, activation(104, "Completed"))
+
+	_, errb, err := run(t, activationsCreateCommand(), srv, append(append([]string(nil), threeIDs...), "--wait")...)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	warn, created := strings.Index(errb, "deliver nothing"), strings.Index(errb, "created activation")
+	if warn < 0 || created < 0 || warn > created {
+		t.Errorf("the warning should precede the create:\n%s", errb)
+	}
+}
+
+// Completed with no datastreams at all delivered nothing. The exit code stays
+// 0 - the activation did what it was asked - but plain success would mislead.
+func TestWaitNotesACompletedActivationWithNoDatastreams(t *testing.T) {
+	fast(t)
+	srv, _ := stubSeq(t, activation(104, "Completed"))
+
+	_, errb, err := run(t, activationsShowCommand(), srv, "501", "--wait")
+	if err != nil {
+		t.Fatalf("a Completed activation keeps exit 0: %v", err)
+	}
+	if !strings.Contains(errb, "no datastreams") || !strings.Contains(errb, "nothing was delivered") {
+		t.Errorf("stderr should note the empty delivery:\n%s", errb)
+	}
+}
+
+// Streams that delivered, or a record that does not list streams, get no note.
+func TestWaitNoteNeedsAnEmptyDatastreamList(t *testing.T) {
+	fast(t)
+	for name, body := range map[string]string{
+		"healthy streams": `{"status":"success","code":200,"data":[{"id":625,"status":{"id":104,"name":"Completed"},
+		 "datastreams":[{"name":"marketing_audience","status":"success","results":{"uri":"s3://example-bucket/x.csv.gz"}}]}]}`,
+		"no datastreams key": `{"status":"success","code":200,"data":[{"id":625,"status":{"id":104,"name":"Completed"}}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, _ := stubSeq(t, reply{body: body})
+
+			_, errb, err := run(t, activationsShowCommand(), srv, "625", "--wait")
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if strings.Contains(errb, "nothing was delivered") {
+				t.Errorf("noted an empty delivery:\n%s", errb)
+			}
+		})
+	}
+}

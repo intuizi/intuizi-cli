@@ -472,6 +472,7 @@ intuizi audiences lookalike create \
 | `--audience-id` | Completed audience | `audiences list` |
 | `--endpoint-connection-id` | destination connection | `reference common endpoint-connections` |
 | `--pricing-model-id` | pricing model for the export | `reference common pricing-models` |
+| `--datastream` | datastream id, repeatable or comma-separated | `reference common datastreams` |
 | `--description` | any string | - |
 | `--project-id` | project id | `projects list` |
 | `--dry-run` | - | - |
@@ -483,11 +484,24 @@ body the flags produce, sends nothing, and needs no token. Not with `--wait` or
 
 Pricing models are per partner: `reference common pricing-models --partner-id
 <id>`. Endpoint partners come from `reference common endpoint-partners`, their
-datastreams from `reference common datastreams --partner-id <id>`.
+datastreams from `reference common datastreams --partner-id <id>`. The partner
+of a connection is its `partner.id` in `reference common endpoint-connections
+--json`.
+
+A datastream is one of the partner's delivery outputs, and only an enabled one
+uploads anything. Each `--datastream` is sent as `{"id": <id>, "status": true}`
+in `datastreams`; a repeated id is sent once, and a zero or negative one is
+refused, exit 2. Without `--datastream` the activation still reaches Completed
+but delivers nothing, so the flag form prints a one-line warning on stderr,
+`--dry-run` included. A `--file` body is sent as written, without the warning.
+Per-stream `inputs`, `compression` or `service_account` need `--file`.
+
+With `--wait`, a Completed activation whose record lists no datastreams exits
+0 but notes on stderr that nothing was delivered.
 
 ```bash
 intuizi activations create --audience-id 88 \
-  --endpoint-connection-id 4 --pricing-model-id 3 --wait
+  --endpoint-connection-id 4 --pricing-model-id 3 --datastream 7 --wait
 
 # or the whole body, for fields these flags do not model
 intuizi activations create --file examples/activation.json --wait
@@ -878,7 +892,7 @@ id=$(intuizi audiences create --type poi --brand starbucks \
        --name "Starbucks visitors - 1 week" --wait --quiet)
 
 intuizi activations create --audience-id "$id" \
-  --endpoint-connection-id 4 --pricing-model-id 3 --wait
+  --endpoint-connection-id 4 --pricing-model-id 3 --datastream 7 --wait
 
 # Cohort from a cloud file, columns confirmed first
 intuizi cohorts preview --file-uri s3://example-bucket/cohorts/q3.csv

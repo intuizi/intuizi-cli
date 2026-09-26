@@ -88,3 +88,19 @@ func TestAudiencesTimeoutWithoutWaitIsRejected(t *testing.T) {
 		t.Errorf("should cost no round trip, got %v", got.paths)
 	}
 }
+
+// The empty-delivery note is about activations: an audience delivers nothing
+// by design, whatever its record carries.
+func TestAudienceWaitNeverNotesAnEmptyDelivery(t *testing.T) {
+	fast(t)
+	srv, _ := stubSeq(t, reply{body: `{"status":"success","code":200,"data":[
+	 {"id":1377,"name":"x","status":{"id":104,"name":"Completed"},"datastreams":[]}]}`})
+
+	_, errb, err := run(t, audiencesShowCommand(), srv, "1377", "--wait")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if strings.Contains(errb, "nothing was delivered") {
+		t.Errorf("an audience is not a delivery:\n%s", errb)
+	}
+}

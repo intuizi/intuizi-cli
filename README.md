@@ -72,9 +72,10 @@ intuizi audiences create \
   --start-date 2026-09-02 --end-date 2026-09-09 \
   --name "Starbucks visitors - SF - 1 week" --wait
 
-# Export it, following the delivery to Completed
+# Export it through one of the partner's datastreams, following the
+# delivery to Completed
 intuizi activations create --audience-id 88 \
-  --endpoint-connection-id 12 --pricing-model-id 3 --wait
+  --endpoint-connection-id 12 --pricing-model-id 3 --datastream 7 --wait
 
 # Import your own identifiers as a cohort from a cloud file
 intuizi cohorts create --name "Loyalty members" \

@@ -180,6 +180,12 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 					return rec, fmt.Errorf("%s %d %w: Completed, but %d of %d datastreams failed%s",
 						singular, id, errWaitFailed, failed, total, detail)
 				}
+				if singular == "activation" && noDatastreams(rec) {
+					// Not a failure - nothing was asked to deliver - but not
+					// the success a bare Completed reads as either.
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+						"note: %s %d has no datastreams, so nothing was delivered\n", singular, id)
+				}
 				return rec, nil
 			}
 			if !waiting[sid] {
@@ -273,6 +279,13 @@ func failedDatastreams(rec output.Record) (failed, total int, detail string) {
 		detail += fmt.Sprintf("\n  %s: %s", name, e)
 	}
 	return failed, total, detail
+}
+
+// noDatastreams reports a record that lists its datastreams and has none. A
+// record without the field says nothing either way.
+func noDatastreams(rec output.Record) bool {
+	streams, ok := rec["datastreams"].([]any)
+	return ok && len(streams) == 0
 }
 
 // isHardError reports an API error that retrying cannot fix.
