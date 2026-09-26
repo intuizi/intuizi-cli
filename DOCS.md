@@ -740,7 +740,7 @@ with `poi segments list`, create categories under it, and brands under those.
 | `poi categories create` | `--name`, `--segment-id` | parent id from `poi segments list` |
 | `poi brands list` | `--search` | |
 | `poi brands create` | `--name`, `--category-id` | parent id from `poi categories list` |
-| `poi locations list` | `--search`, `--brands`, `--countries`, `--geometry`, `--page`, `--per-page` | `--brands` takes your own brand ids, repeatable or comma-separated; `--countries` repeats; `--geometry` is `polygon` or `coordinates` |
+| `poi locations list` | `--search`, `--brands`, `--countries`, `--geometry`, `--page`, `--per-page` | `--brands` takes your own brand ids, repeatable or comma-separated; `--countries` takes ISO-3 codes such as `USA`, repeatable (locations are stored as ISO-3 even when submitted as alpha-2, so `US` matches nothing); `--geometry` is `polygon` or `coordinates` |
 | `poi locations show <id>` | | |
 | `poi submissions list` | `--search`, `--sort-by`, `--order` | not paginated; `--sort-by` is `name`, `status`, `created_at` or `updated_at`; `--order` is `asc` or `desc` |
 | `poi submissions show <id>` | | where an asynchronous submission is followed |

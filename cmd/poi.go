@@ -165,7 +165,10 @@ is also in one of those fields.`,
 	flags.Var(&page, "page", "Page to fetch (default 1)")
 	flags.Var(&perPage, "per-page", "Items per page (server default 25, capped at 500)")
 	flags.IntSliceVar(&brands, "brands", nil, "Your own brand ids to filter by (repeatable, or comma-separated)")
-	flags.StringArrayVar(&countries, "countries", nil, "Country codes to filter by (repeat the flag for more than one)")
+	flags.StringArrayVar(&countries, "countries", nil,
+		"Country codes to filter by, ISO-3 (e.g. USA); locations are stored as\n"+
+			"ISO-3 even when submitted as alpha-2, so US matches nothing\n"+
+			"(repeat the flag for more than one)")
 	flags.StringVar(&geometry, "geometry", "", "Filter by how the location is stored: polygon or coordinates")
 
 	show := &cobra.Command{
