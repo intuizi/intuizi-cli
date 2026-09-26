@@ -102,8 +102,8 @@ so a field this CLI has never heard of still reaches the API:
 Creation is asynchronous: the new audience comes back Initiating with a
 results_count of 0. That is expected. Add --wait to block until the build
 reaches Completed, with --timeout to bound it (default 60m). The last record
-read is printed whatever the outcome, and an audience that fails to build, or
-a wait that times out, exits non-zero.
+read is printed whether the build completes, fails or the wait times out, and
+an audience that fails to build, or a wait that times out, exits non-zero.
 
 A retry of this command reuses its Idempotency-Key, so it cannot create a
 duplicate.`,
