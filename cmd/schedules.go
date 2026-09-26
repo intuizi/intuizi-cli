@@ -33,6 +33,10 @@ A schedule rebuilds a completed audience on a recurring data window, and can
 re-export it every cycle. The audience definition is snapshotted when the
 schedule is created, so later edits to the original do not change it.
 
+Schedules require additional permissions which need to be approved by your
+Account Manager. Every schedules command needs them, list and show included;
+a 403 means they are not enabled for the account.
+
 Each cycle produces its own audience, named "<name> - #<cycle>".
 
 The cadence values a schedule accepts come from 'intuizi reference':

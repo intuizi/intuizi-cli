@@ -665,6 +665,10 @@ cd34          Los Angeles  90001
 
 ### schedules create
 
+Schedules require additional permissions which need to be approved by your
+Account Manager. Every `schedules` command needs them, `list` and `show`
+included; a 403 means they are not enabled for the account.
+
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
 | `--name` | letters, digits, spaces, `_` and `-` | - |
