@@ -65,13 +65,16 @@ with names resolved against the reference catalogs rather than pasted as ids:
       --start-date 2026-09-02 --end-date 2026-09-09 \
       --name "Starbucks visitors - SF - 1 week"
 
---brand and --category both take a name or an id; a name matching no entry, or
-more than one, is an error listing what was found. --brand-all takes every
-match for a search instead, for the deliberate "all the coffee brands" case,
-and reports to stderr how many it selected. --brand applies to POI.
---category applies to POI, Apps, WebDomain and AffinityTransactions, each
-resolving against its own catalog. Every selector repeats for more than one
-value.
+--brand and --category both take a name or an id. A name is a contains match:
+when several entries come back and exactly one is labelled with the name
+itself, ignoring case, that one is taken, so "Example Coffee" resolves even
+though "Example Coffee Reserve" also matches. Otherwise no match or several is
+an error listing what was found, and so is an exact label on a result too long
+to arrive in one page. --brand-all takes every match for a search instead, for
+the deliberate "all the coffee brands" case, and reports to stderr how many it
+selected. --brand applies to POI. --category applies to POI, Apps, WebDomain
+and AffinityTransactions, each resolving against its own catalog. Every
+selector repeats for more than one value.
 
 --type origin targets devices by their home location rather than the places
 they visited, so its only filters are geographic. --country is required, and
