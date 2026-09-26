@@ -36,7 +36,9 @@ says that nothing was delivered.
 An audience must hold at least 500 devices, 1,000 for a Lookalike Model
 result, and pass the other eligibility checks before it can be activated.
 'intuizi audiences show <id> --json' reports is_activation_allowed, and
-eligibility.reasons says why when it is false.`,
+eligibility.reasons says why when it is false. A true can still carry
+eligibility.notices, each naming in blocks_identifiers the identifiers it
+blocks: a create whose pricing model delivers one of them is refused.`,
 }
 
 // --------------------------------------------------------------------------------- create
