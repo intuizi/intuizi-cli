@@ -153,8 +153,8 @@ func resolveOrID(ctx context.Context, c *api.Client, path, flag, value, what str
 	return resolveOne(ctx, c, path, value, what)
 }
 
-// allProviders backs the --provider default. A provider left out is the
-// quietest way to get an empty audience. Sets differ per type, so no cache.
+// allProviders backs the --provider default: every provider for the type.
+// Sets differ per type, so no cache.
 func allProviders(ctx context.Context, c *api.Client, dataType string) ([]any, error) {
 	query := url.Values{}
 	query.Set("dataType", dataType)

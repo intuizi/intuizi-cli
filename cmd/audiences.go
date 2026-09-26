@@ -82,10 +82,9 @@ window to the whole Monday-to-Sunday weeks it touches, and the CLI reports the
 widened dates on stderr when they differ from the ones given.
 
 Omitting --provider includes every signal provider for the dataset type, which
-is almost always what you want: a provider left out builds an audience that
-completes with zero devices and no error. A --provider the type's catalog does
-not list is rejected, since the API would accept it and build that same empty
-audience.
+is almost always what you want. A --provider the type's catalog does not list
+is rejected before anything is sent, since the API would accept it and build an
+audience that completes with zero devices.
 
 --dry-run prints the body those flags produce and sends nothing, so it doubles
 as a starting point for the file form:

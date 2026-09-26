@@ -311,10 +311,10 @@ It combines with `--brand`, so an exact brand plus a whole search is one
 command. A search matching nothing is an error.
 
 Omitting `--provider` includes every provider for the dataset type, which is
-almost always right: a provider left out builds an audience that completes with
-zero devices and no error. Provider sets differ per type, and a `--provider`
+almost always what you want. Provider sets differ per type, and a `--provider`
 outside the type's catalog is rejected before anything is sent: the API would
-accept it and build that same empty audience.
+accept it and build an audience that completes with zero devices. A `--file`
+body lists its own `signal_providers`.
 
 Blank values are rejected before anything is sent, as is a zero or negative
 `--brand` or `--category` id. Beyond that a numeric id is passed through as
