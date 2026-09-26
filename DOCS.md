@@ -18,12 +18,14 @@ serve versions from v0.1.0, the first public release.
 ## Authenticate
 
 ```bash
-intuizi auth login     # exchanges credentials for an API token, stored in ~/.config/intuizi/
+intuizi auth login     # exchanges credentials for an API token and stores it
 intuizi auth status    # shows the token in use and the account it belongs to
 intuizi auth logout    # forgets the stored token
 ```
 
-The token can also be supplied per-call with the `INTUIZI_API_TOKEN`
+The token goes to the OS credential store when there is one, otherwise to
+the config file; see [Where the token is stored](#where-the-token-is-stored).
+It can also be supplied per-call with the `INTUIZI_API_TOKEN`
 environment variable, which wins over the stored one. `auth logout` forgets the
 token locally; it does not revoke it on the server.
 
@@ -165,9 +167,10 @@ resolved silently.
 Two habits make this safe:
 
 - **`--dry-run`** prints the body the flags produce and creates nothing.
-  Redirect it to a file for a starting point in the `--file` form. It still
-  reads the catalogs to resolve names, so it needs a token and counts against
-  the read budget; it cannot be combined with `--wait`.
+  Redirect it to a file for a starting point in the `--file` form. On
+  `audiences create` it still reads the catalogs to resolve names, so it needs
+  a token and counts against the read budget; the other creates send nothing
+  and need no token. It cannot be combined with `--wait`.
 - **Names resolve, ids do not.** A name is looked up and must match exactly one
   entry. The lookup matches substrings, so when several come back and exactly
   one is labelled with the name itself, ignoring case, that one is taken:
@@ -492,7 +495,12 @@ When the run completes, the API emails the user who created it. `--notify` is
 on by default and always sent as `notification`, so `--notify=false` is what
 turns the email off.
 
-Requires the Lookalike capability; a 403 means it is not enabled.
+The Lookalike commands, `lookalike create` and `lookalike cancel` alike,
+require additional permissions which need to be approved by your Account
+Manager; a 403 means they are not enabled for the account.
+
+Training shows as status `108` Modeling, which is not terminal;
+`audiences show <id> --wait` follows the new audience through it to Completed.
 
 ```bash
 intuizi audiences lookalike create \
@@ -550,13 +558,13 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 | --- | --- | --- |
 | `--name` | any string; rejected for an audience source | - |
 | `--file-uri` | `s3://bucket/path` or `gs://bucket/path` | - |
-| `--upload-reference` | reference from a reserved upload | `uploads reserve`, or `uploads put` |
+| `--upload-reference` | reference from an upload with `--purpose cohort` | `uploads put`, or `uploads reserve` |
 | `--audience-id` | Completed audience | `audiences list` |
 | `--file-format` | `csv`, `gzip` or `parquet` | - |
 | `--identifier-type` | one of nine, below | - |
 | `--identifier-column` | column name: letters, digits, `_` and `-` | `cohorts preview` |
 | `--metadata-columns` | column name, repeatable | `cohorts preview` |
-| `--ip-enrichment` | boolean | - |
+| `--ip-enrichment` | boolean: also add devices seen on the same IP addresses as the cohort's devices (Enrich by Household) | - |
 | `--device-limit` | device cap | - |
 | `--project-id` | project id | `projects list` |
 | `--dry-run` | - | - |
@@ -566,9 +574,9 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 
 A `file_uri` ending `.csv`, `.gz` or `.parquet` is read as a single file;
 anything else is read as a folder, and whitespace anywhere in it is refused.
-An audience makes at most one live cohort, and the cohort takes the audience's
-own name, so `--name` is rejected alongside `--audience-id` rather than sent
-to be ignored.
+A regular audience makes at most one cohort, and a Lookalike Model audience
+can make several. An audience cohort takes the audience's own name, so
+`--name` is rejected alongside `--audience-id` rather than sent to be ignored.
 
 ```bash
 # from a cloud file
@@ -586,8 +594,10 @@ intuizi cohorts create --audience-id 88 --device-limit 1000
 ```
 
 Needs `--file`: capping an audience cohort by visit frequency (`freq_limit`
-with `freq_min`/`freq_max`) or by distance (`distance_limit` with `distance` in
-meters) instead of a device count.
+with `freq_min`/`freq_max`), by distance (`distance_limit` with `distance` in
+meters) or, for a Lookalike Model audience, by score range (`score_limit` with
+`min_score`/`max_score`) instead of a device count, and Match Strictness
+(`max_devices_per_ip`, 1 to 5) on an SCID file import.
 
 ```bash
 cat > freq-capped.json <<'EOF'
@@ -612,8 +622,8 @@ express directly as `--audience-id 88 --device-limit 1000`.
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
 | `--file-uri` | `s3://bucket/path` or `gs://bucket/path` | - |
-| `--upload-reference` | reference from a reserved upload | `uploads reserve`, or `uploads put` |
-| `--file-format` | `csv` or `gzip`; sniffed if omitted | - |
+| `--upload-reference` | reference from an upload with `--purpose cohort` | `uploads put`, or `uploads reserve` |
+| `--file-format` | `csv` (the default) or `gzip`; the format is not detected, so pass `gzip` for a compressed file | - |
 
 Exactly one of `--file-uri` or `--upload-reference`. Parquet cannot be
 previewed. `--quiet` does not apply: a preview returns sample rows, not an id.
@@ -651,8 +661,8 @@ cd34          Los Angeles  90001
 `--frequency` takes `daily`, `weekly`, `bi-weekly` or `monthly`. `--ending` is
 `1` Never, `2` Recurrences or `3` Custom Date.
 
-Each ending rule carries its own field, and a mismatch is rejected here because
-the API ignores the wrong one rather than refusing it. `--start` and
+Each ending rule carries its own field, and a mismatch is rejected before
+anything is sent; the API rejects it as well, with a 422. `--start` and
 `--timezone` are checked before anything is sent: the zone must be a real IANA
 name, the start must parse in the layout above, and it must still be in the
 future in that zone.
@@ -676,8 +686,8 @@ intuizi schedules create --file examples/schedule.json
 | `--name` | any string | - |
 | `--brand-id` | a first-party brand id | `poi brands list` |
 | `--file` | a `.csv` or `.txt` of locations | - |
-| `--list` | JSON body carrying `locations[]`, or `-` for stdin | - |
-| `--upload-reference` | reference from a reserved upload | `uploads put` |
+| `--list` | path to a JSON file holding `locations[]` (and `name` and `brand_id` unless the flags give them), or `-` for stdin | - |
+| `--upload-reference` | reference from an upload with `--purpose poi_submission` | `uploads put`, or `uploads reserve` |
 | `--key` | how to match existing POIs, below | - |
 | `--update` `--remove` | booleans; both need `--key` | - |
 
@@ -690,15 +700,20 @@ is refused and points at `--list -`.
 `external-id`. It travels on every route, so `--list ... --update --key
 store-id` updates the matched POIs rather than inserting duplicates.
 
+Only the `--upload-reference` form sends an `Idempotency-Key`. The API reads
+none on the `--file` and `--list` forms, so there `--idempotency-key` has no
+effect and stderr says so.
+
 Submission CSVs need `latitude`, `longitude`, and a country column headed
 `country|alpha_2` or `country|alpha_3`. The taxonomy nests segments >
-categories > brands; create the parent first.
+categories > brands. Segments already exist and cannot be created: pick one
+with `poi segments list`, create categories under it, and brands under those.
 
 #### The rest of poi
 
 | Command | Flags | Notes |
 | --- | --- | --- |
-| `poi segments list` | `--search` | ids come back as `value` |
+| `poi segments list` | `--search` | the available segments; ids come back as `value` |
 | `poi categories list` | `--search` | |
 | `poi categories create` | `--name`, `--segment-id` | parent id from `poi segments list` |
 | `poi brands list` | `--search` | |
@@ -769,9 +784,31 @@ refused there (exit 2) - read it with `--json`.
 - **deidentified** - fields
 - **cohorts** - list
 
-The geography catalogs cascade: countries, then states, then cities, then
-zipcodes. Each level takes the level above it. The POI taxonomy cascades the
-same way: segments, then categories, then brands, then locations.
+Several catalogs cascade: a child read takes values from the level above to
+narrow its list.
+
+Geography requires the parent. `states` needs `--countries`, `dmas` needs
+`--countries`, `cities` needs `--states`, and `zipcodes` needs `--cities`.
+Their other flags only narrow the list: `dmas` takes `--states` and
+`--cities`, `cities` takes `--dmas`, and `zipcodes` takes `--states`, `--dmas`
+and `--countries`.
+
+In every other cascade the parent is optional, and leaving it out returns the
+catalog unfiltered:
+
+- **poi** - `segments`, then `categories` (`--segments`), then `brands`
+  (`--categories`), then `locations` (`--brands`).
+- **transactions** - `categories`, then `subcategories` (`--categories`), then
+  `brands` (`--categories`, `--subcategories`).
+- **profile-attributes** - `categories`, then `keys` (`--category-ids`), then
+  `values` (`--category-ids`, `--key`).
+- **web** - `iab-categories`, then `iab-subcategories` (`--category-ids`).
+  `domains` narrows by either level (`--category-codes`,
+  `--subcategory-codes`).
+
+Table cells show a list of plain values inline, such as a datastream's
+`dataset_types`; a list of objects shows as a count, and `--json` has it in
+full.
 
 Paginated reads return one page per call; ask for more with `--page` and
 `--per-page`. Both must be 1 or more: the API rejects 0 rather than treating it
@@ -931,19 +968,35 @@ Console.
 
 ## Shell completion
 
-Cobra generates a completion script for each shell:
+A Homebrew install, on macOS or Linux, includes the completion scripts for
+bash, zsh and fish. After a binary or npm install, load the script the CLI
+generates for your shell:
 
 ```bash
-intuizi completion zsh > "${fpath[1]}/_intuizi"
-exec zsh
-```
-
-Zsh needs its completion system switched on for this, or any other, completion
-to load. If `intuizi aud<TAB>` does nothing, add to `~/.zshrc`:
-
-```bash
+# zsh: add to ~/.zshrc
 autoload -U compinit && compinit
+source <(intuizi completion zsh)
+
+# bash, with the bash-completion package: add to ~/.bashrc
+source <(intuizi completion bash)
+
+# fish: run once
+mkdir -p ~/.config/fish/completions
+intuizi completion fish > ~/.config/fish/completions/intuizi.fish
 ```
+
+For PowerShell, add this line to your profile (`$PROFILE`):
+
+```powershell
+intuizi completion powershell | Out-String | Invoke-Expression
+```
+
+Zsh loads no completion, the Homebrew one included, until its completion
+system is switched on, which is what the `compinit` line does: if
+`intuizi aud<TAB>` does nothing, that line is missing from `~/.zshrc`. To
+install a script file instead of loading it at startup,
+`intuizi completion <shell> --help` gives the Linux and macOS (Homebrew)
+locations.
 
 Completion covers commands, flag names, and the values of flags that take a
 fixed set: `--type`, `--signal`, `--file-format`, `--identifier-type`,
