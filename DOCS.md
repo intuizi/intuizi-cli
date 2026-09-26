@@ -328,8 +328,9 @@ command. A search matching nothing is an error.
 
 Omitting `--provider` includes every provider for the dataset type, which is
 almost always what you want. Provider sets differ per type, and a `--provider`
-outside the type's catalog is rejected before anything is sent: the API would
-accept it and build an audience that completes with zero devices. A `--file`
+outside the type's catalog is rejected before anything is created (the CLI
+reads that catalog first, so the check needs a token): the API would accept it
+and build an audience that completes with zero devices. A `--file`
 body lists its own `signal_providers`.
 
 Blank values are rejected before anything is sent, as is a zero or negative

@@ -91,12 +91,13 @@ window to the whole Monday-to-Sunday weeks it touches, and the CLI reports the
 widened dates on stderr when they differ from the ones given.
 
 Omitting --provider includes every signal provider for the dataset type, which
-is almost always what you want. A --provider the type's catalog does not list
-is rejected before anything is sent, since the API would accept it and build an
-audience that completes with zero devices.
+is almost always what you want. The CLI reads that catalog first, and a
+--provider it does not list is rejected before anything is created, since the
+API would accept it and build an audience that completes with zero devices.
 
---dry-run prints the body those flags produce and sends nothing, so it doubles
-as a starting point for the file form:
+--dry-run prints the body those flags produce and creates nothing. It still
+resolves names and reads the signal-provider catalog, so it needs a token. It
+doubles as a starting point for the file form:
 
     intuizi audiences create --type POI ... --dry-run > audience.json
 
@@ -148,7 +149,7 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 		}
 
 		if dryRun && wait {
-			return usageErr("--dry-run sends nothing, so there is nothing to --wait for")
+			return usageErr("--dry-run creates nothing, so there is nothing to --wait for")
 		}
 		if err := missingFlags(flags, audienceRequired, "a single-dataset audience"); err != nil {
 			return err
