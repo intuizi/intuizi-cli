@@ -43,16 +43,17 @@ go install github.com/intuizi/intuizi-cli@latest   # or: make build
 ## Quickstart
 
 ```bash
-intuizi auth login                  # stores a token in ~/.config/intuizi/
+intuizi auth login                  # mints an API token and stores it
 intuizi reference poi brands --search starbucks
 intuizi audiences list
 ```
 
-`auth login` asks for the email and password of your Intuizi account, and
-`auth status` shows which account the stored token belongs to. To switch
-accounts, log in again with the other account's `--email`. In CI, set
-`INTUIZI_API_TOKEN` to a token minted in the console under My Account then API
-Tokens, and skip the login.
+`auth login` asks for the email and password of your Intuizi account and
+keeps the token it mints in the OS credential store, or in
+`~/.config/intuizi/config.json` where there is none; `auth status` shows where
+it is held and which account it belongs to. To switch accounts, log in again
+with the other account's `--email`. In CI, set `INTUIZI_API_TOKEN` to a token
+minted in the console under My Account then API Tokens, and skip the login.
 
 ## Usage
 
@@ -64,7 +65,7 @@ exact name; otherwise nothing or several is an error listing what it found.
 the coffee brands" case.
 
 ```bash
-# Authenticate once; stores a bearer token in ~/.config/intuizi/
+# Authenticate once; stores a bearer token for later commands
 intuizi auth login
 
 # Build an audience and block until it has built
@@ -98,17 +99,19 @@ intuizi schedules create --name "Weekly refresh" --audience-id 88 \
   --frequency weekly --window 2
 ```
 
-`--dry-run` prints the request body those flags produce and sends nothing, so
-you can check a payload before it costs anything, or redirect it to a file as a
-starting point.
+`--dry-run` prints the request body those flags produce and creates nothing,
+so you can check a payload before it costs anything, or redirect it to a file
+as a starting point. On `audiences create` it still reads the catalogs to
+resolve names, so it needs a token; the other creates send nothing.
 
 ```bash
 intuizi audiences create --type poi --brand starbucks ... --dry-run > audience.json
 ```
 
-`--file payload.json` (or `-` for stdin) stays for the genuinely nested cases:
-two datasets combined with an operator, refine and crosspurchase blocks, a
-schedule's auto-export, and cohort caps by visit frequency or distance.
+`--file payload.json` (or `-` for stdin) stays for what the flags do not
+model: two datasets combined with an operator, refine and crosspurchase
+blocks, a schedule's auto-export, cohort limits by visit frequency, distance or
+Lookalike Model score range, and Match Strictness on an SCID cohort import.
 Ready-made payloads live in [`examples/`](examples).
 
 ```bash
@@ -145,21 +148,24 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 - **Pure API v2 client.** Every command maps to a documented endpoint of the
   Intuizi API v2 (`https://console.intuizi.com/api/v2`). No server-side
   logic lives here.
-- **Full v2 parity.** Auth, audiences (including refine and crosspurchase),
-  activations, cohorts, POI, and reference reads.
+- **Most of the v2 surface.** Auth, audiences (including refine and
+  crosspurchase), activations, cohorts, schedules, projects, POI, uploads,
+  usage and reference reads. Audience size estimates, activation preview and
+  datastream visualizations have no command; call the API for those.
 - **Human first, script friendly.** Readable tables by default, `--json` for
   raw responses, `--quiet` for ids alone, and exit codes scripts can branch on.
 - **Wrong input fails before it is sent.** Names are resolved against the
   catalogs, dataset types and date ranges are validated locally, and payloads
-  are built from typed fields rather than free-form JSON.
+  built from flags come from typed fields rather than free-form JSON. A
+  `--file` body is forwarded as written.
 
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | `0` | Success |
-| `1` | API error, or a `--wait` that ended in a failed or timed-out state |
-| `2` | Usage error - an unknown flag or flag value, an unknown command or subcommand, an invalid id argument, or flags that are missing or conflict. Caught before anything is sent |
+| `1` | A failure once the command line parsed: an API error, a `--wait` that failed, timed out or gave up, or a local failure such as an unreadable `--file`, a missing token or a declined confirmation |
+| `2` | Usage error - an unknown command or flag, a bad value or id, missing or conflicting flags, a delete without `--yes` where stdin is not a terminal, or a name that matches no catalog entry or several. Nothing is created, though a name lookup may already have read the catalog |
 | `130` | Interrupted with Ctrl-C (SIGINT) |
 | `143` | Terminated (SIGTERM) |
 
@@ -270,7 +276,7 @@ scripts/live-test.sh https://TEST-CONSOLE
 ```
 
 It exercises every command group end to end and cleans up after itself, writing
-a pass/fail summary to `live-results/results.md` (gitignored — real API
+a pass/fail summary to `live-results/results.md` (gitignored - real API
 responses). Activations stay at `--dry-run`, so `activations show`/`delete` are
 not covered. A non-zero exit means do not tag. You need an account on the
 environment you test against; each has its own database.
@@ -313,7 +319,7 @@ and the npm registry cannot yet validate that format, so it answers "package
 not found" ([npm/cli#9969](https://github.com/npm/cli/issues/9969)). The claim
 cannot be disabled. When npm fixes it, prove the exchange first with a
 throwaway workflow running `npm publish --loglevel verbose` against an
-already-published version — two releases failed by removing the token first.
+already-published version - two releases failed by removing the token first.
 Only then drop `registry-url` and `NODE_AUTH_TOKEN`, revoke the token and
 delete the secret.
 
