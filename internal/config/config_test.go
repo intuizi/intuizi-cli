@@ -17,6 +17,10 @@ func isolate(t *testing.T) string {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("AppData", dir) // os.UserConfigDir() reads this on Windows
 	t.Setenv(EnvToken, "")
+	// A caller who exports INTUIZI_NO_KEYRING=1, as DOCS.md offers, would
+	// otherwise turn off the fake store every test swaps in. Tests that want
+	// the file path set it again after this.
+	t.Setenv(EnvNoKeyring, "")
 	swapKeyring(t)
 	return dir
 }
