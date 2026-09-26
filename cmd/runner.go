@@ -79,6 +79,17 @@ Asks for confirmation unless --yes is given. Deleting is not reversible.`, singu
 
 // --------------------------------------------------------------------------------- shared runners
 
+// printErrorEnvelope prints a failed request's error envelope on stdout, for
+// --json: the flag promises what the server sent, and a script reads 422 field
+// errors from it. A body that was not JSON, such as a proxy's HTML page,
+// prints nothing, and the error still goes to stderr either way.
+func printErrorEnvelope(cmd *cobra.Command, err error) {
+	var apiErr *api.Error
+	if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
+		_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
+	}
+}
+
 // renderList performs a paginated read: data on stdout, commentary on stderr,
 // so a pipe only ever sees the payload.
 func renderList(cmd *cobra.Command, path string, query url.Values, cols []string, empty string) error {
@@ -90,12 +101,7 @@ func renderList(cmd *cobra.Command, path string, query url.Values, cols []string
 	if jsonOutput {
 		raw, err := c.GetRaw(cmd.Context(), path, query)
 		if err != nil {
-			// The envelope still goes out on a failure: --json promises what
-			// the server sent, and a script reads 422 field errors from it.
-			var apiErr *api.Error
-			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
-				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
-			}
+			printErrorEnvelope(cmd, err)
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
@@ -141,11 +147,7 @@ func renderOne(cmd *cobra.Command, path string, lead []string) error {
 	if jsonOutput {
 		raw, err := c.GetRaw(cmd.Context(), path, nil)
 		if err != nil {
-			// As in renderList: the error envelope is still data for --json.
-			var apiErr *api.Error
-			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
-				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
-			}
+			printErrorEnvelope(cmd, err)
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
@@ -172,11 +174,7 @@ func postID(cmd *cobra.Command, path string, id int, done string) error {
 	if jsonOutput {
 		raw, err := c.PostRaw(cmd.Context(), path, map[string]int{"id": id})
 		if err != nil {
-			// As in renderList: the error envelope is still data for --json.
-			var apiErr *api.Error
-			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
-				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
-			}
+			printErrorEnvelope(cmd, err)
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
@@ -211,11 +209,7 @@ func createBody(cmd *cobra.Command, path string, payload any, lead []string, nex
 	if jsonOutput {
 		raw, err := c.PostRaw(cmd.Context(), path, payload)
 		if err != nil {
-			// As in renderList: the error envelope is still data for --json.
-			var apiErr *api.Error
-			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
-				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
-			}
+			printErrorEnvelope(cmd, err)
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)

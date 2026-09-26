@@ -62,6 +62,7 @@ the read is rejected.`,
 			if jsonOutput {
 				raw, err := c.GetRaw(cmd.Context(), "/usage", query)
 				if err != nil {
+					printErrorEnvelope(cmd, err)
 					return err
 				}
 				return output.JSON(cmd.OutOrStdout(), raw)

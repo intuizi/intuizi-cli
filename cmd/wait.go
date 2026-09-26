@@ -195,6 +195,11 @@ func createAndWait(cmd *cobra.Command, prefix, singular string, body any, cols [
 	}
 	created, err := createRecord(cmd, c, prefix+"/create", body)
 	if err != nil {
+		// Nothing was created, so there is no record to wait on: --json gets
+		// the error envelope, as it does from a create without --wait.
+		if jsonOutput {
+			printErrorEnvelope(cmd, err)
+		}
 		return err
 	}
 	id, err := idOf(created)

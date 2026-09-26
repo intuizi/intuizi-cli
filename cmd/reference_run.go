@@ -182,6 +182,7 @@ func runReference(cmd *cobra.Command, path string, query url.Values) error {
 	if jsonOutput {
 		raw, err := c.GetRaw(cmd.Context(), path, query)
 		if err != nil {
+			printErrorEnvelope(cmd, err)
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)

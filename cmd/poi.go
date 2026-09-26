@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -565,12 +564,7 @@ func createSubmissionByFile(cmd *cobra.Command, name string, brandID int, file s
 		raw, err := api.CreateMultipartRaw(cmd.Context(), c,
 			poiPrefix+"/submissions/create-by-file", fields, "locations_file", file)
 		if err != nil {
-			// Same rule as the JSON runners: the error envelope still goes out,
-			// so a script can read the 422 field errors from it.
-			var apiErr *api.Error
-			if errors.As(err, &apiErr) && len(apiErr.Body) > 0 {
-				_ = output.JSON(cmd.OutOrStdout(), apiErr.Body)
-			}
+			printErrorEnvelope(cmd, err)
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)

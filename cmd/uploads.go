@@ -166,6 +166,9 @@ authorises it.`,
 			slot, raw, err := api.CreateWithEnvelope[output.Record](cmd.Context(), c, uploadsCreatePath,
 				reserveBody(purpose, info.Name(), contentType, info.Size()))
 			if err != nil {
+				if jsonOutput {
+					printErrorEnvelope(cmd, err)
+				}
 				return err
 			}
 

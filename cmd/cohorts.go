@@ -423,6 +423,7 @@ func previewCohort(cmd *cobra.Command, body any) error {
 	if jsonOutput {
 		raw, err := c.PostRaw(cmd.Context(), path, body)
 		if err != nil {
+			printErrorEnvelope(cmd, err)
 			return err
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)

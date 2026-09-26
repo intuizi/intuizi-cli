@@ -851,14 +851,19 @@ Commentary always goes to stderr: status changes while `--wait` polls, the
 On a failure `--json` still prints what the server sent: the error envelope
 goes to stdout, the one-line error goes to stderr as usual, and the exit code
 is 1. A script can therefore read a 422's field errors from the same place it
-reads a success:
+reads a success. The CLI refuses a blank name itself, so this example sends a
+name longer than the API's 255 characters to get a 422 back:
 
 ```bash
-out=$(intuizi projects create --name "" --json) || jq '.data.errors' <<<"$out"
+long=$(printf 'x%.0s' {1..256})
+out=$(intuizi projects create --name "$long" --json) || jq '.data.errors' <<<"$out"
 ```
 
-A failure whose body is not JSON, such as an HTML error page from a proxy,
-prints nothing on stdout; only the stderr line explains it.
+Stdout stays empty, and only the stderr line explains the failure, in three
+cases: a body that is not JSON, such as an HTML error page from a proxy; a
+failure before anything is sent, such as a usage error (exit 2), a missing
+token or an unreadable `--file`; and a failed catalog read while
+`audiences create` resolves a name or the default providers.
 
 A `--wait` that fails, times out or gives up is different: the record it
 prints was read successfully, so stdout carries that record's own success
