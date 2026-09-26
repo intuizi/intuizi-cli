@@ -101,7 +101,10 @@ func waitAndPrint(cmd *cobra.Command, c *api.Client, prefix, singular string, id
 	if err != nil && (final == nil || !printsRecord(err)) {
 		return err
 	}
-	if perr := printWaited(cmd, c, path, final, cols, err); perr != nil && err == nil {
+	perr := printWaited(cmd, c, path, final, cols, err)
+	if perr != nil && (err == nil || cmd.Context().Err() != nil) {
+		// A signal during the --json re-read ends the command with the
+		// context's error, as it does anywhere else in a wait.
 		return perr
 	}
 	return err

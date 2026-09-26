@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -129,6 +130,46 @@ func TestWaitCancelledMidPollIsQuiet(t *testing.T) {
 	}
 	if strings.Contains(errb, "poll failed") {
 		t.Errorf("a cancelled poll is not a failed one:\n%s", errb)
+	}
+}
+
+// A signal during the --json re-read after a failed wait ends the command like
+// a signal anywhere else in a wait: with the context's own error, not the
+// wait's, and nothing half-printed on stdout.
+func TestWaitCancelledDuringTheReReadReturnsTheContextError(t *testing.T) {
+	fast(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var (
+		mu sync.Mutex
+		n  int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n++
+		i := n
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch i {
+		case 1:
+			_, _ = w.Write([]byte(activation(101, "Processing").body))
+		case 2:
+			_, _ = w.Write([]byte(failedActivation.body))
+		default:
+			cancel() // the signal lands once the re-read is in flight
+			<-r.Context().Done()
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cmd := waitShow()
+	cmd.SetContext(ctx)
+	out, _, err := runJSON(t, cmd, srv, "501", "--wait")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the context's own error", err)
+	}
+	if out != "" {
+		t.Errorf("stdout = %q, want nothing", out)
 	}
 }
 
