@@ -89,10 +89,10 @@ func TestPutPresignedHonoursContentType(t *testing.T) {
 	}
 }
 
-// Every header the reservation lists is part of the signature, not just
-// Content-Type: a PUT missing one is a 403 from storage, however correct the
-// bytes are.
-func TestPutPresignedSendsEverySignedHeader(t *testing.T) {
+// Every header the reservation lists is sent, not just Content-Type: storage
+// refuses a PUT missing one it signed or requires, however correct the bytes
+// are.
+func TestPutPresignedSendsEveryListedHeader(t *testing.T) {
 	fp := tempFile(t, "x")
 	var got http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -100,15 +100,15 @@ func TestPutPresignedSendsEverySignedHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	signed := map[string]string{
+	listed := map[string]string{
 		"Content-Type":                 "text/csv",
 		"x-amz-server-side-encryption": "AES256",
 		"x-goog-content-length-range":  "0,1048576",
 	}
-	if err := PutPresigned(context.Background(), srv.URL, signed, fp); err != nil {
+	if err := PutPresigned(context.Background(), srv.URL, listed, fp); err != nil {
 		t.Fatalf("PutPresigned: %v", err)
 	}
-	for k, want := range signed {
+	for k, want := range listed {
 		if got.Get(k) != want {
 			t.Errorf("%s = %q, want %q", k, got.Get(k), want)
 		}

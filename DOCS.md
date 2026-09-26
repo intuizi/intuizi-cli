@@ -751,8 +751,8 @@ ref=$(intuizi uploads put customers.csv --purpose cohort)
 intuizi uploads put customers.csv --purpose cohort --json | jq -r '.data[0].upload_reference'
 ```
 
-Every header the reservation lists is sent on the PUT, since all of them are
-signed; `--content-type` replaces `Content-Type` alone. An empty file is
+Every header the reservation lists is sent on the PUT; `--content-type`
+replaces `Content-Type` alone. An empty file is
 refused before a slot is reserved, a `--purpose` outside the two values before
 anything is sent, and a redirect from the storage host is reported as an error
 rather than followed.

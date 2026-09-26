@@ -207,8 +207,9 @@ func CreateWithEnvelope[T any](ctx context.Context, c *Client, path string, body
 // expires after 15 minutes, so a fresh reservation is the correct recovery,
 // not a replay.
 //
-// headers is the set the reservation listed. Every one of them is part of the
-// signature, so all are sent; Content-Type alone defaults when absent.
+// headers is the set the reservation listed. All of them are sent, whether or
+// not storage signed them, so a header the server starts requiring needs no
+// change here; Content-Type alone defaults when absent.
 func PutPresigned(ctx context.Context, url string, headers map[string]string, filePath string) error {
 	ctx, cancel := context.WithTimeout(markStorage(ctx), presignedTimeout)
 	defer cancel()
@@ -230,7 +231,7 @@ func PutPresigned(ctx context.Context, url string, headers map[string]string, fi
 	if err != nil {
 		return fmt.Errorf("uploading %s: %w", filepath.Base(filePath), withoutPresignedURL(err))
 	}
-	// Ours first, so a signed header of the same name would still win.
+	// Ours first, so a listed header of the same name still wins.
 	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Content-Type", "text/csv")
 	for k, v := range headers {

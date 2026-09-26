@@ -201,14 +201,14 @@ authorises it.`,
 	return cmd
 }
 
-// putHeaders is what the PUT must carry: every header the reservation signed,
+// putHeaders is what the PUT must carry: every header the reservation listed,
 // with --content-type replacing Content-Type alone. Keys are canonicalised on
 // the way in so the override replaces the server's spelling rather than
 // racing it on map order.
 func putHeaders(slot output.Record, contentType string) map[string]string {
 	headers := map[string]string{}
-	if signed, ok := slot["headers"].(map[string]any); ok {
-		for k, v := range signed {
+	if listed, ok := slot["headers"].(map[string]any); ok {
+		for k, v := range listed {
 			switch v := v.(type) {
 			case string:
 				headers[http.CanonicalHeaderKey(k)] = v
