@@ -113,7 +113,7 @@ A file_uri ending .csv, .gz or .parquet is read as a single file; anything else
 is read as a folder.
 
 The other two sources are flat too. From a file you uploaded, swap --file-uri
-for the reference 'intuizi uploads reserve' handed back:
+for the reference 'intuizi uploads put --purpose cohort' printed:
 
     intuizi cohorts create --name "Q3 customers" \
       --upload-reference upl_abc123 --file-format csv \
@@ -124,9 +124,15 @@ takes the audience's own name, so --name is rejected:
 
     intuizi cohorts create --audience-id 88 --device-limit 1000
 
-An audience makes at most one live cohort. Capping by visit frequency or by
-distance instead of a device count needs freq_limit or distance_limit and their
-bounds, so those go through the whole body:
+A regular audience makes at most one cohort; a Lookalike Model audience can
+make several.
+
+--device-limit is the only limit with a flag. Capping an audience cohort by
+visit frequency (freq_limit with freq_min and freq_max), by distance
+(distance_limit with distance) or, for a Lookalike Model audience, by score
+range (score_limit with min_score and max_score) goes through the whole body,
+and so does Match Strictness (max_devices_per_ip, 1 to 5) on an SCID file
+import:
 
     intuizi cohorts create --file cohort.json
 
@@ -252,7 +258,7 @@ duplicate import.`,
 	flags.StringVar(&fileURI, "file-uri", "",
 		"The file to import: s3://bucket/path or gs://bucket/path")
 	flags.StringVar(&uploadRef, "upload-reference", "",
-		"An upload_reference from 'intuizi uploads reserve', instead of --file-uri")
+		"An upload_reference from 'intuizi uploads put --purpose cohort',\ninstead of --file-uri")
 	flags.IntVar(&audienceID, "audience-id", 0,
 		"Build from this Completed audience instead of a file")
 	flags.StringVar(&fileFormat, "file-format", "",
@@ -264,7 +270,7 @@ duplicate import.`,
 	flags.StringArrayVar(&metadata, "metadata-columns", nil,
 		"A column to keep alongside the identifier (repeat the flag for more than one)")
 	flags.BoolVar(&ipEnrich, "ip-enrichment", false,
-		"Resolve IP addresses to devices")
+		"Also add devices seen on the same IP addresses as the cohort's\ndevices (Enrich by Household in Audience Manager)")
 	flags.IntVar(&deviceLimit, "device-limit", 0,
 		"Cap the devices imported")
 	flags.IntVar(&projectID, "project-id", 0,
@@ -328,8 +334,9 @@ three scalars, so it can be built from flags:
     intuizi cohorts preview --file-uri s3://example-bucket/cohorts/q3.csv
     intuizi cohorts preview --upload-reference upl_abc123 --file-format csv
 
-Give exactly one of --file-uri or --upload-reference. --file-format is
-optional; the file is sniffed when it is left off.
+Give exactly one of --file-uri or --upload-reference. --file-format defaults
+to csv - the format is not detected - so pass --file-format gzip for a gzip
+file.
 
 Parquet files cannot be previewed - only csv and gzip.
 
@@ -394,9 +401,9 @@ The whole body still works if you prefer:
 	flags.StringVar(&fileURI, "file-uri", "",
 		"The file to preview: s3://bucket/path or gs://bucket/path")
 	flags.StringVar(&uploadRef, "upload-reference", "",
-		"An upload_reference from 'intuizi uploads reserve', instead of --file-uri")
+		"An upload_reference from 'intuizi uploads put --purpose cohort',\ninstead of --file-uri")
 	flags.StringVar(&fileFormat, "file-format", "",
-		"How the file is encoded: csv or gzip (parquet cannot be previewed)")
+		"How the file is encoded: csv (the default) or gzip; parquet\ncannot be previewed")
 	completeValues(cmd, "file-format", previewFileFormats)
 	return cmd
 }
