@@ -178,6 +178,12 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 The signal codes follow the shell's `128 + signal` convention, so a script can
 tell a cancelled run from a failed one.
 
+With the npm package, `intuizi` is a Node launcher that ignores a SIGTERM sent
+to its own process id. Ctrl-C, `timeout`, and a signal to the whole process
+group (`kill -TERM -- -<pgid>`) reach the binary, but a SIGTERM to the
+launcher alone leaves the command running, and it exits with its own code
+rather than `143`.
+
 ## Support, issues and contributions
 
 Bug reports and feature requests are welcome as
