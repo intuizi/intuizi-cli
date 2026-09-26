@@ -140,8 +140,10 @@ import:
 
 Check the column mapping before importing with 'intuizi cohorts preview'.
 
-A retry of this command reuses its Idempotency-Key, so it cannot create a
-duplicate import.`,
+The request carries an Idempotency-Key, and a retry after a 429 reuses it.
+Running the command again sends a fresh key and can create a second import.
+When a create gets no response at all, stderr prints the key it used: rerun
+with --idempotency-key <key> to retry it without risking a duplicate.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()

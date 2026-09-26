@@ -106,8 +106,10 @@ read is printed whether the build completes, fails, the wait times out or it
 gives up after three failed reads in a row, and an audience that fails to
 build, or a wait that times out or gives up, exits non-zero.
 
-A retry of this command reuses its Idempotency-Key, so it cannot create a
-duplicate.`,
+The request carries an Idempotency-Key, and a retry after a 429 reuses it.
+Running the command again sends a fresh key and can create a second audience.
+When a create gets no response at all, stderr prints the key it used: rerun
+with --idempotency-key <key> to retry it without risking a duplicate.`,
 		Args: cobra.NoArgs,
 	}
 	waitOpts := waitFlags(cmd)

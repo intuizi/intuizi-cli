@@ -122,8 +122,10 @@ Collect the ids first: 'intuizi reference common endpoint-connections', then
 reference common datastreams --partner-id <id>', where <id> is the
 connection's partner.id (shown with --json).
 
-A retry of this command reuses its Idempotency-Key, so it cannot create a
-duplicate export.`,
+The request carries an Idempotency-Key, and a retry after a 429 reuses it.
+Running the command again sends a fresh key and can create a second export.
+When a create gets no response at all, stderr prints the key it used: rerun
+with --idempotency-key <key> to retry it without risking a duplicate.`,
 		Args: cobra.NoArgs,
 	}
 	waitOpts := waitFlags(cmd)
