@@ -33,7 +33,10 @@ after three failed reads in a row still prints the last record it read, then
 exits non-zero. A Completed activation with no datastreams exits 0, and stderr
 says that nothing was delivered.
 
-An audience must hold at least 500 devices before it can be activated.`,
+An audience must hold at least 500 devices, 1,000 for a Lookalike Model
+result, and pass the other eligibility checks before it can be activated.
+'intuizi audiences show <id> --json' reports is_activation_allowed, and
+eligibility.reasons says why when it is false.`,
 }
 
 // --------------------------------------------------------------------------------- create
