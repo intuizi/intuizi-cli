@@ -43,8 +43,8 @@ replaces the stored one; the replaced token stays valid on the server until it
 expires or is revoked at My Account > API Tokens. A token stored before the
 account was recorded (v0.1.3 and earlier) cannot be matched, so the first
 `auth login --email` after upgrading mints a new token and records the account,
-and stderr says it replaced the stored token, which likewise stays valid until
-it expires or is revoked; `auth login` without `--email` keeps it. Logging in
+and stderr says it replaced the stored token and whether that token was still
+valid; `auth login` without `--email` keeps it. Logging in
 with a different `--base-url` mints a new token there and replaces the stored
 base URL, token and account together. The file and its directory are checked
 before anything is minted, so a corrupt file, an unwritable directory or a credential
