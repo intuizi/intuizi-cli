@@ -383,12 +383,15 @@ func TestLoginOverAnotherAccountsDeadToken(t *testing.T) {
 
 // A token stored before accounts were recorded belongs to nobody known, so
 // an --email cannot be matched against it: it mints, and records the account.
+// The old token still holds one of the account's ten slots, so stderr - all a
+// script's log keeps - says it was replaced, as it does for a known account.
 func TestLoginWithEmailOverALegacyTokenMints(t *testing.T) {
 	srv, got := fakeConsole(t, "new-token", 200)
 	path := authEnv(t, srv.URL)
-	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "old-token"})
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "old-token", ExpiresAt: "2099-01-01T00:00:00Z"})
 
-	if _, _, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "a@b.com"); err != nil {
+	_, errb, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "a@b.com")
+	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
 	if got.hits() != 1 || got.paths[0] != "/api/v2/auth/api-token" {
@@ -396,6 +399,44 @@ func TestLoginWithEmailOverALegacyTokenMints(t *testing.T) {
 	}
 	if cfg := loadAuthConfig(t, path); cfg.Token != "new-token" || cfg.Email != "a@b.com" {
 		t.Errorf("stored config = %+v", cfg)
+	}
+	for _, want := range []string{"Logged in to " + srv.URL + " as a@b.com",
+		"Replaced the stored token", "not recorded", "stays valid"} {
+		if !strings.Contains(errb, want) {
+			t.Errorf("stderr missing %q:\n%s", want, errb)
+		}
+	}
+}
+
+// An expired legacy token is replaced too, but does not "stay valid".
+func TestLoginWithEmailOverAnExpiredLegacyToken(t *testing.T) {
+	srv, _ := fakeConsole(t, "new-token", 200)
+	path := authEnv(t, srv.URL)
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "old-token", ExpiresAt: "2020-01-01T00:00:00Z"})
+
+	_, errb, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "a@b.com")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if !strings.Contains(errb, "Replaced the stored token") || !strings.Contains(errb, "no longer valid") ||
+		strings.Contains(errb, "stays valid") {
+		t.Errorf("stderr = %q, want the replace line saying it was no longer valid", errb)
+	}
+}
+
+// A legacy token bound to another console is not "the stored token" here:
+// like a known account's, it is replaced without a replace line.
+func TestLoginWithEmailOverALegacyTokenForAnotherConsole(t *testing.T) {
+	srv, _ := fakeConsole(t, "new-token", 200)
+	path := authEnv(t, srv.URL)
+	storeAuthConfig(t, path, config.Config{BaseURL: "https://elsewhere.example", Token: "old-token"})
+
+	_, errb, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "a@b.com")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if strings.Contains(errb, "Replaced") {
+		t.Errorf("stderr = %q, want no replace line for another console's token", errb)
 	}
 }
 

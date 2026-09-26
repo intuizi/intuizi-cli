@@ -133,11 +133,11 @@ func login(cmd *cobra.Command, email, password string) error {
 		// For a token this console holds, only expiry or a 401 says no.
 		dead = true
 	}
-	// Whose token this login replaces, when it is another account's here.
-	replaced := ""
-	if stored != "" && cfg.Email != "" && (cfg.BaseURL == "" || sameBase(cfg.BaseURL, base)) {
-		replaced = cfg.Email
-	}
+	// Whether this login replaces a token this console holds, and whose it
+	// is: "" for one stored before accounts were recorded. Taken now, as cfg
+	// is about to hold the new account.
+	heldHere := stored != "" && (cfg.BaseURL == "" || sameBase(cfg.BaseURL, base))
+	replaced := cfg.Email
 
 	email, err = readEmail(cmd, email)
 	if err != nil {
@@ -164,13 +164,8 @@ func login(cmd *cobra.Command, email, password string) error {
 	}
 
 	_, _ = fmt.Fprintf(stderr, "Logged in to %s as %s\n", base, cfg.Email)
-	if replaced != "" && !sameAccount(cfg.Email, replaced) {
-		if dead {
-			_, _ = fmt.Fprintf(stderr, "Replaced the token stored for %s, which was no longer valid.\n", replaced)
-		} else {
-			_, _ = fmt.Fprintf(stderr, "Replaced the token stored for %s; it stays valid until it expires "+
-				"or you revoke it at My Account > API Tokens.\n", replaced)
-		}
+	if heldHere {
+		reportReplaced(stderr, replaced, cfg.Email, dead)
 	}
 	_, _ = fmt.Fprintf(stderr, "Token saved to %s\n", path)
 	if exp := formatExpiry(res.ExpiresAt); exp != "" {
@@ -189,6 +184,26 @@ func sameAccount(given, stored string) bool {
 		return true
 	}
 	return strings.EqualFold(given, strings.TrimSpace(stored))
+}
+
+// reportReplaced says when a login replaced a token this console held that
+// may belong to someone other than now: a live one still holds one of that
+// account's ten slots. replaced is the old token's account, "" when it was
+// stored before accounts were recorded; a replaced token of the account just
+// logged in needs no line. dead says it is known to no longer work.
+func reportReplaced(w io.Writer, replaced, now string, dead bool) {
+	const live = "it stays valid until it expires or you revoke it at My Account > API Tokens."
+	switch {
+	case replaced == "" && dead:
+		_, _ = fmt.Fprintln(w, "Replaced the stored token, whose account was not recorded and which was no longer valid.")
+	case replaced == "":
+		_, _ = fmt.Fprintln(w, "Replaced the stored token, whose account was not recorded; "+live)
+	case sameAccount(now, replaced):
+	case dead:
+		_, _ = fmt.Fprintf(w, "Replaced the token stored for %s, which was no longer valid.\n", replaced)
+	default:
+		_, _ = fmt.Fprintf(w, "Replaced the token stored for %s; %s\n", replaced, live)
+	}
 }
 
 // reportReuse says which account a kept token belongs to, and how to get
