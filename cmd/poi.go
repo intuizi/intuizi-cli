@@ -341,8 +341,9 @@ Exactly one source:
 
 With --list, the file's name and brand_id are sent unless --name and
 --brand-id override them, and --key, --update and --remove replace the
-file's key, update and remove. stderr notes each flag that replaces a
-different value in the file.
+file's key, update and remove (--update=false and --remove=false turn off
+a true in the file). stderr notes each flag that replaces a different
+value in the file.
 
 Each listed location is matched to the brand's existing POIs on --key
 (the API uses gps-coordinates when it is omitted). A location that matches
@@ -371,7 +372,9 @@ retried safely with --idempotency-key; the API reads none on the --file and
 			if (update || remove) && key == "" {
 				return usageErr("--update and --remove need --key to match on")
 			}
-			if key != "" && !matchKeys[key] {
+			// Changed, not key != "": an empty --key would otherwise be
+			// dropped as if it had not been given.
+			if flags.Changed("key") && !matchKeys[key] {
 				return usageErr(fmt.Sprintf("--key must be %s, not %q", matchKeyList, key))
 			}
 			if flags.Changed("file") {
@@ -417,18 +420,19 @@ retried safely with --idempotency-key; the API reads none on the --file and
 				if err != nil {
 					return err
 				}
-				// The match flags replace the body's fields the same way.
-				if update {
-					noteOverride(stderr, body, "update", true)
+				// The match flags replace the body's fields the same way,
+				// decided by Changed so --remove=false turns off a remove:true
+				// in a reused file. JSON like create-by-upload, so the
+				// booleans are real ones.
+				for _, f := range []struct {
+					flag  string
+					value any
+				}{{"update", update}, {"remove", remove}, {"key", key}} {
+					if flags.Changed(f.flag) {
+						noteOverride(stderr, body, f.flag, f.value)
+						body[f.flag] = f.value
+					}
 				}
-				if remove {
-					noteOverride(stderr, body, "remove", true)
-				}
-				if key != "" {
-					noteOverride(stderr, body, "key", key)
-				}
-				// JSON like create-by-upload, so the booleans are real ones.
-				addMatchFields(body, update, remove, key)
 				return createBody(cmd, poiPrefix+"/submissions/create-by-list", body,
 					submissionColumns, "processing - run 'intuizi poi submissions show <id>'")
 
@@ -476,6 +480,8 @@ var matchKeys = map[string]bool{
 
 const matchKeyList = "location-id, gps-coordinates, store-id, master-id or external-id"
 
+// addMatchFields writes the match flags into a body that starts empty (the
+// --upload-reference form), so an unset or false flag leaves the API default.
 func addMatchFields(body map[string]any, update, remove bool, key string) {
 	if update {
 		body["update"] = true
@@ -525,7 +531,13 @@ func noteOverride(w io.Writer, body map[string]any, flag string, value any) {
 		return
 	}
 	given := "--" + flag
-	if _, isBool := value.(bool); !isBool {
+	switch v := value.(type) {
+	case bool:
+		// A bare --remove reads as true; false has to say so.
+		if !v {
+			given += "=false"
+		}
+	default:
 		given += " " + shown(value)
 	}
 	_, _ = fmt.Fprintf(w, "note: %s replaces %s %s from the --list body\n", given, field, shown(old))

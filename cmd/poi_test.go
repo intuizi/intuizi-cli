@@ -423,6 +423,96 @@ func TestPoiSubmissionsCreateByListCarriesTheMatchFields(t *testing.T) {
 	}
 }
 
+// --update=false and --remove=false replace a true the --list body carries,
+// the same as any other override. They used to be dropped because only a
+// true flag was written, so a reused file's remove:true still went out and
+// archived the brand's unlisted POIs, with nothing on stderr.
+func TestPoiSubmissionsCreateByListTurnsOffTheBodysMatchFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "locations.json")
+	if err := os.WriteFile(path,
+		[]byte(`{"name":"stores","brand_id":9,"key":"store-id","update":true,"remove":true,`+
+			`"locations":[{"country":"US","longitude":-89.6501,"latitude":39.7817}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bare := filepath.Join(t.TempDir(), "bare.json")
+	if err := os.WriteFile(bare, []byte(`{"name":"stores","brand_id":9,"locations":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name       string
+		args       []string
+		wantUpdate any // nil means the field is absent
+		wantRemove any
+		wantNotes  []string
+	}{
+		{"both turned off", []string{"--list", path, "--update=false", "--remove=false"}, false, false, []string{
+			"note: --update=false replaces update true from the --list body",
+			"note: --remove=false replaces remove true from the --list body",
+		}},
+		{"only remove turned off", []string{"--list", path, "--remove=false"}, true, false, []string{
+			"note: --remove=false replaces remove true from the --list body",
+		}},
+		{"unset flags keep the body", []string{"--list", path}, true, true, nil},
+		{"same value says nothing", []string{"--list", path, "--remove", "--update", "--key", "store-id"}, true, true, nil},
+		{"a field the body lacks", []string{"--list", bare, "--remove=false"}, nil, false, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, submissionEnvelope)
+			_, stderr, err := run(t, poiSubmissionCreateCommand(), srv, tc.args...)
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+
+			var body map[string]any
+			if err := json.Unmarshal([]byte(got.bodies[0]), &body); err != nil {
+				t.Fatal(err)
+			}
+			for field, want := range map[string]any{"update": tc.wantUpdate, "remove": tc.wantRemove} {
+				v, ok := body[field]
+				if want == nil {
+					if ok {
+						t.Errorf("%s = %#v, want it absent", field, v)
+					}
+					continue
+				}
+				if v != want {
+					t.Errorf("%s = %#v, want the JSON boolean %v", field, v, want)
+				}
+			}
+
+			var notes []string
+			for _, line := range strings.Split(stderr, "\n") {
+				if strings.HasPrefix(line, "note: ") {
+					notes = append(notes, line)
+				}
+			}
+			if strings.Join(notes, "\n") != strings.Join(tc.wantNotes, "\n") {
+				t.Errorf("notes = %q, want %q", notes, tc.wantNotes)
+			}
+		})
+	}
+}
+
+// An empty --key used to be dropped as if it had not been given, so the
+// body's key or the API's gps-coordinates applied without a word. It is not
+// one of the accepted keys, so it is refused like any other.
+func TestPoiSubmissionsCreateRefusesAnEmptyKey(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	_, _, err := run(t, poiSubmissionCreateCommand(), srv, "--list", "locs.json", "--key", "")
+	if err == nil || !strings.Contains(err.Error(), "--key must be") {
+		t.Fatalf("err = %v, want one listing the accepted keys", err)
+	}
+	if exitCode(err, nil, true) != 2 {
+		t.Errorf("exit = %d, want 2", exitCode(err, nil, true))
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
 // --------------------------------------------------------------------------------- locations
 
 func TestPoiLocationsListBuildsTheQuery(t *testing.T) {
