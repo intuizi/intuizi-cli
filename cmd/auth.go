@@ -539,8 +539,10 @@ func warnNearExpiry(w io.Writer, iso string) {
 		_, _ = fmt.Fprintf(w, "\nWarning: this token expired on %s. Run 'intuizi auth login'.\n",
 			t.Format("2006-01-02"))
 	case left < expiryWarning:
-		_, _ = fmt.Fprintf(w, "\nWarning: this token expires in %d days. Run 'intuizi auth login' to mint a new one.\n",
-			int(left.Hours()/24))
+		// Login keeps a token that still works, so renewing early takes a
+		// logout first; an expired one is replaced by login alone.
+		_, _ = fmt.Fprintf(w, "\nWarning: this token expires in %d days. Run 'intuizi auth logout' and then "+
+			"'intuizi auth login' to mint a new one.\n", int(left.Hours()/24))
 	}
 }
 

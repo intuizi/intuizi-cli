@@ -986,6 +986,23 @@ func TestLogoutWarnsWhenEnvTokenRemains(t *testing.T) {
 	}
 }
 
+// A token that still works is kept by a bare or same-account 'auth login', so
+// renewing it early takes a logout first. An expired one is replaced by login
+// alone, so that warning must not send the user through a needless logout.
+func TestNearExpiryWarningNamesLogoutBeforeLogin(t *testing.T) {
+	var soon strings.Builder
+	warnNearExpiry(&soon, time.Now().Add(10*24*time.Hour+time.Hour).Format(time.RFC3339))
+	if !strings.Contains(soon.String(), "'intuizi auth logout' and then 'intuizi auth login'") {
+		t.Errorf("near-expiry warning does not say to log out first:\n%s", soon.String())
+	}
+
+	var gone strings.Builder
+	warnNearExpiry(&gone, time.Now().Add(-24*time.Hour).Format(time.RFC3339))
+	if strings.Contains(gone.String(), "logout") {
+		t.Errorf("expired warning sends the user through a logout login does not need:\n%s", gone.String())
+	}
+}
+
 // The warning belongs on stderr: stdout is what a script reads.
 func TestAuthStatusWarnsNearExpiry(t *testing.T) {
 	for _, tc := range []struct {
