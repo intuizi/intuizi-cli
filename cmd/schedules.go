@@ -108,7 +108,7 @@ The recurrence block is one level deep, so it can be built from flags:
 
     intuizi schedules create --name "Weekly coffee refresh" --audience-id 88 \
       --start "2027-09-15 06:00:00" --timezone America/New_York \
-      --frequency weekly --window 2
+      --frequency weekly --window 4
 
 --frequency, --window and --ending take values from the catalogs:
 

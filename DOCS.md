@@ -692,7 +692,7 @@ future in that zone.
 ```bash
 intuizi schedules create --name "Weekly coffee refresh" --audience-id 88 \
   --start "2027-09-15 06:00:00" --timezone America/New_York \
-  --frequency weekly --window 2
+  --frequency weekly --window 4
 ```
 
 Needs `--file`: the nested activation block that re-exports every cycle.

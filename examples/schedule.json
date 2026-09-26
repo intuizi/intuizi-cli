@@ -5,7 +5,7 @@
     "start": "2027-09-15 06:00:00",
     "timezone": "America/New_York",
     "frequency": "weekly",
-    "window_type": 2,
+    "window_type": 4,
     "ending": { "type": 1 }
   },
   "activation": {
