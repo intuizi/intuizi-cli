@@ -16,7 +16,8 @@ import (
 
 // My POI Data is your company's own places, not the shared POI catalog that
 // 'intuizi reference poi' reads. The taxonomy is segments -> categories ->
-// brands -> locations, and locations arrive through a submission.
+// brands -> locations: segments are a fixed list to pick from, categories and
+// brands are the company's own, and locations arrive through a submission.
 //
 // It does not use the resource table: these reads hang off /my-data/pois, the
 // indexes take different parameters, and submissions have three create modes.
@@ -29,11 +30,13 @@ var poiCmd = &cobra.Command{
 	Long: `Manage your company's own points of interest.
 
 The taxonomy nests: segments hold categories, categories hold brands, and
-brands hold the locations you submit. Create the parent before the child.
+brands hold the locations you submit. Segments already exist and cannot be
+created: pick one with 'intuizi poi segments list', create categories under
+it, and brands under those.
 
 Locations are not created one by one - they arrive in a submission, from a CSV
-file, an upload reference, or an inline list. A submission is processed
-asynchronously; watch it with 'intuizi poi submissions show <id>'.
+file, an upload reference, or a JSON file of locations. A submission is
+processed asynchronously; watch it with 'intuizi poi submissions show <id>'.
 
 This is your own data. The shared catalog every audience is built from is read
 with 'intuizi reference poi'.`,
@@ -163,7 +166,7 @@ placekey, so a store number finds its location as readily as a name.`,
 	flags.Var(&perPage, "per-page", "Items per page (server default 25, capped at 500)")
 	flags.IntSliceVar(&brands, "brands", nil, "Your own brand ids to filter by (repeatable, or comma-separated)")
 	flags.StringArrayVar(&countries, "countries", nil, "Country codes to filter by (repeat the flag for more than one)")
-	flags.StringVar(&geometry, "geometry", "", "Only locations stored as polygon or coordinates")
+	flags.StringVar(&geometry, "geometry", "", "Filter by how the location is stored: polygon or coordinates")
 
 	show := &cobra.Command{
 		Use:   "show <id>",
@@ -197,11 +200,14 @@ Three ways to send the same thing, differing only in where the locations come
 from:
 
   create --file locations.csv        a CSV posted directly (up to 50 MB)
-  create --upload-reference <ref>    a file already sent with 'intuizi uploads put'
-  create --list locations.json       an inline JSON list, for a handful of places
+  create --upload-reference <ref>    a file already sent with
+                                     'intuizi uploads put --purpose poi_submission'
+  create --list locations.json       a JSON file of locations, or - for stdin,
+                                     for a handful of places
 
-All three take --name and --brand-id. Processing is asynchronous; follow it
-with 'intuizi poi submissions show <id>'.`,
+All three take --name and --brand-id; with --list they may come from the file
+instead. Processing is asynchronous; follow it with
+'intuizi poi submissions show <id>'.`,
 	}
 
 	var (
@@ -322,8 +328,13 @@ func poiSubmissionCreateCommand() *cobra.Command {
 Exactly one source:
 
     --file locations.csv          post the CSV directly (up to 50 MB)
-    --upload-reference upl_...    claim a file sent with 'intuizi uploads put'
-    --list locations.json         an inline JSON body carrying locations[]
+    --upload-reference upl_...    claim a file sent with
+                                  'intuizi uploads put --purpose poi_submission'
+    --list locations.json         a JSON file holding locations[], or - to read
+                                  it from stdin
+
+With --list, the file's name and brand_id are sent unless --name and
+--brand-id override them.
 
 --update and --remove need --key to say how existing POIs are matched.`,
 		Args: cobra.NoArgs,
@@ -411,8 +422,11 @@ Exactly one source:
 	flags.StringVar(&name, "name", "", "The submission name")
 	flags.IntVar(&brandID, "brand-id", 0, "The brand these locations belong to")
 	flags.StringVar(&file, "file", "", "A CSV of locations in the Intuizi ingestion format")
-	flags.StringVar(&uploadRef, "upload-reference", "", "An upload_reference from 'intuizi uploads put'")
-	flags.StringVar(&list, "list", "", `A JSON body carrying locations[], or "-" for stdin`)
+	flags.StringVar(&uploadRef, "upload-reference", "",
+		"An upload_reference from 'intuizi uploads put --purpose poi_submission'")
+	flags.StringVar(&list, "list", "",
+		"Path to a JSON file holding locations[] (and name and brand_id\n"+
+			`unless the flags give them), or "-" to read it from stdin`)
 	flags.BoolVar(&update, "update", false, "Update existing matched POIs")
 	flags.BoolVar(&remove, "remove", false, "Remove existing matched POIs")
 	flags.StringVar(&key, "key", "", "How to match existing POIs: "+matchKeyList)
@@ -464,8 +478,8 @@ func mergeSubmissionFields(payload []byte, name string, brandID int, setName, se
 
 func init() {
 	poiCmd.AddCommand(
-		poiGroup("segments", "Your own POI segments",
-			searchList("list", "List your own POI segments",
+		poiGroup("segments", "The available POI segments",
+			searchList("list", "List the available POI segments",
 				poiPrefix+"/segments/index", "no segments", []string{"value", "text"})),
 
 		poiGroup("categories", "Your own POI categories",
@@ -473,7 +487,7 @@ func init() {
 				poiPrefix+"/categories/index", "no categories", []string{"value", "text"}),
 			poiCreateCommand("create", "Create a POI category",
 				poiPrefix+"/categories/create", "segment-id",
-				"The parent segment id", `Create a POI category under one of your segments.
+				"The parent segment id", `Create a POI category under one of the available segments.
 
 Read the parent ids first with 'intuizi poi segments list'.`, []string{"id", "name"})),
 
