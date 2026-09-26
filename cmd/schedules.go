@@ -187,9 +187,10 @@ duplicate schedule.`,
 			return usageErr("--start " + start + " must be in the future in " + timezone)
 		}
 
-		// Each rule carries its own field, and sending the wrong one is not
-		// rejected - it is ignored, leaving a schedule that never stops. An
-		// explicit 0 is a mistake to name, so these go by Changed, not value.
+		// Each rule carries its own field, and the API answers the wrong one
+		// with a 422 (prohibited_unless); checked here to name the mistake
+		// without a round trip. An explicit 0 is a mistake to name too, so
+		// these go by Changed, not value.
 		switch ending {
 		case 1:
 			if flags.Changed("after-recurrences") || flags.Changed("end-date") {
