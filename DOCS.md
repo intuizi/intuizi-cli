@@ -108,9 +108,21 @@ never calls the server.
 
 ### `--debug`
 
-One line per request and one per response on stderr: method and URL, the
-headers, the status, how long it took, and how many bytes came back. Stdout is
-untouched, so `--debug` composes with `--json` and `--quiet`.
+Each request and response on stderr, one item per line: the method and URL,
+then one line per request header; the status and how long it took, then one
+line per response header, then how many bytes came back. Stdout is untouched,
+so `--debug` composes with `--json` and `--quiet`.
+
+```
+> GET https://console.intuizi.com/api/v2/analyses/reference/poi/brands?search=star
+>   Accept: application/json
+>   Authorization: <redacted>
+>   User-Agent: intuizi-cli/v0.1.4
+< 200 OK in 212ms
+<   Content-Type: application/json
+<   ...
+<   1843 bytes read
+```
 
 Credentials are redacted: the `Authorization` and `Idempotency-Key` headers,
 cookies, every `x-amz-*` header, any userinfo in a URL, and the signature
@@ -974,9 +986,22 @@ They do different jobs and cannot be combined; asking for both is an error.
 | `--quiet` | bare ids on stdout, one per line | capturing a value, or feeding a loop |
 | `--json` | the raw response envelope | reaching any field the table does not show |
 
-Both are global, so they apply to every command: reads, creates and deletes
-alike. `--quiet` prints one scalar per record, so it cannot reach a nested
-field. Anything deeper needs `--json` and `jq`.
+Both are global and apply to reads, creates and deletes alike, with these
+exceptions:
+
+- `auth`, `version` and `completion` print text and ignore either flag.
+- `usage`, `cohorts preview` and `reference profile-attributes
+  recency-limits` return no ids, so they refuse `--quiet`; use `--json`.
+- `uploads put` prints the bare upload reference, which is also what
+  `--quiet` prints; `--json` prints the reservation envelope.
+- Deletes, `audiences lookalike cancel`, and `schedules activate` and
+  `deactivate` print their confirmation on stderr and nothing on stdout,
+  `--quiet` or not; `--json` prints the response envelope.
+- `--dry-run` prints the request body as JSON whichever flag is set: `--json`
+  adds no envelope, and `--quiet` prints no ids.
+
+`--quiet` prints one scalar per record, so it cannot reach a nested field.
+Anything deeper needs `--json` and `jq`.
 
 ```bash
 id=$(intuizi audiences create --type poi --brand starbucks \
@@ -1054,9 +1079,10 @@ keys are not checked by name: a misspelt top-level block such as
 `crosspurchse` is ignored, and the audience builds without it.
 
 `normalized_payload` on an audience is the canonical copy of the `name`,
-`operator` and `datasets` it was created from. Its `recipe_hash` is computed
-from the `operator` and `datasets` only, so the name does not change it. It
-echoes what was sent, so a per-dataset filter, such as the brand or the
+`operator` and `datasets` it was created from. The audience's `recipe_hash`
+(`.data[0].recipe_hash`, beside `normalized_payload` rather than inside it) is
+computed from the `operator` and `datasets` only, so the name does not change
+it. `normalized_payload` echoes what was sent, so a per-dataset filter, such as the brand or the
 country, that is missing from it was not sent:
 
 ```bash
@@ -1187,9 +1213,11 @@ install a script file instead of loading it at startup,
 `intuizi completion <shell> --help` gives the Linux and macOS (Homebrew)
 locations.
 
-Completion covers commands, flag names, and the values of flags that take a
-fixed set: `--type`, `--signal`, `--file-format`, `--identifier-type`,
-`--frequency` and `--purpose`.
+Completion covers commands, flag names, and the values of `--type`,
+`--signal`, `--file-format`, `--identifier-type`, `--frequency` and
+`--purpose`. Other flags that take a fixed set, such as `poi submissions list
+--sort-by` and `--order`, `poi locations list --geometry` and `poi submissions
+create --key`, complete no values; their help lists them.
 
 ## Typical workflows
 

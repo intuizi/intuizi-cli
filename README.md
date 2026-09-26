@@ -123,7 +123,7 @@ Strictness on an SCID cohort import.
 Ready-made payloads live in [`examples/`](examples).
 
 ```bash
-# Everything supports --json for scripting, and --quiet for ids alone
+# Reads and creates take --json for scripting, and --quiet for ids alone
 intuizi reference poi brands --search starbucks --quiet       # 208
 id=$(intuizi audiences create --type poi ... --wait --quiet)
 intuizi audiences show "$id" --json | jq '.data[0].normalized_payload'
