@@ -402,7 +402,7 @@ func joinScalars(list []any) (string, bool) {
 
 // createRecord posts a body and returns the created record without printing
 // it, for a caller that needs the new id before deciding what to show - a
-// --wait create prints the final state, not the Initiating one.
+// --wait create prints the record its wait ended on, not the Initiating one.
 func createRecord(cmd *cobra.Command, c *api.Client, path string, payload any) (output.Record, error) {
 	return api.Create[output.Record](cmd.Context(), c, path, payload)
 }

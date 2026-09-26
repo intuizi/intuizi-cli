@@ -102,8 +102,9 @@ so a field this CLI has never heard of still reaches the API:
 Creation is asynchronous: the new audience comes back Initiating with a
 results_count of 0. That is expected. Add --wait to block until the build
 reaches Completed, with --timeout to bound it (default 60m). The last record
-read is printed whether the build completes, fails or the wait times out, and
-an audience that fails to build, or a wait that times out, exits non-zero.
+read is printed whether the build completes, fails, the wait times out or it
+gives up after three failed reads in a row, and an audience that fails to
+build, or a wait that times out or gives up, exits non-zero.
 
 A retry of this command reuses its Idempotency-Key, so it cannot create a
 duplicate.`,
@@ -345,8 +346,8 @@ func audiencesShowCommand() *cobra.Command {
 
 With --wait, keep polling until the build reaches Completed or fails, printing
 each status change to stderr and the last record read to stdout, and exiting
-non-zero if it fails or --timeout runs out. A lookalike in 108 Modeling is
-still training and is waited through:
+non-zero if it fails, --timeout runs out or three reads in a row fail. A
+lookalike in 108 Modeling is still training and is waited through:
 
     intuizi audiences show 1377 --wait`,
 		Args: cobra.ExactArgs(1),
@@ -383,11 +384,12 @@ func audiencesLookalikeCommand() *cobra.Command {
 		Long: `Build and cancel Lookalike Model audiences.
 
 A Lookalike Model trains on a completed seed audience and produces a new
-audience of similar devices. It is a gated feature: without the permission the
-create is rejected with 403.
+audience of similar devices. The Lookalike commands, create and cancel alike,
+require additional permissions which need to be approved by your Account
+Manager; a 403 means they are not enabled for the account.
 
-Training shows as status 108 Modeling, which is not terminal - keep polling
-'audiences show <id>' until it reads Completed.`,
+Training shows as status 108 Modeling, which is not terminal - follow it with
+'intuizi audiences show <id> --wait' until it reads Completed.`,
 	}
 
 	create := lookalikeCreateCommand()
@@ -398,7 +400,11 @@ Training shows as status 108 Modeling, which is not terminal - keep polling
 		Long: `Cancel a lookalike run in progress.
 
 The job stops at its next checkpoint rather than immediately, so the audience
-may sit in its current status for a short while after this returns.`,
+may sit in its current status for a short while after this returns.
+
+Takes the id 'lookalike create' returned, not the seed's. Like create, it
+requires additional permissions which need to be approved by your Account
+Manager; a 403 means they are not enabled for the account.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := parseID(args[0], "audience")
@@ -505,8 +511,10 @@ body instead, with --file:
 
     intuizi audiences lookalike create --file lookalike.json
 
-Training shows as status 108 Modeling, which is not terminal - keep polling.
-Requires the Lookalike capability; a 403 means it is not enabled.`,
+Training shows as status 108 Modeling, which is not terminal - follow it with
+'intuizi audiences show <id> --wait'. The Lookalike commands require
+additional permissions which need to be approved by your Account Manager; a
+403 means they are not enabled for the account.`,
 		Args: cobra.NoArgs,
 	}
 
@@ -609,6 +617,18 @@ Requires the Lookalike capability; a 403 means it is not enabled.`,
 	return cmd
 }
 
+// audiencesDeleteCommand is the shared delete, with the two things deleting an
+// audience also does, per the API's delete service.
+func audiencesDeleteCommand() *cobra.Command {
+	cmd := deleteCommand("audience", audiencesPrefix)
+	cmd.Long += `
+
+A cohort created from the audience with 'intuizi cohorts create --audience-id'
+is deleted with it, and deleting a Lookalike Model that is still modelling
+stops the run.`
+	return cmd
+}
+
 func audiencesListCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -627,7 +647,7 @@ func init() {
 	audiencesCmd.AddCommand(
 		audiencesListCommand(),
 		audiencesShowCommand(),
-		deleteCommand("audience", audiencesPrefix),
+		audiencesDeleteCommand(),
 		audiencesCreateCommand(), audiencesLookalikeCommand(),
 	)
 	rootCmd.AddCommand(audiencesCmd)

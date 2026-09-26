@@ -236,9 +236,9 @@ func activationsShowCommand() *cobra.Command {
 
 With --wait, keep polling until it reaches Completed or fails, printing each
 status change to stderr and the last record read to stdout, and exiting
-non-zero if it fails or --timeout runs out. Use it to resume following an
-export whose create timed out, or as a gate in CI - a Completed activation
-returns at once:
+non-zero if it fails, --timeout runs out or three reads in a row fail. Use it
+to resume following an export whose create timed out, or as a gate in CI - a
+Completed activation returns at once:
 
     intuizi activations show 501 --wait --timeout 90m`,
 		Args: cobra.ExactArgs(1),

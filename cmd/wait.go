@@ -80,10 +80,12 @@ func waitFlags(cmd *cobra.Command) func() (bool, time.Duration, error) {
 	}
 }
 
-// waitAndPrint follows one resource to a terminal status and prints the final
-// state. With --json a completed or failed record is re-read so the bytes
-// printed are the server's own, as every other --json path does; an abandoned
-// wait prints the record as last polled, which is the one its error names.
+// waitAndPrint follows one resource until its wait ends and prints the record
+// the wait ended on: the terminal record when it completed or failed, the
+// last one polled when it timed out or gave up. With --json a completed or
+// failed record is re-read so the bytes printed are the server's own, as
+// every other --json path does; an abandoned wait prints the record as last
+// polled, which is the one its error names.
 //
 // A wait that fails, times out or gives up after repeated failed reads still
 // prints the last record read, then returns its error, so the exit code is
