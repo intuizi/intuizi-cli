@@ -747,7 +747,7 @@ with `poi segments list`, create categories under it, and brands under those.
 | `poi submissions delete <id>` | `--yes` | only a waiting submission can be deleted |
 
 `--search` on `locations list` matches name, address, city, state, zip, DMA,
-external id and placekey; on the taxonomy lists and `submissions list` it
+external id and placekey, not the store id; on the taxonomy lists and `submissions list` it
 matches the name. A value outside a flag's set - `--key`, `--geometry`,
 `--sort-by`, `--order`, an empty `--name` or a zero parent id on the creates -
 is refused before anything is sent, exit 2.

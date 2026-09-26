@@ -127,7 +127,8 @@ func poiLocationsCommand() *cobra.Command {
 		Long: `List your own POI locations.
 
 --search matches across name, address, city, state, zip, DMA, external id and
-placekey, so a store number finds its location as readily as a name.`,
+placekey. It does not match store_id, so a store number is found only when it
+is also in one of those fields.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()
