@@ -247,8 +247,9 @@ Ids and values collected here are what 'intuizi audiences create' expects.
     intuizi reference apps categories --search fitness
     intuizi reference web domains --category-codes IAB2 --json
 
-Each read accepts --search, a case-insensitive contains match on the item label.
-Paginated reads add --page and --per-page, and return one page per call.`,
+Each read accepts --search, a case-insensitive contains match on the item
+label, except profile-attributes recency-limits, which takes no flags of its
+own. Paginated reads add --page and --per-page, and return one page per call.`,
 }
 
 func init() {
