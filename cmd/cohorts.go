@@ -29,7 +29,17 @@ cloud file or an upload, or built from a completed audience. Once imported it
 becomes a dataset an audience can be built from.
 
 Cohort status ids are their own scale, not the audience one: 1 Uploading,
-2 Initiating, 3 Processing, 4 Completed, 5 Not Available.`,
+2 Initiating, 3 Processing, 4 Completed. A failed import reports an error code
+outside 1 to 4 instead, which the table shows as Unknown; 5 Not Available is
+reserved and never reported. No cohort command takes --wait, so re-run
+'intuizi cohorts show <id>' until the status is 4, and stop on any status
+outside 1 to 4. With --json the id is .data.status.id: a cohort read returns
+the record itself, not an array of one.
+
+After a failed import, fix the cause and create the cohort again. An
+--upload-reference is used up by the failed create, so upload the file again
+for a new one. A regular audience keeps its failed cohort, and makes at most
+one, so run 'intuizi cohorts delete <id>' before creating from it again.`,
 }
 
 // --------------------------------------------------------------------------------- create
@@ -111,7 +121,8 @@ from flags:
       --identifier-column email_sha256
 
 A file_uri ending .csv, .gz or .parquet is read as a single file; anything else
-is read as a folder.
+is read as a folder. The match is case-sensitive, so Q3.CSV imports as a
+folder.
 
 The other two sources are flat too. From a file you uploaded, swap --file-uri
 for the reference 'intuizi uploads put --purpose cohort' printed:
@@ -119,6 +130,13 @@ for the reference 'intuizi uploads put --purpose cohort' printed:
     intuizi cohorts create --name "Q3 customers" \
       --upload-reference upl_abc123 --file-format csv \
       --identifier-type hem_sha256 --identifier-column email_sha256
+
+The same suffix rule decides an upload, by the name it was uploaded under: the
+'uploads put' file name, or 'uploads reserve --filename'. The API keeps the
+first 100 characters of that name, so a longer one loses its suffix. Name the
+file .csv, .gz or .parquet before uploading it; 'cohorts preview' reads an
+upload whatever its name, so a clean preview does not show which way it will
+import.
 
 From a Completed audience, --audience-id is the only flag needed; the cohort
 takes the audience's own name and project, so --name is rejected, and so is
@@ -155,7 +173,8 @@ file has to be uploaded again for a new one once the budget has room.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()
 
-			next := "importing - run 'intuizi cohorts show <id>' for its status"
+			next := "importing - re-run 'intuizi cohorts show <id>' until its status is 4 Completed; " +
+				"a status outside 1 to 4 means the import failed"
 
 			if file != "" {
 				// Mixing the two would beg the question of which wins.

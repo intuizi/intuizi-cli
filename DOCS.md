@@ -618,6 +618,14 @@ Exactly one source: `--file-uri`, `--upload-reference` or `--audience-id`.
 
 A `file_uri` ending `.csv`, `.gz` or `.parquet` is read as a single file;
 anything else is read as a folder, and whitespace anywhere in it is refused.
+The match is case-sensitive, so `Q3.CSV` imports as a folder. The same rule
+decides an `--upload-reference` import, by the name the file was uploaded
+under: the `uploads put` file name, or `--filename` on `uploads reserve`. The
+API keeps the first 100 characters of that name, so a longer one loses its
+suffix. Name the file `.csv`, `.gz` or `.parquet` before uploading it:
+`cohorts preview` reads an upload whatever its name, so a clean preview does
+not show which way it will import.
+
 A regular audience makes at most one cohort, and a Lookalike Model audience
 can make several. An audience cohort takes the audience's own name and
 project, so `--name` and `--project-id` are rejected alongside `--audience-id`
@@ -638,6 +646,15 @@ intuizi cohorts create --name "Q3 customers" \
 intuizi cohorts create --audience-id 88 --device-limit 1000
 ```
 
+With `--upload-reference`, the organization build budget's `429` and the
+monthly data-scan limit's `422` both refuse the create after it has claimed
+the reference, so a create refused by either has used the reference up, and
+the CLI does not retry that `429`. Upload the file again for a new reference
+once there is room. See [Rate limits](#rate-limits).
+
+A create returns as soon as the import is queued; follow it with
+`cohorts show <id>` as [The async model](#the-async-model) describes.
+
 Needs `--file`: capping an audience cohort by visit frequency (`freq_limit`
 with `freq_min`/`freq_max`), by distance (`distance_limit` with `distance` in
 meters) or, for a Lookalike Model audience, by score range (`score_limit` with
@@ -647,7 +664,6 @@ meters) or, for a Lookalike Model audience, by score range (`score_limit` with
 ```bash
 cat > freq-capped.json <<'EOF'
 {
-  "name": "Frequent visitors",
   "source": "audience",
   "audience_id": 88,
   "freq_limit": true,
@@ -946,6 +962,7 @@ path returns nothing.
 | Read | Path to the records |
 | --- | --- |
 | `show <id>` | `.data[0]` - an array of one, so the index is required |
+| `cohorts show <id>`, `projects show <id>` | `.data` - the record itself, with no array around it |
 | `list` | `.data.items[]`, with `.data.pagination` alongside |
 | `reference`, unpaged catalog | `.data[]` - a bare array |
 | `reference`, paged catalog | `.data.items[]` |
@@ -1058,7 +1075,16 @@ most often a date range outside the dataset's data coverage, or a filter the
 dataset needs. Fix the request and create it again.
 
 Cohort status ids are their own scale: `1` Uploading, `2` Initiating,
-`3` Processing, `4` Completed, `5` Not Available.
+`3` Processing, `4` Completed. A failed import reports an error code outside
+`1` to `4` instead, which the table shows as `Unknown`; `5` Not Available is
+reserved and never reported. No cohort command takes `--wait`, so re-run
+`cohorts show <id>` until the status is `4`, and stop on any status outside
+`1` to `4`. With `--json` the id is `.data.status.id`: a cohort read returns
+the record itself, not an array of one. After a failed import, fix the cause
+and create the cohort again. An `--upload-reference` is used up by the failed
+create, so upload the file again for a new one. A regular audience keeps its
+failed cohort and makes at most one, so run `cohorts delete <id>` before
+creating from it again.
 
 Everything else is followed with `show <id>`, or by a webhook registered in the
 Console.

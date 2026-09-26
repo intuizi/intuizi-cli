@@ -127,6 +127,28 @@ func TestCohortsCreateSendsAFolderURI(t *testing.T) {
 	}
 }
 
+// No cohort command waits, so the hint after a create is the whole guide to
+// following it: the one success, and the codes a failed import reports
+// instead, which the table shows as Unknown.
+func TestCohortsCreateNamesWhenToStopPolling(t *testing.T) {
+	srv, _ := stub(t, `{"status":"success","code":201,"data":[{"id":77,"name":"Q3 customers","status":{"id":2,"name":"Initiating"}}]}`)
+
+	_, stderr, err := run(t, cohortsCreateCommand(), srv,
+		"--name", "Q3 customers",
+		"--file-uri", "s3://example-bucket/cohorts/q3.csv",
+		"--file-format", "csv",
+		"--identifier-type", "hem_sha256",
+		"--identifier-column", "email_sha256")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for _, want := range []string{"intuizi cohorts show <id>", "4 Completed", "outside 1 to 4", "failed"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr should contain %q, got %q", want, stderr)
+		}
+	}
+}
+
 func TestCohortsCreateRejectsFileMixedWithFlags(t *testing.T) {
 	srv, got := stub(t, `{}`)
 

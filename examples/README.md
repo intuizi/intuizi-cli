@@ -24,7 +24,7 @@ sending anything. The dates are examples too, and some go stale: see the
 | `audience-refine-crosspurchase.json` | `audiences create` | `refine` sits **inside** the dataset; `crosspurchase` sits at the **top level**. Both are permission-gated. |
 | `activation.json` | `activations create --file` | From flags, an export needs `--audience-id`, `--endpoint-connection-id`, `--pricing-model-id` and at least one `--datastream`; without a datastream it completes and delivers nothing. Use this file for per-stream inputs or compression. Add `--wait` to follow it to Completed; `--timeout` defaults to 60m. |
 | `cohort.json` | `cohorts create` | Swap `file_uri` for `upload_reference` to use `intuizi uploads put`. Or build it from flags - see the README. |
-| `cohort-from-audience.json` | `cohorts create` | The audience must be Completed, and makes at most one live cohort. Swap `device_limit` for `freq_limit` + `freq_min`/`freq_max`, or `distance_limit` + `distance` (meters). Its `name` is ignored - the cohort takes the audience's. |
+| `cohort-from-audience.json` | `cohorts create` | The audience must be Completed, and makes at most one live cohort. Swap `device_limit` for `freq_limit` + `freq_min`/`freq_max`, or `distance_limit` + `distance` (meters). It carries no `name`: the cohort takes the audience's, and the API ignores one sent here. |
 | `schedule.json` | `schedules create` | The `activation` block re-exports the audience every cycle; drop it for a refresh-only schedule, which flags can build. `recurrence.start` must be in the future in `recurrence.timezone`. |
 
 ## Where the ids come from
