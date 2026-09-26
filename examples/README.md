@@ -2,7 +2,8 @@
 
 Bodies for the `create` commands that take `--file`. Every id and code in them
 is a placeholder - replace them with values read from your own account before
-sending anything.
+sending anything. The dates are examples too, and some go stale: see the
+`WebDomain` note under Gotchas.
 
 > **`signal_providers` fails silently.** A value that is not in your account's
 > catalog is *not* rejected with a 422 - the audience builds normally and
@@ -52,3 +53,8 @@ intuizi reference common schedule-endings         # recurrence.ending.type
 - A `crosspurchase` window covers at most two calendar months and cannot run
   past the last settled purchase week.
 - `crossvisitation` can be sent on create but never round-trips on the read.
+- A `WebDomain` dataset's `start_date` must fall within the last 45 days
+  (today minus 46 days, in UTC, is the earliest accepted), or the API
+  rejects it with a 422. `audience-two-datasets.json` carries a fixed date
+  that goes stale, so move both datasets' windows to a recent week before
+  sending.

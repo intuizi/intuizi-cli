@@ -226,7 +226,9 @@ jq --argjson p "$providers" '.datasets[0].signal_providers = $p' base.json \
 
 Ready-made payloads for every command live in `examples/`. Every id in them is
 a placeholder: replace each one with a value read from the account in use, or
-the audience will build against ids that account does not have.
+the audience will build against ids that account does not have. The dates are
+examples too: a `WebDomain` start date must fall within the last 45 days, and
+a schedule's start must be in the future.
 
 `--file` cannot be combined with a flag that builds a body, or with
 `--dry-run`, since the file already carries one. `--wait`, `--timeout`,
@@ -431,16 +433,16 @@ exists for:
   "datasets": [
     {
       "type": "Apps",
-      "start_date": "2026-08-09",
-      "end_date": "2026-08-15",
+      "start_date": "2026-09-13",
+      "end_date": "2026-09-19",
       "signal_providers": ["ef3d56f1305f0f8f28bdf35eb524d729"],
       "categories": [1],
       "location": { "countries": ["USA"] }
     },
     {
       "type": "WebDomain",
-      "start_date": "2026-08-09",
-      "end_date": "2026-08-15",
+      "start_date": "2026-09-13",
+      "end_date": "2026-09-19",
       "signal_providers": ["80791f138dc009b67aabd14f3add93b3"],
       "iab_category_codes": [1],
       "location": { "countries": ["USA"] }
@@ -454,6 +456,12 @@ exists for:
 ```bash
 intuizi audiences create --file two-datasets.json --wait
 ```
+
+Move the dates to a recent week before sending. A `WebDomain` dataset's
+`start_date` must fall within the last 45 days, because older web data is
+archived: the earliest date accepted is today minus 46 days, in UTC, and an
+earlier one is rejected with a 422 that names it. The dates here, and in
+`examples/audience-two-datasets.json`, are illustrations that go stale.
 
 `operator` is `AND`, `OR` or `NOTIN`, from `reference common operators`.
 `NOTIN` is order-sensitive: it subtracts the second dataset from the first.

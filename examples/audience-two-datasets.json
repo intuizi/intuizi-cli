@@ -4,16 +4,16 @@
   "datasets": [
     {
       "type": "Apps",
-      "start_date": "2026-08-09",
-      "end_date": "2026-08-15",
+      "start_date": "2026-09-13",
+      "end_date": "2026-09-19",
       "signal_providers": ["ef3d56f1305f0f8f28bdf35eb524d729"],
       "categories": [1],
       "location": { "countries": ["USA"] }
     },
     {
       "type": "WebDomain",
-      "start_date": "2026-08-09",
-      "end_date": "2026-08-15",
+      "start_date": "2026-09-13",
+      "end_date": "2026-09-19",
       "signal_providers": ["80791f138dc009b67aabd14f3add93b3"],
       "iab_category_codes": [1],
       "location": { "countries": ["USA"] }
