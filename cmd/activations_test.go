@@ -705,3 +705,62 @@ func TestWaitHardErrorPrintsNothing(t *testing.T) {
 		t.Errorf("stdout = %q, want nothing", out)
 	}
 }
+
+// Three failed reads in a row abandon the wait like a timeout does, with the
+// job still running, so the last good read is printed. With --json it is the
+// polled record as read: a fourth read of a server that just failed three
+// times would only delay the exit.
+func TestWaitGiveUpPrintsTheLastRecord(t *testing.T) {
+	fast(t)
+	boom := reply{status: 500, body: `{"status":"error","code":500,"message":"boom","data":[]}`}
+
+	t.Run("table", func(t *testing.T) {
+		srv, _ := stubSeq(t, activation(101, "Processing"), boom)
+
+		out, _, err := run(t, activationsShowCommand(), srv, "501", "--wait")
+		if err == nil || !strings.Contains(err.Error(), "giving up after 3") {
+			t.Fatalf("err = %v", err)
+		}
+		if code := exitCode(err, nil, true); code != 1 {
+			t.Errorf("exit = %d, want 1", code)
+		}
+		if !strings.HasPrefix(out, "id") || !strings.Contains(out, "Processing") {
+			t.Errorf("stdout should be the last polled record:\n%s", out)
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		srv, got := stubSeq(t, activation(101, "Processing"), boom)
+
+		out, errb, err := runJSON(t, activationsShowCommand(), srv, "501", "--wait")
+		if err == nil || !strings.Contains(err.Error(), "giving up after 3") {
+			t.Fatalf("err = %v", err)
+		}
+		if len(got.paths) != 4 {
+			t.Errorf("expected 1 good + 3 failed polls and no re-read, got %d calls", len(got.paths))
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(out), &rec); err != nil {
+			t.Fatalf("stdout is not JSON: %v\n%s", err, out)
+		}
+		if status, _ := rec["status"].(map[string]any); status["name"] != "Processing" {
+			t.Errorf("stdout should be the last polled record:\n%s", out)
+		}
+		if !strings.Contains(errb, "last polled record") {
+			t.Errorf("stderr should say the shape is the polled record, got %q", errb)
+		}
+	})
+
+	// With no good read there is nothing to show.
+	t.Run("no read", func(t *testing.T) {
+		srv, _ := stubSeq(t, boom)
+
+		out, _, err := run(t, activationsShowCommand(), srv, "501", "--wait")
+		if err == nil || !strings.Contains(err.Error(), "giving up after 3") {
+			t.Fatalf("err = %v", err)
+		}
+		if out != "" {
+			t.Errorf("stdout = %q, want nothing", out)
+		}
+	})
+}

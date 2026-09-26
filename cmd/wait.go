@@ -50,6 +50,7 @@ var waiting = map[int]bool{
 var (
 	errWaitFailed  = errors.New("failed")
 	errWaitTimeout = errors.New("timed out")
+	errWaitGaveUp  = errors.New("giving up")
 )
 
 // waitFlags registers --wait and --timeout on cmd and returns a reader that
@@ -83,10 +84,11 @@ func waitFlags(cmd *cobra.Command) func() (bool, time.Duration, error) {
 // state. With --json the envelope is re-read so the bytes printed are the
 // server's own, as every other --json path does.
 //
-// A wait that fails or times out still prints the last record read, then
-// returns its error, so the exit code is unchanged and a CI log shows where
-// the job stood. Any other error - a hard API error, repeated failed reads, a
-// signal - prints nothing: there is no settled state to show.
+// A wait that fails, times out or gives up after repeated failed reads still
+// prints the last record read, then returns its error, so the exit code is
+// unchanged and a CI log shows where the job stood. A hard API error or a
+// signal prints nothing: the record may be long stale, and the error says
+// what went wrong.
 func waitAndPrint(cmd *cobra.Command, c *api.Client, prefix, singular string, id int, cols []string, timeout time.Duration) error {
 	path := prefix + "/" + strconv.Itoa(id)
 	final, err := waitFor(cmd, c, path, singular, id, timeout)
@@ -98,22 +100,34 @@ func waitAndPrint(cmd *cobra.Command, c *api.Client, prefix, singular string, id
 	if err != nil && (final == nil || !printsRecord(err)) {
 		return err
 	}
-	if perr := printWaited(cmd, c, path, final, cols); perr != nil && err == nil {
+	if perr := printWaited(cmd, c, path, final, cols, err); perr != nil && err == nil {
 		return perr
 	}
 	return err
 }
 
 // printsRecord reports a wait error that still ends on a record worth
-// printing: a failed state, or a timeout while the job runs on.
+// printing: a failed state, or a wait abandoned - timed out or given up -
+// while the job runs on.
 func printsRecord(err error) bool {
-	return errors.Is(err, errWaitFailed) || errors.Is(err, errWaitTimeout)
+	return errors.Is(err, errWaitFailed) || errors.Is(err, errWaitTimeout) || errors.Is(err, errWaitGaveUp)
 }
 
 // printWaited prints the record a wait ended on, in the active output mode.
-func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Record, cols []string) error {
+// waitErr is how the wait ended, nil for a success.
+func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Record, cols []string, waitErr error) error {
 	if jsonOutput {
-		raw, err := rawAfterWait(cmd, c, path, final)
+		var (
+			raw []byte
+			err error
+		)
+		if errors.Is(waitErr, errWaitGaveUp) {
+			// The last three reads failed; a fourth would only delay the exit.
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "printing the last polled record instead of re-reading it")
+			raw, err = json.MarshalIndent(final, "", "  ")
+		} else {
+			raw, err = rawAfterWait(cmd, c, path, final)
+		}
 		if err != nil {
 			return err
 		}
@@ -230,7 +244,7 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 		default:
 			failures++
 			if failures >= maxPollFailures {
-				return rec, fmt.Errorf("giving up after %d consecutive failed reads: %w", failures, err)
+				return rec, fmt.Errorf("%w after %d consecutive failed reads: %w", errWaitGaveUp, failures, err)
 			}
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "poll failed (%d/%d), retrying: %v\n", failures, maxPollFailures, err)
 		}

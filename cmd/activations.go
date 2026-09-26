@@ -28,9 +28,10 @@ delivered files are listed under datastreams[].results.uri, which --json shows.
 Pass --wait to 'create' or 'show' to follow an activation to its end: each
 status change is printed to stderr, the final state to stdout, and the exit
 code is non-zero if it fails, if any datastream fails to deliver, or --timeout
-(default 60m) runs out. A failed or timed-out wait still prints the last
-record it read, then exits non-zero. A Completed activation with no
-datastreams exits 0, and stderr says that nothing was delivered.
+(default 60m) runs out. A wait that fails, times out, or gives up after three
+failed reads in a row still prints the last record it read, then exits
+non-zero. A Completed activation with no datastreams exits 0, and stderr says
+that nothing was delivered.
 
 An audience must hold at least 500 devices before it can be activated.`,
 }
