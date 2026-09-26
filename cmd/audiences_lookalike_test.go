@@ -101,3 +101,46 @@ func TestLookalikeCreateHelpNamesTheContrastFlag(t *testing.T) {
 		t.Errorf("help still routes a contrast audience through --file:\n%s", long)
 	}
 }
+
+// The API emails the run's creator on completion unless told otherwise, so
+// the flag defaults on and is always sent: with omitempty, --notify=false went
+// out as nothing and the email was sent anyway.
+func TestLookalikeCreateAlwaysSendsNotification(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra []string
+		want  bool
+	}{
+		{"default on", nil, true},
+		{"--notify", []string{"--notify"}, true},
+		{"--notify=false", []string{"--notify=false"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, created)
+
+			body := dryRunBody(t, lookalikeCreateCommand(), srv,
+				append(append([]string(nil), lookalikeFlags...), tc.extra...)...)
+
+			got, ok := body["notification"]
+			if !ok {
+				t.Fatalf("notification not sent: %v", body)
+			}
+			if got != tc.want {
+				t.Errorf("notification = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// --file carries the whole body, notification included.
+func TestLookalikeCreateRejectsNotifyWithFile(t *testing.T) {
+	srv, got := stub(t, created)
+	path := payloadFile(t, `{"name":"x"}`)
+
+	_, _, err := run(t, lookalikeCreateCommand(), srv, "--file", path, "--notify=false")
+
+	wantUsageErr(t, err, "--file carries the whole body", "--notify")
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}

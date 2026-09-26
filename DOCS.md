@@ -414,7 +414,7 @@ intuizi audiences create --file examples/audience-refine-crosspurchase.json
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--exclude-seed-devices` `--expand-eids` | booleans, default false, always sent | - |
 | `--contrast-audience-id` | Completed, non-lookalike audience | `audiences list` |
-| `--notify` | boolean | - |
+| `--notify` | boolean, default true, always sent | - |
 | `--file` | the whole payload as JSON, or `-` for stdin | for fields the flags do not model |
 | `--dry-run` | - | - |
 
@@ -429,6 +429,10 @@ flags do not model.
 
 `--signal` takes `poi`, `apps`, `demographics`, `transactions` or
 `profile_attributes`. `web` and `ctv` were withdrawn and are rejected.
+
+When the run completes, the API emails the user who created it. `--notify` is
+on by default and always sent as `notification`, so `--notify=false` is what
+turns the email off.
 
 Requires the Lookalike capability; a 403 means it is not enabled.
 

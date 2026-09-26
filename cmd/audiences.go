@@ -396,10 +396,12 @@ type lookalikeConfig struct {
 	ContrastAudienceID int          `json:"contrast_audience_id,omitempty"`
 }
 
+// lookalikeBody always carries notification: the API defaults it to true, so
+// omitting a false would send the email anyway.
 type lookalikeBody struct {
 	Name             string          `json:"name"`
 	SourceAudienceID int             `json:"source_audience_id"`
-	Notification     bool            `json:"notification,omitempty"`
+	Notification     bool            `json:"notification"`
 	Config           lookalikeConfig `json:"config"`
 }
 
@@ -459,6 +461,9 @@ repeated for more than one. web and ctv are withdrawn and rejected.
 because the API requires both fields. --contrast-audience-id names a Completed,
 non-lookalike audience to contrast the seed against. --dry-run prints the body
 and sends nothing.
+
+When the run completes, the API emails the user who created it. --notify is on
+by default and always sent; pass --notify=false to skip the email.
 
 Anything the API grows that these flags do not model goes through the whole
 body instead, with --file:
@@ -563,8 +568,8 @@ Requires the Lookalike capability; a 403 means it is not enabled.`,
 		"Expand matched devices to their EIDs")
 	f.IntVar(&contrastID, "contrast-audience-id", 0,
 		"Completed, non-lookalike audience to contrast against")
-	f.BoolVar(&notify, "notify", false,
-		"Notify the account owner when the run finishes")
+	f.BoolVar(&notify, "notify", true,
+		"Email the user who created the run when it completes\n(--notify=false to skip)")
 	// No MarkFlagsOneRequired("file", "source-audience-id"): see audiencesCreateCommand.
 	return cmd
 }
