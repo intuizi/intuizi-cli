@@ -278,3 +278,68 @@ func TestSchedulesCreateChecksTheNameCharacters(t *testing.T) {
 		t.Errorf("should cost no round trip, got %v", got.paths)
 	}
 }
+
+// An --end-date before the --start date used to pass both the CLI and the
+// API, and the gap was counted forward from --start, so the schedule ran for
+// that many days instead of not at all. The end date is compared with the
+// start's own date in --timezone, so the start date itself is still allowed.
+func TestSchedulesCreateRejectsAnEndDateBeforeTheStart(t *testing.T) {
+	srv, got := stub(t, `{}`)
+	base := append(append([]string{}, scheduleBase...),
+		"--window", "2", "--ending", "3", "--timezone", "America/New_York", "--dry-run")
+
+	for _, tc := range []struct {
+		name, start, end string
+		ok               bool
+	}{
+		{"a day before", "2999-03-10 06:00:00", "2999-03-09", false},
+		{"a year before", "2999-03-10 06:00:00", "2998-03-10", false},
+		{"the start date", "2999-03-10 06:00:00", "2999-03-10", true},
+		{"after", "2999-03-10 06:00:00", "2999-04-10", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append(append([]string{}, base...), "--start", tc.start, "--end-date", tc.end)
+			out, _, err := run(t, schedulesCreateCommand(), srv, args...)
+			if tc.ok {
+				if err != nil {
+					t.Fatalf("rejected a valid --end-date: %v", err)
+				}
+				return
+			}
+			var ue usageError
+			if !errors.As(err, &ue) {
+				t.Fatalf("err = %v, want a usageError", err)
+			}
+			if !strings.Contains(err.Error(), "--end-date "+tc.end) || !strings.Contains(err.Error(), "2999-03-10") {
+				t.Errorf("err = %v, want it to name both dates", err)
+			}
+			if out != "" {
+				t.Errorf("a rejected dry run must print no body, got %q", out)
+			}
+		})
+	}
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
+// The API caps a schedule name at 255 characters; a dry run should not print
+// a body it would refuse.
+func TestSchedulesCreateChecksTheNameLength(t *testing.T) {
+	srv, _ := stub(t, `{}`)
+	for _, tc := range []struct {
+		n  int
+		ok bool
+	}{{255, true}, {256, false}} {
+		args := []string{"--name", strings.Repeat("a", tc.n), "--audience-id", "88", "--frequency", "weekly",
+			"--window", "2", "--start", futureStart(t, "UTC"), "--timezone", "UTC", "--dry-run"}
+		_, _, err := run(t, schedulesCreateCommand(), srv, args...)
+		if tc.ok && err != nil {
+			t.Errorf("%d characters: %v", tc.n, err)
+		}
+		var ue usageError
+		if !tc.ok && (!errors.As(err, &ue) || !strings.Contains(err.Error(), "255")) {
+			t.Errorf("%d characters: err = %v, want a usage error naming the cap", tc.n, err)
+		}
+	}
+}

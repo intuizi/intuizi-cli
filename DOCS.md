@@ -690,7 +690,7 @@ included; a 403 means they are not enabled for the account.
 
 | Flag | Takes | Where the value comes from |
 | --- | --- | --- |
-| `--name` | letters, digits, spaces, `_` and `-` | - |
+| `--name` | letters, digits, spaces, `_` and `-`, up to 255 characters | - |
 | `--audience-id` | audience to rebuild each cycle | `audiences list` |
 | `--project-id` | project id | `projects list` |
 | `--start` | `"YYYY-MM-DD HH:MM:SS"`, read in `--timezone`, must be in the future | - |
@@ -700,7 +700,7 @@ included; a 403 means they are not enabled for the account.
 | `--window-days` | `1` to `365`, `--window 3` Custom only | - |
 | `--ending` | `1`, `2` or `3`; default `1` | `reference common schedule-endings` |
 | `--after-recurrences` | run count of `1` or more, `--ending 2` only | - |
-| `--end-date` | `YYYY-MM-DD`, `--ending 3` only | - |
+| `--end-date` | `YYYY-MM-DD`, on or after the `--start` date, `--ending 3` only | - |
 | `--dry-run` | - | - |
 
 `--frequency` takes `daily`, `weekly`, `bi-weekly` or `monthly`. `--ending` is
@@ -710,7 +710,10 @@ Each ending rule carries its own field, and a mismatch is rejected before
 anything is sent; the API rejects it as well, with a 422. `--start` and
 `--timezone` are checked before anything is sent: the zone must be a real IANA
 name, the start must parse in the layout above, and it must still be in the
-future in that zone.
+future in that zone. An `--end-date` before the `--start` date is rejected
+too: the API would accept it and count the gap forward from `--start`, so the
+schedule would run for that many days instead of not at all. So is a `--name`
+over 255 characters.
 
 ```bash
 intuizi schedules create --name "Weekly coffee refresh" --audience-id 88 \

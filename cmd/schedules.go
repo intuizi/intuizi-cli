@@ -122,7 +122,8 @@ The recurrence block is one level deep, so it can be built from flags:
 
 --start must be in the future and is read in --timezone. --window 3 is Custom
 and also needs --window-days. --ending defaults to 1 Never; 2 Recurrences needs
---after-recurrences and 3 Custom Date needs --end-date.
+--after-recurrences and 3 Custom Date needs --end-date, on or after the
+--start date.
 
 An activation block for auto-export is nested, so a schedule that exports every
 cycle is passed whole instead:
@@ -167,6 +168,10 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 		if !scheduleName.MatchString(name) {
 			return usageErr(fmt.Sprintf(
 				"--name %q may use only letters, digits, spaces, _ and -", name))
+		}
+		// The API's cap; the characters above are ASCII, so bytes are characters.
+		if len(name) > 255 {
+			return usageErr(fmt.Sprintf("--name is %d characters; the most a schedule name takes is 255", len(name)))
 		}
 
 		freq, ok := scheduleFrequencies[strings.ToLower(frequency)]
@@ -216,8 +221,16 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 			if !flags.Changed("end-date") {
 				return usageErr("--ending 3 is Custom Date and needs --end-date")
 			}
-			if _, err := time.Parse(dateLayout, endDate); err != nil {
+			end, err := time.Parse(dateLayout, endDate)
+			if err != nil {
 				return usageErr("--end-date must be YYYY-MM-DD, not " + endDate)
+			}
+			// Neither the API nor the run count rejects an earlier end date:
+			// the gap is counted forward from --start, so the schedule would
+			// run for that many days instead of not at all.
+			if first := startAt.Format(dateLayout); end.Format(dateLayout) < first {
+				return usageErr(fmt.Sprintf("--end-date %s is before the --start date %s; "+
+					"the schedule ends on or after the day it starts", endDate, first))
 			}
 			if flags.Changed("after-recurrences") {
 				return usageErr("--after-recurrences belongs to --ending 2, not 3")
@@ -288,8 +301,9 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 
 	completeValues(cmd, "frequency", sortedKeys(scheduleFrequencies))
 	f.StringVar(&endDate, "end-date", "",
-		"Date the schedule ends, YYYY-MM-DD (--ending 3); counted as whole\n"+
-			"cycles from --start to 00:00 on that date, so it is not always a run date")
+		"Date the schedule ends, YYYY-MM-DD (--ending 3), on or after the --start\n"+
+			"date; counted as whole cycles from --start to 00:00 on that date, so it\n"+
+			"is not always a run date")
 	return cmd
 }
 
