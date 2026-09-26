@@ -635,9 +635,9 @@ func audiencesDeleteCommand() *cobra.Command {
 	cmd := deleteCommand("audience", audiencesPrefix)
 	cmd.Long += `
 
-A cohort created from the audience with 'intuizi cohorts create --audience-id'
-is deleted with it, and deleting a Lookalike Model that is still modelling
-stops the run.`
+A cohort created from a regular audience with 'intuizi cohorts create
+--audience-id' is deleted with it; cohorts created from a Lookalike Model are
+not. Deleting a Lookalike Model that is still modelling stops the run.`
 	return cmd
 }
 
