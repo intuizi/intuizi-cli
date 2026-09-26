@@ -807,7 +807,8 @@ func TestWaitGiveUpPrintsTheLastRecord(t *testing.T) {
 		}
 	})
 
-	// With no good read there is nothing to show.
+	// With no good read there is no record to show. With --json the last
+	// failed read's error envelope is printed, as for any refused request.
 	t.Run("no read", func(t *testing.T) {
 		srv, _ := stubSeq(t, boom)
 
@@ -817,6 +818,21 @@ func TestWaitGiveUpPrintsTheLastRecord(t *testing.T) {
 		}
 		if out != "" {
 			t.Errorf("stdout = %q, want nothing", out)
+		}
+	})
+
+	t.Run("no read json", func(t *testing.T) {
+		srv, _ := stubSeq(t, boom)
+
+		out, _, err := runJSON(t, activationsShowCommand(), srv, "501", "--wait")
+		if err == nil || !strings.Contains(err.Error(), "giving up after 3") {
+			t.Fatalf("err = %v", err)
+		}
+		var env struct {
+			Code int `json:"code"`
+		}
+		if err := json.Unmarshal([]byte(out), &env); err != nil || env.Code != 500 {
+			t.Errorf("stdout should be the last failed read's envelope (%v):\n%s", err, out)
 		}
 	})
 }

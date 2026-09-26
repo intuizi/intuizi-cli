@@ -1035,8 +1035,9 @@ whatever the outcome.
 
 No record is printed when the wait ends with none to show: a timeout or three
 failed reads before any status was read, a 401, 403 or 404 while polling, or
-Ctrl-C. With `--json` a refusal still prints its error envelope, as on any
-other command.
+Ctrl-C. With `--json` a wait that ends on a failed read still prints that
+read's error envelope, as any other command does: the 401, 403 or 404, or the
+last of the three failed reads.
 
 Audience and activation status ids share one scale, where `104` Completed is
 the only success. A wait polls on through `100` Initiating, `101` Processing,
