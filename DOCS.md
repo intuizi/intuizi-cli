@@ -69,7 +69,7 @@ $ intuizi auth status
 Base URL: https://console.intuizi.com
 Token:    present (in the OS credential store)
 Account:  you@example.com
-Expires:  2027-09-26 (in 365 days)
+Expires:  2027-09-26 (in 364 days)
 ```
 
 Every command refuses a stored token for a `--base-url` other than the
