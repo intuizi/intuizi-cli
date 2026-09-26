@@ -344,7 +344,13 @@ With --list, the file's name and brand_id are sent unless --name and
 file's key, update and remove. stderr notes each flag that replaces a
 different value in the file.
 
---update and --remove need --key to say how existing POIs are matched.
+Each listed location is matched to the brand's existing POIs on --key
+(the API uses gps-coordinates when it is omitted). A location that matches
+is never added a second time: --update changes the POI it matches, and
+without --update that POI is left as it is. --remove archives the brand's
+existing POIs that no listed location matches and keeps the matched ones, so
+list every location the brand should keep, not the ones to drop. Both take
+effect when Intuizi approves the submission, and both need --key.
 
 Only the --upload-reference form sends an Idempotency-Key, so only it can be
 retried safely with --idempotency-key; the API reads none on the --file and
@@ -451,9 +457,13 @@ retried safely with --idempotency-key; the API reads none on the --file and
 	flags.StringVar(&list, "list", "",
 		"Path to a JSON file holding locations[] (and name and brand_id\n"+
 			`unless the flags give them), or "-" to read it from stdin`)
-	flags.BoolVar(&update, "update", false, "Update existing matched POIs")
-	flags.BoolVar(&remove, "remove", false, "Remove existing matched POIs")
-	flags.StringVar(&key, "key", "", "How to match existing POIs: "+matchKeyList)
+	flags.BoolVar(&update, "update", false, "Update the brand's existing POIs that a listed location matches")
+	flags.BoolVar(&remove, "remove", false,
+		"Archive the brand's existing POIs that no listed location matches (matched\n"+
+			"ones are kept); applied when Intuizi approves the submission")
+	flags.StringVar(&key, "key", "",
+		"How listed locations are matched to the brand's existing POIs:\n"+
+			matchKeyList+"\n(the API uses gps-coordinates when omitted)")
 
 	return cmd
 }

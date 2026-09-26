@@ -815,8 +815,9 @@ counted run made. Create a new schedule instead.
 | `--file` | a `.csv` or `.txt` of locations | - |
 | `--list` | path to a JSON file holding `locations[]` (and `name` and `brand_id` unless the flags give them), or `-` for stdin | - |
 | `--upload-reference` | reference from an upload with `--purpose poi_submission` | `uploads put`, or `uploads reserve` |
-| `--key` | how to match existing POIs, below | - |
-| `--update` `--remove` | booleans; both need `--key` | - |
+| `--key` | how each listed location is matched to the brand's existing POIs, below | - |
+| `--update` | update the brand's existing POIs that a listed location matches; needs `--key` | - |
+| `--remove` | archive the brand's existing POIs that no listed location matches, keeping the matched ones; needs `--key` | - |
 
 Exactly one of `--file`, `--list` and `--upload-reference`. `--file` and
 `--upload-reference` need `--name` and `--brand-id`; `--list` takes both from
@@ -827,8 +828,13 @@ flag that replaces a different value in the body says so on stderr, as in
 reads stdin: `--file -` is refused and points at `--list -`.
 
 `--key` takes `location-id`, `gps-coordinates`, `store-id`, `master-id` or
-`external-id`. It travels on every route, so `--list ... --update --key
-store-id` updates the matched POIs rather than inserting duplicates.
+`external-id`, and the API matches on `gps-coordinates` when it is left out.
+A listed location that matches an existing POI is never added a second time:
+`--list ... --update --key store-id` changes the POIs it matches by store id,
+and without `--update` they are left as they are. `--remove` keeps the POIs
+you list and archives the rest of the brand's POIs, so list every location
+the brand should keep, not the ones to drop. Both take effect when Intuizi
+approves the submission.
 
 Only the `--upload-reference` form sends an `Idempotency-Key`. The API reads
 none on the `--file` and `--list` forms, so there `--idempotency-key` has no
