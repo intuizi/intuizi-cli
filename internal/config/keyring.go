@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,17 @@ type keyringStore interface {
 var keyring keyringStore = osKeyring{}
 
 // False when the store is switched off: neither read nor write touches it.
-func keyringEnabled() bool { return os.Getenv(EnvNoKeyring) == "" }
+// Unset, empty, or a value that reads as false (0, false) leaves it on, so
+// INTUIZI_NO_KEYRING=0 does not mean the opposite of what it says; any other
+// value switches it off.
+func keyringEnabled() bool {
+	v := strings.TrimSpace(os.Getenv(EnvNoKeyring))
+	if v == "" {
+		return true
+	}
+	off, err := strconv.ParseBool(v)
+	return err == nil && !off
+}
 
 // EnvNoKeyring keeps the token in the file: for anyone who prefers that, and
 // for tests in other packages, which must not reach the real store.

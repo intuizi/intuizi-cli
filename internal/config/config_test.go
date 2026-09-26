@@ -969,3 +969,28 @@ func TestSaveWhereReportsWhereTheTokenWent(t *testing.T) {
 		t.Errorf("with no token: where = %q, want %q", where, SourceNone)
 	}
 }
+
+// INTUIZI_NO_KEYRING=0 used to switch the store off like any other non-empty
+// value, so someone saying "not no-keyring" lost sight of a stored token and
+// the next login spent one of the account's ten slots. A value that reads as
+// false leaves the store on; anything else still switches it off.
+func TestNoKeyringFalseValuesLeaveTheStoreOn(t *testing.T) {
+	isolate(t)
+	for value, enabled := range map[string]bool{
+		"":      true,
+		"0":     true,
+		"false": true,
+		"FALSE": true,
+		"f":     true,
+		" 0 ":   true,
+		"1":     false,
+		"true":  false,
+		"yes":   false,
+		"on":    false,
+	} {
+		t.Setenv(EnvNoKeyring, value)
+		if got := keyringEnabled(); got != enabled {
+			t.Errorf("%s=%q: store enabled = %v, want %v", EnvNoKeyring, value, got, enabled)
+		}
+	}
+}
