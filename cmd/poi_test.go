@@ -283,7 +283,7 @@ func TestMergeSubmissionFields(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			body, err := mergeSubmissionFields([]byte(tc.payload), "from flag", 77, tc.setName, tc.setBrand)
+			body, err := mergeSubmissionFields(io.Discard, []byte(tc.payload), "from flag", 77, tc.setName, tc.setBrand)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want one naming %s", err, tc.wantErr)
@@ -334,6 +334,58 @@ func TestPoiSubmissionsCreateByListPostsTheMergedBody(t *testing.T) {
 	}
 	if locs, _ := body["locations"].([]any); len(locs) != 1 {
 		t.Errorf("locations = %v", body["locations"])
+	}
+}
+
+// A flag that replaces a different value in the --list body says so on
+// stderr: the override is the point, but a silent swap hides a file that
+// names another brand. The same value, or a field the body lacks, says
+// nothing.
+func TestPoiSubmissionsCreateByListNotesAnOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "locations.json")
+	if err := os.WriteFile(path,
+		[]byte(`{"name":"from file","brand_id":9,"key":"store-id","update":false,`+
+			`"locations":[{"country":"US","longitude":-89.6501,"latitude":39.7817}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bare := filepath.Join(t.TempDir(), "bare.json")
+	if err := os.WriteFile(bare, []byte(`{"locations":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"different values", []string{"--list", path, "--name", "from flag", "--brand-id", "12",
+			"--update", "--key", "external-id"}, []string{
+			`note: --name "from flag" replaces name "from file" from the --list body`,
+			"note: --brand-id 12 replaces brand_id 9 from the --list body",
+			"note: --update replaces update false from the --list body",
+			`note: --key "external-id" replaces key "store-id" from the --list body`,
+		}},
+		{"same values", []string{"--list", path, "--name", "from file", "--brand-id", "9",
+			"--key", "store-id"}, nil},
+		{"fields the body lacks", []string{"--list", bare, "--name", "n", "--brand-id", "12"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, submissionEnvelope)
+			_, stderr, err := run(t, poiSubmissionCreateCommand(), srv, tc.args...)
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			var notes []string
+			for _, line := range strings.Split(stderr, "\n") {
+				if strings.HasPrefix(line, "note: ") {
+					notes = append(notes, line)
+				}
+			}
+			if strings.Join(notes, "\n") != strings.Join(tc.want, "\n") {
+				t.Fatalf("notes = %q, want %q", notes, tc.want)
+			}
+		})
 	}
 }
 

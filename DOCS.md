@@ -738,8 +738,11 @@ intuizi schedules create --file examples/schedule.json
 
 Exactly one of `--file`, `--list` and `--upload-reference`. `--file` and
 `--upload-reference` need `--name` and `--brand-id`; `--list` takes both from
-the body unless the flags override them. Only `--list` reads stdin: `--file -`
-is refused and points at `--list -`.
+the body unless the flags override them, and `--key`, `--update` and
+`--remove` replace the body's `key`, `update` and `remove` the same way. A
+flag that replaces a different value in the body says so on stderr, as in
+`note: --brand-id 12 replaces brand_id 9 from the --list body`. Only `--list`
+reads stdin: `--file -` is refused and points at `--list -`.
 
 `--key` takes `location-id`, `gps-coordinates`, `store-id`, `master-id` or
 `external-id`. It travels on every route, so `--list ... --update --key

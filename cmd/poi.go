@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"net/url"
 	"path/filepath"
 	"strconv"
@@ -339,7 +340,9 @@ Exactly one source:
                                   it from stdin
 
 With --list, the file's name and brand_id are sent unless --name and
---brand-id override them.
+--brand-id override them, and --key, --update and --remove replace the
+file's key, update and remove. stderr notes each flag that replaces a
+different value in the file.
 
 --update and --remove need --key to say how existing POIs are matched.
 
@@ -402,9 +405,21 @@ retried safely with --idempotency-key; the API reads none on the --file and
 				if err != nil {
 					return err
 				}
-				body, err := mergeSubmissionFields(payload, name, brandID, flags.Changed("name"), flags.Changed("brand-id"))
+				stderr := cmd.ErrOrStderr()
+				body, err := mergeSubmissionFields(stderr, payload, name, brandID,
+					flags.Changed("name"), flags.Changed("brand-id"))
 				if err != nil {
 					return err
+				}
+				// The match flags replace the body's fields the same way.
+				if update {
+					noteOverride(stderr, body, "update", true)
+				}
+				if remove {
+					noteOverride(stderr, body, "remove", true)
+				}
+				if key != "" {
+					noteOverride(stderr, body, "key", key)
 				}
 				// JSON like create-by-upload, so the booleans are real ones.
 				addMatchFields(body, update, remove, key)
@@ -464,16 +479,19 @@ func addMatchFields(body map[string]any, update, remove bool, key string) {
 }
 
 // mergeSubmissionFields lets --name and --brand-id override what the list file
-// carries, so one file can be reused across brands.
-func mergeSubmissionFields(payload []byte, name string, brandID int, setName, setBrand bool) (map[string]any, error) {
+// carries, so one file can be reused across brands. An override of a different
+// value is noted on w.
+func mergeSubmissionFields(w io.Writer, payload []byte, name string, brandID int, setName, setBrand bool) (map[string]any, error) {
 	body, err := decodeObject(payload)
 	if err != nil {
 		return nil, err
 	}
 	if setName {
+		noteOverride(w, body, "name", name)
 		body["name"] = name
 	}
 	if setBrand {
+		noteOverride(w, body, "brand-id", brandID)
 		body["brand_id"] = brandID
 	}
 	if _, ok := body["name"]; !ok {
@@ -483,6 +501,32 @@ func mergeSubmissionFields(payload []byte, name string, brandID int, setName, se
 		return nil, usageErr("the list file has no brand_id - pass --brand-id")
 	}
 	return body, nil
+}
+
+// noteOverride says on w when the flag for field is about to replace a
+// different value the --list body already carries. The flag wins, which is
+// the point, but a silent swap would hide a file that names another brand.
+// flag is the flag's name, which is the field's with - for _.
+func noteOverride(w io.Writer, body map[string]any, flag string, value any) {
+	field := strings.ReplaceAll(flag, "-", "_")
+	old, ok := body[field]
+	// Compared as text: the body's numbers decode as json.Number.
+	if !ok || fmt.Sprint(old) == fmt.Sprint(value) {
+		return
+	}
+	given := "--" + flag
+	if _, isBool := value.(bool); !isBool {
+		given += " " + shown(value)
+	}
+	_, _ = fmt.Fprintf(w, "note: %s replaces %s %s from the --list body\n", given, field, shown(old))
+}
+
+// shown quotes a string so an empty or spaced name reads as one value.
+func shown(v any) string {
+	if s, ok := v.(string); ok {
+		return strconv.Quote(s)
+	}
+	return fmt.Sprint(v)
 }
 
 func init() {
