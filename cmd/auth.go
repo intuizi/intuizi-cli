@@ -119,13 +119,19 @@ func login(cmd *cobra.Command, email, password string) error {
 	if err := storeUnavailable(from); err != nil {
 		return err
 	}
+	// Whether the stored token is known to be dead, for the replace line.
+	dead := expired(cfg.ExpiresAt)
 	// Another account's token is not reused however live it is: checked
 	// first, so the old token is not even sent to find out.
-	if sameAccount(email, cfg.Email) && storedTokenUsable(ctx, cfg, stored, base) {
-		config.MigrateToken(cfg, from)
-		reportReuse(stderr, base, cfg.Email)
-		warnEnvToken(stderr, "is set and takes precedence over the stored token")
-		return nil
+	if sameAccount(email, cfg.Email) {
+		if storedTokenUsable(ctx, cfg, stored, base) {
+			config.MigrateToken(cfg, from)
+			reportReuse(stderr, base, cfg.Email)
+			warnEnvToken(stderr, "is set and takes precedence over the stored token")
+			return nil
+		}
+		// For a token this console holds, only expiry or a 401 says no.
+		dead = true
 	}
 	// Whose token this login replaces, when it is another account's here.
 	replaced := ""
@@ -159,8 +165,12 @@ func login(cmd *cobra.Command, email, password string) error {
 
 	_, _ = fmt.Fprintf(stderr, "Logged in to %s as %s\n", base, cfg.Email)
 	if replaced != "" && !sameAccount(cfg.Email, replaced) {
-		_, _ = fmt.Fprintf(stderr, "Replaced the token stored for %s; it stays valid until it expires "+
-			"or you revoke it at My Account > API Tokens.\n", replaced)
+		if dead {
+			_, _ = fmt.Fprintf(stderr, "Replaced the token stored for %s, which was no longer valid.\n", replaced)
+		} else {
+			_, _ = fmt.Fprintf(stderr, "Replaced the token stored for %s; it stays valid until it expires "+
+				"or you revoke it at My Account > API Tokens.\n", replaced)
+		}
 	}
 	_, _ = fmt.Fprintf(stderr, "Token saved to %s\n", path)
 	if exp := formatExpiry(res.ExpiresAt); exp != "" {
@@ -209,10 +219,8 @@ func storedTokenUsable(ctx context.Context, cfg *config.Config, token, base stri
 	if cfg.BaseURL != "" && !sameBase(cfg.BaseURL, base) {
 		return false
 	}
-	if cfg.ExpiresAt != "" {
-		if t, err := time.Parse(time.RFC3339, cfg.ExpiresAt); err == nil && !t.After(time.Now()) {
-			return false
-		}
+	if expired(cfg.ExpiresAt) {
+		return false
 	}
 
 	// Not expired is not enough - it may have been revoked in the console.
@@ -228,6 +236,13 @@ func storedTokenUsable(ctx context.Context, cfg *config.Config, token, base stri
 	// costs one of 10 slots for a year and can't be undone without revoking
 	// CI's token too, so keep what we have. 'auth logout' forces a new one.
 	return true
+}
+
+// expired reports an expiry that has passed. No expiry, or one that does not
+// parse, is not known to have passed.
+func expired(iso string) bool {
+	t, err := time.Parse(time.RFC3339, iso)
+	return err == nil && !t.After(time.Now())
 }
 
 // sameBase compares two base URLs the way BaseURL normalises them.

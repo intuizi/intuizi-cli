@@ -330,11 +330,55 @@ func TestLoginAsAnotherAccountMintsAndReplaces(t *testing.T) {
 	if cfg.Token != "their-token" || cfg.Email != "c@d.com" {
 		t.Errorf("stored config = %+v, want c@d.com's token", cfg)
 	}
-	for _, want := range []string{"Logged in to " + srv.URL + " as c@d.com", "a@b.com"} {
+	// Not known to be dead - it was never even checked - so it may still work.
+	for _, want := range []string{"Logged in to " + srv.URL + " as c@d.com",
+		"Replaced the token stored for a@b.com", "stays valid"} {
 		if !strings.Contains(errb, want) {
 			t.Errorf("stderr missing %q:\n%s", want, errb)
 		}
 	}
+}
+
+// Another account's token that had expired, or that the API refused, does not
+// "stay valid until it expires": the replace line says it was already dead.
+func TestLoginOverAnotherAccountsDeadToken(t *testing.T) {
+	t.Run("expired", func(t *testing.T) {
+		srv, _ := fakeConsole(t, "their-token", 200)
+		path := authEnv(t, srv.URL)
+		storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "my-token", Email: "a@b.com",
+			ExpiresAt: "2020-01-01T00:00:00Z"})
+
+		_, errb, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "c@d.com")
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		if !strings.Contains(errb, "Replaced the token stored for a@b.com") || strings.Contains(errb, "stays valid") {
+			t.Errorf("stderr = %q, want the replace line without \"stays valid\"", errb)
+		}
+	})
+
+	// A bare login verifies the stored token first; after a 401 the prompt
+	// can still name another account.
+	t.Run("rejected", func(t *testing.T) {
+		srv, got := fakeConsole(t, "their-token", 401)
+		path := authEnv(t, srv.URL)
+		storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "revoked", Email: "a@b.com"})
+		f := installFakeTerminal(t)
+		close(f.release)
+
+		cmd := authLoginCommand()
+		cmd.SetContext(context.Background())
+		_, errb, err := runAuth(t, cmd, "c@d.com\n")
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		if got.hits() != 2 || got.paths[1] != "/api/v2/auth/api-token" {
+			t.Errorf("requests = %v, want verify then mint", got.paths)
+		}
+		if !strings.Contains(errb, "Replaced the token stored for a@b.com") || strings.Contains(errb, "stays valid") {
+			t.Errorf("stderr = %q, want the replace line without \"stays valid\"", errb)
+		}
+	})
 }
 
 // A token stored before accounts were recorded belongs to nobody known, so
