@@ -73,7 +73,7 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 		// "Example Coffee Reserve". One exact label is the one that was meant,
 		// but only if every match came back: its twin may be on the next page.
 		partial := pg != nil && pg.Total > len(items)
-		if exact := exactMatches(items, search); len(exact) == 1 && !partial {
+		if exact := exactMatches(items, search, path); len(exact) == 1 && !partial {
 			return catalogValue(exact[0], path)
 		}
 		// Ids too: the fix is usually to pass one.
@@ -95,12 +95,30 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 
 // exactMatches returns rows whose label equals the search, ignoring case and
 // space. Duplicates return all hits, so the caller still lists them.
-func exactMatches(items []output.Record, search string) []output.Record {
+//
+// An IAB category's label is "CODE - name", so there the code in its value,
+// or the name after the separator, is exact too: IAB1 is otherwise a contains
+// match for IAB10 to IAB19 as well, and no label is ever just "IAB1".
+func exactMatches(items []output.Record, search, path string) []output.Record {
 	want := strings.ToLower(strings.TrimSpace(search))
+	same := func(v any) bool {
+		s, ok := v.(string)
+		return ok && strings.ToLower(strings.TrimSpace(s)) == want
+	}
 	var hits []output.Record
 	for _, it := range items {
-		if label, ok := catalogLabel(it).(string); ok &&
-			strings.ToLower(strings.TrimSpace(label)) == want {
+		label := catalogLabel(it)
+		match := same(label)
+		if !match && path == iabCategoriesPath {
+			name := ""
+			if s, ok := label.(string); ok {
+				if _, after, found := strings.Cut(s, " - "); found {
+					name = after
+				}
+			}
+			match = same(it["value"]) || same(name)
+		}
+		if match {
 			hits = append(hits, it)
 		}
 	}

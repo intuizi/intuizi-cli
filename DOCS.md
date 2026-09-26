@@ -299,7 +299,9 @@ An IAB category row carries two identifiers: the IAB code (`IAB2`) as `value`,
 which `reference web domains --category-codes` takes, and the catalog `id`
 (`2`), which is what `iab_category_codes` takes. A WebDomain `--category` name
 resolves to the `id`, and a number passed instead must be that `id`, not the
-code.
+code. Its label reads `IAB2 - Automotive`, so the exact-match rule takes the
+row whose code (`IAB1`) or name (`Automotive`) is the one given: `IAB1`
+resolves to IAB1 rather than failing because IAB10 to IAB19 also contain it.
 
 `--brand` is POI only. AffinityTransactions has brands too, in its own
 `brands` field, which no flag writes yet; that filter needs `--file`.

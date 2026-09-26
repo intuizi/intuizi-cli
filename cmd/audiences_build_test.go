@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -354,7 +355,7 @@ func TestResolveOneAmbiguityListsIABCategoryIDs(t *testing.T) {
 		`{"value":"IAB2","text":"IAB2 - Automotive","id":2},`+
 		`{"value":"IAB20","text":"IAB20 - Travel","id":20}]}`)
 
-	_, err := resolveOne(context.Background(), c, referencePrefix+"web/iab-categories", "IAB2", "categories")
+	_, err := resolveOne(context.Background(), c, referencePrefix+"web/iab-categories", "IAB", "categories")
 	if err == nil {
 		t.Fatal("resolveOne picked one of several matches")
 	}
@@ -367,6 +368,46 @@ func TestResolveOneAmbiguityListsIABCategoryIDs(t *testing.T) {
 		if strings.Contains(err.Error(), code) {
 			t.Errorf("error lists the code %q where the id belongs: %v", code, err)
 		}
+	}
+}
+
+// An IAB category is labelled "CODE - name", so neither its code nor its name
+// is ever the whole label. A code that other codes contain, such as IAB1, and
+// a name that other names contain used to fail with a match list; the row
+// whose code or name is exactly the one given is taken instead.
+func TestResolveOneTakesAnExactIABCodeOrName(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":"IAB1","text":"IAB1 - Arts & Entertainment","id":1},`+
+		`{"value":"IAB10","text":"IAB10 - Home & Garden","id":10},`+
+		`{"value":"IAB3","text":"IAB3 - Business","id":3},`+
+		`{"value":"IAB13","text":"IAB13 - Business Finance","id":13}]}`)
+
+	for search, want := range map[string]string{
+		"IAB1":     "1",
+		"iab1":     "1",
+		"Business": "3",
+		"business": "3",
+	} {
+		got, err := resolveOne(context.Background(), c, iabCategoriesPath, search, "categories")
+		if err != nil {
+			t.Errorf("%q: %v", search, err)
+			continue
+		}
+		if fmt.Sprint(got) != want {
+			t.Errorf("%q resolved to %v, want the id %s", search, got, want)
+		}
+	}
+}
+
+// The code and name rule is the IAB label's alone: elsewhere a " - " is part
+// of the name, and only the whole label is an exact match.
+func TestResolveOneSplitsOnlyIABLabels(t *testing.T) {
+	c, _ := catalogServer(t, `{"status":"success","code":200,"message":"ok","data":[`+
+		`{"value":7,"text":"Example Coffee - Downtown"},`+
+		`{"value":8,"text":"Example Tea - Downtown"}]}`)
+
+	if _, err := resolveOne(context.Background(), c, brandsPath, "Downtown", "brands"); err == nil {
+		t.Fatal("a brand was picked by the part of its label after ' - '")
 	}
 }
 
