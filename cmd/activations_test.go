@@ -673,12 +673,13 @@ func TestWaitJSONPrintsTheFailedEnvelope(t *testing.T) {
 	}
 }
 
-// A timed-out --json wait prints the record the timeout error names, as
-// polled. A re-read after the deadline used to print whatever the job had
-// reached since - Completed, beside an error saying it was still running.
-// The poll interval stays at 15s here, so the 30ms deadline lands in the
-// sleep after the first read.
-func TestWaitJSONPrintsThePolledRecordOnTimeout(t *testing.T) {
+// A timed-out --json wait prints the envelope it last polled, which holds the
+// record the timeout error names. A re-read after the deadline used to print
+// whatever the job had reached since - Completed, beside an error saying it
+// was still running - and the bare record printed instead then was not the
+// envelope, so .data[0].status reached nothing. The poll interval stays at
+// 15s here, so the 30ms deadline lands in the sleep after the first read.
+func TestWaitJSONPrintsThePolledEnvelopeOnTimeout(t *testing.T) {
 	srv, got := stubSeq(t, activation(101, "Processing"), activation(104, "Completed"))
 
 	out, errb, err := runJSON(t, activationsShowCommand(), srv, "501", "--wait", "--timeout", "30ms")
@@ -688,15 +689,11 @@ func TestWaitJSONPrintsThePolledRecordOnTimeout(t *testing.T) {
 	if len(got.paths) != 1 {
 		t.Errorf("expected one poll and no re-read after the deadline, got %d calls", len(got.paths))
 	}
-	var rec map[string]any
-	if err := json.Unmarshal([]byte(out), &rec); err != nil {
-		t.Fatalf("stdout is not JSON: %v\n%s", err, out)
+	if name := polledEnvelope(t, out); name != "Processing" {
+		t.Errorf("stdout should hold the record the error names:\n%s", out)
 	}
-	if status, _ := rec["status"].(map[string]any); status["name"] != "Processing" {
-		t.Errorf("stdout should be the record the error names:\n%s", out)
-	}
-	if !strings.Contains(errb, fallbackNote+" the wait timed out") {
-		t.Errorf("stderr should say the shape is the polled record, and why, got %q", errb)
+	if strings.Contains(errb, "printing") {
+		t.Errorf("the envelope is the usual shape, so stderr need not explain it, got %q", errb)
 	}
 }
 
@@ -733,25 +730,42 @@ func TestWaitJSONTimeoutMakesNoLateRequest(t *testing.T) {
 }
 
 // A wait cut short by a hard error has no final state to show: the last read
-// may be long stale, and the error says what went wrong.
+// may be long stale, and the error says what went wrong. With --json the
+// refusal's own envelope is printed, as on every other --json path.
 func TestWaitHardErrorPrintsNothing(t *testing.T) {
 	fast(t)
 	gone := reply{status: 404, body: `{"status":"error","code":404,"message":"Activation not found.","data":[]}`}
-	srv, _ := stubSeq(t, activation(101, "Processing"), gone)
 
-	out, _, err := run(t, activationsShowCommand(), srv, "501", "--wait")
-	if err == nil || !strings.Contains(err.Error(), "not found") {
-		t.Fatalf("err = %v", err)
-	}
-	if out != "" {
-		t.Errorf("stdout = %q, want nothing", out)
-	}
+	t.Run("table", func(t *testing.T) {
+		srv, _ := stubSeq(t, activation(101, "Processing"), gone)
+		out, _, err := run(t, activationsShowCommand(), srv, "501", "--wait")
+		if err == nil || !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("err = %v", err)
+		}
+		if out != "" {
+			t.Errorf("stdout = %q, want nothing", out)
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		srv, _ := stubSeq(t, activation(101, "Processing"), gone)
+		out, _, err := runJSON(t, activationsShowCommand(), srv, "501", "--wait")
+		if err == nil || !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("err = %v", err)
+		}
+		var env struct {
+			Code int `json:"code"`
+		}
+		if err := json.Unmarshal([]byte(out), &env); err != nil || env.Code != 404 {
+			t.Errorf("stdout should be the 404 envelope (%v):\n%s", err, out)
+		}
+	})
 }
 
 // Three failed reads in a row abandon the wait like a timeout does, with the
 // job still running, so the last good read is printed. With --json it is the
-// polled record as read: a fourth read of a server that just failed three
-// times would only delay the exit.
+// envelope as polled: a fourth read of a server that just failed three times
+// would only delay the exit.
 func TestWaitGiveUpPrintsTheLastRecord(t *testing.T) {
 	fast(t)
 	boom := reply{status: 500, body: `{"status":"error","code":500,"message":"boom","data":[]}`}
@@ -762,6 +776,10 @@ func TestWaitGiveUpPrintsTheLastRecord(t *testing.T) {
 		out, _, err := run(t, activationsShowCommand(), srv, "501", "--wait")
 		if err == nil || !strings.Contains(err.Error(), "giving up after 3") {
 			t.Fatalf("err = %v", err)
+		}
+		// The job runs on, so the error names the command that resumes it.
+		if !strings.Contains(err.Error(), "rerun 'intuizi activations show 501 --wait'") {
+			t.Errorf("err = %v, want the resume command", err)
 		}
 		if code := exitCode(err, nil, true); code != 1 {
 			t.Errorf("exit = %d, want 1", code)
@@ -781,15 +799,11 @@ func TestWaitGiveUpPrintsTheLastRecord(t *testing.T) {
 		if len(got.paths) != 4 {
 			t.Errorf("expected 1 good + 3 failed polls and no re-read, got %d calls", len(got.paths))
 		}
-		var rec map[string]any
-		if err := json.Unmarshal([]byte(out), &rec); err != nil {
-			t.Fatalf("stdout is not JSON: %v\n%s", err, out)
+		if name := polledEnvelope(t, out); name != "Processing" {
+			t.Errorf("stdout should be the envelope last polled:\n%s", out)
 		}
-		if status, _ := rec["status"].(map[string]any); status["name"] != "Processing" {
-			t.Errorf("stdout should be the last polled record:\n%s", out)
-		}
-		if !strings.Contains(errb, fallbackNote+" the last 3 reads failed") {
-			t.Errorf("stderr should say the shape is the polled record, and why, got %q", errb)
+		if strings.Contains(errb, "printing") {
+			t.Errorf("the envelope is the usual shape, so stderr need not explain it, got %q", errb)
 		}
 	})
 
@@ -808,8 +822,8 @@ func TestWaitGiveUpPrintsTheLastRecord(t *testing.T) {
 }
 
 // After a failed wait the exit code is already 1, so the --json re-read is
-// tried once and then falls back to the polled record, rather than retrying
-// for up to two more poll intervals.
+// tried once and then falls back to the envelope as polled, rather than
+// retrying for up to two more poll intervals.
 func TestWaitJSONReReadsOnceAfterAFailure(t *testing.T) {
 	fast(t)
 	boom := reply{status: 500, body: `{"status":"error","code":500,"message":"boom","data":[]}`}
@@ -822,7 +836,7 @@ func TestWaitJSONReReadsOnceAfterAFailure(t *testing.T) {
 	if len(got.paths) != 3 {
 		t.Errorf("expected two polls and one re-read, got %d calls", len(got.paths))
 	}
-	if !strings.Contains(out, `"Error"`) {
+	if name := polledEnvelope(t, out); name != "Error" {
 		t.Errorf("stdout should be the failed record:\n%s", out)
 	}
 	if !strings.Contains(errb, fallbackNote+" re-reading it failed (") {

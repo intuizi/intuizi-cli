@@ -923,10 +923,10 @@ token or an unreadable `--file`; a failed catalog read while
 to the storage host on `uploads put`.
 
 A `--wait` that fails, times out or gives up is different: the record it
-prints was read successfully, so stdout carries that record's own success
-envelope after a failure, or the last polled record itself after a timeout, a
-wait that gave up after failed reads, or a failed re-read, while the exit code
-is 1. See [The async model](#the-async-model).
+prints was read successfully, so stdout carries the success envelope that
+record came in, while the exit code is 1. A `--wait` that ends on a `401`,
+`403` or `404` prints that refusal's error envelope, like any other request.
+See [The async model](#the-async-model).
 
 ### Envelope shapes
 
@@ -1009,25 +1009,25 @@ and the exit code alone says which: 0 for Completed, 1 for a failed state, a
 failed datastream, a timeout, or three failed reads in a row. When the wait
 is abandoned - timed out, or given up after three failed reads - the record is
 the last one read, so it shows where the job stood; the job keeps running
-server-side. The exit code is the one to branch on.
+server-side, and the error names the `show <id> --wait` command that resumes
+the wait. The exit code is the one to branch on.
 
-With `--json` a Completed or failed record is re-read and printed as the
-server's own envelope, so a failed wait exits 1 with a `"status": "success"`
-envelope on stdout, whose `.status` says nothing about the job: read
-`.data[0].status.id`. That re-read is one more request after the wait ends,
-tried up to three times after a success and once after a failure. An abandoned
-wait makes no request once it ends, so a timed-out command exits at
-`--timeout`, and stdout carries the last polled record itself rather than an
-envelope: the record the error names. A re-read that fails prints the polled
-record the same way. Read that record as `.status.id`, not
-`.data[0].status.id`, which is null there; stderr says `printing the last
-polled record, not the server's envelope:` and why (`the wait timed out`, `the
-last 3 reads failed`, or `re-reading it failed (...)`). With `--quiet` only the
-id is printed, whatever the outcome.
+With `--json` stdout is always the server's envelope, so read the job's status
+as `.data[0].status.id` whatever the outcome. A failed wait exits 1 with a
+`"status": "success"` envelope on stdout, whose `.status` says nothing about
+the job. A Completed or failed record is re-read once the wait ends, tried up
+to three times after a success and once after a failure; if that re-read
+fails, the envelope the record was last polled in is printed instead, and
+stderr says `printing the envelope as last polled: re-reading it failed
+(...)`. An abandoned wait makes no request once it ends, so a timed-out
+command exits at `--timeout`, and stdout carries the envelope last polled,
+which holds the record the error names. With `--quiet` only the id is printed,
+whatever the outcome.
 
-Nothing is printed on stdout when the wait ends with no record to show: a
-timeout or three failed reads before any status was read, a 401, 403 or 404
-while polling, or Ctrl-C.
+No record is printed when the wait ends with none to show: a timeout or three
+failed reads before any status was read, a 401, 403 or 404 while polling, or
+Ctrl-C. With `--json` a refusal still prints its error envelope, as on any
+other command.
 
 Audience and activation status ids share one scale, where `104` Completed is
 the only success. A wait polls on through `100` Initiating, `101` Processing,

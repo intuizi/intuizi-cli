@@ -14,10 +14,28 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// fallbackNote opens the one stderr line both --json fallbacks print - after
-// a failed re-read and after giving up - so a log reads the same either way
-// and says the stdout shape is not the envelope.
-const fallbackNote = "printing the last polled record, not the server's envelope:"
+// fallbackNote is the stderr line a --json wait prints when the re-read after
+// it fails and the envelope it last polled is printed instead.
+const fallbackNote = "printing the envelope as last polled:"
+
+// polledEnvelope decodes --json wait output as the server's envelope and
+// returns the status name of its one record, failing the test on any other
+// shape: a script reads .data[0].status whatever the outcome.
+func polledEnvelope(t *testing.T, out string) string {
+	t.Helper()
+	var env struct {
+		Code int `json:"code"`
+		Data []struct {
+			Status struct {
+				Name string `json:"name"`
+			} `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil || env.Code != 200 || len(env.Data) != 1 {
+		t.Fatalf("stdout should be the server's envelope (%v):\n%s", err, out)
+	}
+	return env.Data[0].Status.Name
+}
 
 // waitShow is a show-like leaf built on the wait helpers alone, so these tests
 // pin the helpers rather than whichever resource commands keep --wait.
@@ -196,7 +214,7 @@ func TestWaitJSONRetriesTheReRead(t *testing.T) {
 	}
 }
 
-// When the re-read keeps failing, the last polled record is printed rather
+// When the re-read keeps failing, the envelope last polled is printed rather
 // than nothing: the wait did succeed, and exit 1 would say the job failed.
 func TestWaitJSONFallsBackToTheFinalRecord(t *testing.T) {
 	fast(t)
@@ -210,11 +228,7 @@ func TestWaitJSONFallsBackToTheFinalRecord(t *testing.T) {
 	if want := 1 + maxPollFailures; len(got.paths) != want {
 		t.Errorf("expected poll + %d re-read attempts, got %d calls", maxPollFailures, len(got.paths))
 	}
-	var rec map[string]any
-	if err := json.Unmarshal([]byte(out), &rec); err != nil {
-		t.Fatalf("stdout is not JSON: %v\n%s", err, out)
-	}
-	if status, _ := rec["status"].(map[string]any); status["name"] != "Completed" {
+	if name := polledEnvelope(t, out); name != "Completed" {
 		t.Errorf("stdout should be the final record:\n%s", out)
 	}
 	if !strings.Contains(errb, fallbackNote+" re-reading it failed (") {
@@ -237,7 +251,7 @@ func TestWaitJSONFallsBackAtOnceOnAHardError(t *testing.T) {
 	if len(got.paths) != 2 {
 		t.Errorf("expected poll + one re-read, got %d calls", len(got.paths))
 	}
-	if !strings.Contains(out, "Completed") {
+	if name := polledEnvelope(t, out); name != "Completed" {
 		t.Errorf("stdout should be the final record:\n%s", out)
 	}
 }

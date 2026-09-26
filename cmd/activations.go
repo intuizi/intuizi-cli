@@ -30,7 +30,8 @@ status change is printed to stderr, the record the wait ended on to stdout,
 and the exit code is non-zero if it fails, if any datastream fails to deliver,
 or --timeout (default 60m) runs out. A wait that fails, times out, or gives up
 after three failed reads in a row still prints the last record it read, then
-exits non-zero. A Completed activation with no datastreams exits 0, and stderr
+exits non-zero, and a wait that times out or gives up names the command that
+resumes it. A Completed activation with no datastreams exits 0, and stderr
 says that nothing was delivered. 107 Additional Info is a failure too: the
 export stopped and will not continue. The API does not return the reason, but
 Audience Manager in the Intuizi console shows it on the activation.

@@ -113,7 +113,9 @@ results_count of 0. That is expected. Add --wait to block until the build
 reaches Completed, with --timeout to bound it (default 60m). The last record
 read is printed whether the build completes, fails, the wait times out or it
 gives up after three failed reads in a row, and an audience that fails to
-build, or a wait that times out or gives up, exits non-zero.
+build, or a wait that times out or gives up, exits non-zero. A wait that times
+out or gives up leaves the build running, and the error names the
+'intuizi audiences show <id> --wait' that resumes it.
 
 An audience that opts into data stream visualizations reads 109 Visualizing
 data streams while it draws them, before Completed, and the wait goes on
