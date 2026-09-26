@@ -435,6 +435,10 @@ func TestSearchHelpNamesTheColumnSearched(t *testing.T) {
 		if !strings.Contains(flag.Usage, tc.want) {
 			t.Errorf("%s %s --search help = %q, want it to name %q", tc.group, tc.item, flag.Usage, tc.want)
 		}
+		// The gender example says nothing about a marital or income code.
+		if tc.item != "genders" && strings.Contains(flag.Usage, "female") {
+			t.Errorf("%s %s --search help borrows the gender example: %q", tc.group, tc.item, flag.Usage)
+		}
 	}
 }
 

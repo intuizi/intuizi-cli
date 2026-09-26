@@ -899,9 +899,10 @@ label is needed as well as the value. The one exception is
 refused there (exit 2) - read it with `--json`.
 
 Most catalogs match `--search` on the label. The demographics `genders`,
-`marital-statuses` and `incomes` match the value code instead (`--search F`,
-not `female`), `apps bundle-ids` matches the app name, and `poi locations`
-matches the name or the address.
+`marital-statuses` and `incomes` match the code in the `value` column instead,
+not the text label (`--search F`, not `female`, for genders, and `M`, not
+`married`, for marital statuses), `apps bundle-ids` matches the app name, and
+`poi locations` matches the name or the address.
 
 - **common** - dataset-types, countries, states, cities, dmas, zipcodes,
   operators, languages, signal-providers, endpoint-partners,
@@ -1147,7 +1148,12 @@ failed cohort and makes at most one, so run `cohorts delete <id>` before
 creating from it again.
 
 Everything else is followed with `show <id>`, or by a webhook registered in the
-Console.
+Console. A webhook is a notification, not a source of truth: keep a
+low-frequency `show <id>` poll as the fallback for a delivery that exhausts
+its retries, and for the end states no webhook reports. An audience or
+activation that stops on `107` Additional Info sends none, and nor does a
+failed cohort import, whose error code is not the `5` that `cohort.failed`
+fires on.
 
 ## Shell completion
 

@@ -55,9 +55,12 @@ type endpoint struct {
 
 // Where --search is not matched on the label.
 const (
-	searchValueCode = "Case-insensitive contains match on the value code (F, not female)"
-	searchAppName   = "Case-insensitive contains match on the app name"
-	searchNameAddr  = "Case-insensitive contains match on the name or address"
+	// Each catalog its own example: the codes look nothing alike.
+	searchGenderCode  = "Case-insensitive contains match on the value code (F, not female)"
+	searchMaritalCode = "Case-insensitive contains match on the value code (M, not married)"
+	searchIncomeCode  = "Case-insensitive contains match on the value code in the value column,\nnot the text label"
+	searchAppName     = "Case-insensitive contains match on the app name"
+	searchNameAddr    = "Case-insensitive contains match on the name or address"
 )
 
 // referenceGroup is one URL segment below /analyses/reference: reference <group> <item>.
@@ -208,10 +211,10 @@ var referenceGroups = []referenceGroup{
 		endpoints: []endpoint{
 			// These three search the value code, not the description shown
 			// as the label; ages carries its name as both.
-			{item: "genders", short: "Demographic genders", paged: true, searchHelp: searchValueCode},
+			{item: "genders", short: "Demographic genders", paged: true, searchHelp: searchGenderCode},
 			{item: "ages", short: "Demographic age ranges", paged: true},
-			{item: "marital-statuses", short: "Demographic marital statuses", paged: true, searchHelp: searchValueCode},
-			{item: "incomes", short: "Demographic income ranges", paged: true, searchHelp: searchValueCode},
+			{item: "marital-statuses", short: "Demographic marital statuses", paged: true, searchHelp: searchMaritalCode},
+			{item: "incomes", short: "Demographic income ranges", paged: true, searchHelp: searchIncomeCode},
 		},
 	},
 	{

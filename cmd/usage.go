@@ -20,7 +20,7 @@ func usageCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "usage",
-		Short: "Show this month's data-scan usage",
+		Short: "Show data-scan usage for a month",
 		Long: `Show your company's data-scan usage for a calendar month.
 
 Reports the total bytes scanned, a breakdown by operation type - audience
