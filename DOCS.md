@@ -138,7 +138,11 @@ intuizi --base-url https://other-console auth logout
 ```
 
 Set `INTUIZI_NO_KEYRING=1` to skip the credential store and keep the token in
-the config file. `INTUIZI_API_TOKEN` still takes precedence over both.
+the config file. Any non-empty value switches the store off, `0` included. Set
+it before `auth login` and keep it set: while it is set, a token already in the
+credential store is not read, so commands report that you are not logged in,
+and `auth login` mints a new token, which counts toward the account's 10.
+`INTUIZI_API_TOKEN` still takes precedence over both.
 
 The config file is refused if its permissions are looser than 0600: it holds a
 bearer token, and `auth login` always writes it owner-only, so a wider mode
