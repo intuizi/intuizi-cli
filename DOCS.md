@@ -117,6 +117,24 @@ command does.
 A transcript is still safe to read before sending it on: it names the host, the
 path and any search terms you passed.
 
+### Rate limits
+
+On a `429` the CLI waits the `Retry-After` the response names and tries again,
+at most twice, and says so on stderr each time
+(`rate limited (429): retrying in 3s (retry 1 of 2)`). A create keeps its
+Idempotency-Key across those retries. A `429` that asks for more than 60
+seconds, such as the organization build budget's, is not waited out: the
+command exits `1` at once, and the error ends with the wait the server asked
+for, as in `(429, Retry-After: 1800s)`. Run it again after that.
+
+A create that claims an upload reference (`cohorts create --upload-reference`,
+`poi submissions create --upload-reference`, or `upload_reference` in a
+`--file` body) is retried only after the per-minute rate limiter's `429`. The
+build budget can refuse a cohort create after the reference is claimed, so a
+retry would fail with `The upload reference has already been used.` and hide
+the refusal. That `429` is returned as it came, and the error says to upload
+the file again for a new reference.
+
 ### Where the token is stored
 
 `auth login` puts the token in the OS credential store when there is one: the

@@ -143,7 +143,12 @@ Check the column mapping before importing with 'intuizi cohorts preview'.
 The request carries an Idempotency-Key, and a retry after a 429 reuses it.
 Running the command again sends a fresh key and can create a second import.
 When a create gets no response at all, stderr prints the key it used: rerun
-with --idempotency-key <key> to retry it without risking a duplicate.`,
+with --idempotency-key <key> to retry it without risking a duplicate.
+
+With --upload-reference, only the per-minute rate limiter's 429 is retried.
+The build budget can refuse the create after the reference is claimed, so its
+429 is not retried: the refused attempt has used the reference up, and the
+file has to be uploaded again for a new one once the budget has room.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			flags := cmd.Flags()

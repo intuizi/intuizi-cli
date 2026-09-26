@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // ErrUnauthorized is returned for any 401. Callers can test for it with
@@ -22,6 +25,11 @@ type Error struct {
 	// Body is the response verbatim when it parsed as JSON, so --json can
 	// print the error envelope a script expects; empty for HTML from a proxy.
 	Body json.RawMessage
+
+	// RetryAfter is a 429's Retry-After as the server sent it, zero when it
+	// sent none. The rate limiter's message points at the header, which the
+	// user never sees, so Error names its value.
+	RetryAfter time.Duration
 }
 
 func (e *Error) Error() string {
@@ -58,15 +66,19 @@ func (e *Error) Error() string {
 		msg = "not found: " + msg
 	case http.StatusConflict:
 		// Only the create routes return 409: an Idempotency-Key is a promise
-		// tthat the request is the same one, and it was broken
+		// that the request is the same one, and it was broken
 		msg += " (an Idempotency-Key was reused with a different body, or the " +
 			"original create is still in flight - use a fresh key for a new create)"
 	}
 
-	if len(e.Errors) == 0 {
-		return fmt.Sprintf("%s (%d)", msg, e.StatusCode)
+	code := strconv.Itoa(e.StatusCode)
+	if e.StatusCode == http.StatusTooManyRequests && e.RetryAfter > 0 {
+		code += fmt.Sprintf(", Retry-After: %ds", int(math.Ceil(e.RetryAfter.Seconds())))
 	}
-	return fmt.Sprintf("%s (%d): %s", msg, e.StatusCode, e.fieldErrors())
+	if len(e.Errors) == 0 {
+		return fmt.Sprintf("%s (%s)", msg, code)
+	}
+	return fmt.Sprintf("%s (%s): %s", msg, code, e.fieldErrors())
 }
 
 // Unwrap lets errors.Is(err, ErrUnauthorized) match a 401.

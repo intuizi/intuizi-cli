@@ -99,17 +99,18 @@ func (c *Client) postMultipartRaw(ctx context.Context, path string, fields map[s
 			return nil, nil, fmt.Errorf("calling %s: %w", target, err)
 		}
 
-		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
-			wait := retryAfter(resp.Header.Get("Retry-After"))
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
-			_ = resp.Body.Close()
-			if err := sleep(ctx, wait); err != nil {
-				if errors.Is(err, context.DeadlineExceeded) {
-					return nil, nil, timeoutErr(filePath, multipartTimeout)
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if wait, ok := c.retryWait(resp, attempt); ok {
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
+				_ = resp.Body.Close()
+				if err := sleep(ctx, wait); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return nil, nil, timeoutErr(filePath, multipartTimeout)
+					}
+					return nil, nil, err
 				}
-				return nil, nil, err
+				continue
 			}
-			continue
 		}
 
 		raw, data, err := readEnvelope(resp, target)

@@ -22,7 +22,9 @@ const apiPrefix = "/api/v2"
 var UserAgent = "intuizi-cli"
 
 // Retry policy for 429s. The write bucket allows 30 requests/min and reads 120,
-// so a rate-limited CLI is nearly always with waiting out rather than failing.
+// so a rate-limited CLI is nearly always worth waiting out rather than failing.
+// A 429 asking for longer than maxRetryIn is not waited out at all: the build
+// budget's runs to minutes or hours, and a shorter wait is a sure second 429.
 const (
 	maxRetries      = 2
 	fallbackRetryIn = 5 * time.Second
@@ -154,6 +156,9 @@ func (c *Client) doRaw(ctx context.Context, method, path string, query url.Value
 	} else if method == http.MethodPost {
 		c.warnUnkeyed(path)
 	}
+	// A create that claims an upload reference is sent once past a 429 from
+	// inside the route: see keepsReference.
+	claims := method == http.MethodPost && claimsUpload(payload)
 
 	target := c.BaseURL + apiPrefix + path
 	if len(query) > 0 {
@@ -179,40 +184,90 @@ func (c *Client) doRaw(ctx context.Context, method, path string, query url.Value
 			return nil, nil, fmt.Errorf("calling %s: %w", target, err)
 		}
 
-		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
-			wait := retryAfter(resp.Header.Get("Retry-After"))
-			// Drain a little before closing so the connection can be reused.
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
-			_ = resp.Body.Close()
-			if err := sleep(ctx, wait); err != nil {
-				return nil, nil, err
+		keep := claims && resp.StatusCode == http.StatusTooManyRequests && !fromRateLimiter(resp)
+		if resp.StatusCode == http.StatusTooManyRequests && !keep {
+			if wait, ok := c.retryWait(resp, attempt); ok {
+				// Drain a little before closing so the connection can be reused.
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
+				_ = resp.Body.Close()
+				if err := sleep(ctx, wait); err != nil {
+					return nil, nil, err
+				}
+				continue
 			}
-			continue
 		}
 
 		raw, data, err := readEnvelope(resp, target)
 		_ = resp.Body.Close()
+		if keep && err != nil {
+			err = keepsReference(err)
+		}
 		return raw, data, err
 	}
 }
 
+// retryWait decides whether a 429 is waited out, and says so on Warn when it
+// is: a silent wait of up to a minute reads as a hang. It is not once the
+// retries are spent, nor when the server asks for longer than maxRetryIn.
+func (c *Client) retryWait(resp *http.Response, attempt int) (time.Duration, bool) {
+	if attempt >= maxRetries {
+		return 0, false
+	}
+	wait, known := retryAfter(resp.Header.Get("Retry-After"))
+	if known && wait > maxRetryIn {
+		return 0, false
+	}
+	c.warnf("rate limited (429): retrying in %s (retry %d of %d)",
+		wait.Round(time.Second), attempt+1, maxRetries)
+	return wait, true
+}
+
 // retryAfter reads the Retry-After header, which the API sends as seconds and
-// a CDN in front of it may send as an HTTP-date. An absent or unparseable value
-// falls back to a fixed wait rather than retrying immediately, and an absurd
-// one is capped so the CLI cannot hang for minutes.
-func retryAfter(header string) time.Duration {
+// a CDN in front of it may send as an HTTP-date, as the server sent it. known
+// is false when it is absent or unparseable, and the wait is then a fixed
+// fallback rather than none. It is not capped here: retryWait decides whether
+// a wait is worth taking at all.
+func retryAfter(header string) (wait time.Duration, known bool) {
 	header = strings.TrimSpace(header)
 	if sec, err := strconv.Atoi(header); err == nil {
 		if sec <= 0 {
-			return fallbackRetryIn
+			return fallbackRetryIn, false
 		}
-		return min(time.Duration(sec)*time.Second, maxRetryIn)
+		return time.Duration(sec) * time.Second, true
 	}
 	if t, err := http.ParseTime(header); err == nil {
 		// A date already past means retry now, not the fallback.
-		return min(max(time.Until(t), 0), maxRetryIn)
+		return max(time.Until(t), 0), true
 	}
-	return fallbackRetryIn
+	return fallbackRetryIn, false
+}
+
+// fromRateLimiter reports a 429 from the per-minute rate limiter, which
+// answers before the route runs and sends its X-RateLimit-* headers. A 429
+// without them came from inside the route, such as the build budget's.
+func fromRateLimiter(resp *http.Response) bool {
+	return resp.Header.Get("X-RateLimit-Limit") != ""
+}
+
+// claimsUpload reports a JSON body that claims an upload reference, whether
+// the flags built it or a --file carried it.
+func claimsUpload(payload []byte) bool {
+	var body map[string]json.RawMessage
+	if json.Unmarshal(payload, &body) != nil {
+		return false
+	}
+	ref := bytes.TrimSpace(body["upload_reference"])
+	return len(ref) > 0 && string(ref) != "null" && string(ref) != `""`
+}
+
+// keepsReference explains a 429 that was not retried because the request
+// claims an upload reference. The API can claim the reference before a check
+// inside the route refuses the create - the build budget does - so a retry
+// would fail with "already been used" and hide the refusal behind it.
+func keepsReference(err error) error {
+	return fmt.Errorf("%w; not retried, because this create claims an upload reference "+
+		"and a refused create may already have used it up - if running it again says "+
+		"the reference has already been used, upload the file again for a new one", err)
 }
 
 // warnUnkeyed says --idempotency-key has no effect on a POST to a route that
@@ -297,6 +352,11 @@ func readEnvelope(resp *http.Response, target string) ([]byte, json.RawMessage, 
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		apiErr := &Error{StatusCode: resp.StatusCode}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if wait, known := retryAfter(resp.Header.Get("Retry-After")); known {
+				apiErr.RetryAfter = wait
+			}
+		}
 		if parsed {
 			apiErr.Body = raw
 			apiErr.Message = env.Message

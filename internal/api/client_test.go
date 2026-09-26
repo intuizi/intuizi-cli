@@ -247,20 +247,7 @@ func recordSleeps(t *testing.T) *[]time.Duration {
 }
 
 func TestRetry429(t *testing.T) {
-	// --- header parsing rules, no server needed ---
-	if d := retryAfter(""); d != fallbackRetryIn {
-		t.Errorf("empty header: %v, want %v", d, fallbackRetryIn)
-	}
-	if d := retryAfter("abc"); d != fallbackRetryIn {
-		t.Errorf("garbage header: %v, want %v", d, fallbackRetryIn)
-	}
-	if d := retryAfter(" 7 "); d != 7*time.Second {
-		t.Errorf("7s header: %v", d)
-	}
-	if d := retryAfter("3600"); d != maxRetryIn {
-		t.Errorf("huge header not capped: %v", d)
-	}
-
+	// Header parsing is TestRetryAfterIsReadUncapped's.
 	waits := recordSleeps(t)
 
 	// --- two 429s then success: the third attempt must carry the body intact ---
@@ -504,18 +491,19 @@ func TestMintAPITokenTakesEitherEnvelopeShape(t *testing.T) {
 // header has one-second resolution, so a +3s date lands anywhere in (2s, 3s].
 func TestRetryAfterHTTPDate(t *testing.T) {
 	future := time.Now().Add(3 * time.Second).UTC().Format(http.TimeFormat)
-	if d := retryAfter(future); d <= 1500*time.Millisecond || d > 3*time.Second {
-		t.Errorf("date 3s ahead: %v, want about 3s", d)
+	if d, known := retryAfter(future); !known || d <= 1500*time.Millisecond || d > 3*time.Second {
+		t.Errorf("date 3s ahead: %v, %v, want about 3s", d, known)
 	}
 
 	past := time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat)
-	if d := retryAfter(past); d != 0 {
-		t.Errorf("date in the past: %v, want 0 (retry now, not the fallback)", d)
+	if d, known := retryAfter(past); !known || d != 0 {
+		t.Errorf("date in the past: %v, %v, want 0 (retry now, not the fallback)", d, known)
 	}
 
+	// Read as sent: the caller decides that a day is too long to wait.
 	far := time.Now().Add(24 * time.Hour).UTC().Format(http.TimeFormat)
-	if d := retryAfter(far); d != maxRetryIn {
-		t.Errorf("date a day ahead not capped: %v", d)
+	if d, known := retryAfter(far); !known || d <= maxRetryIn {
+		t.Errorf("date a day ahead: %v, %v, want about 24h", d, known)
 	}
 }
 
