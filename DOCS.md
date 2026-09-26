@@ -946,9 +946,10 @@ keys are not checked by name: a misspelt top-level block such as
 `crosspurchse` is ignored, and the audience builds without it.
 
 `normalized_payload` on an audience is the canonical copy of the `name`,
-`operator` and `datasets` it was created from, the body its `recipe_hash` is
-computed from. It echoes what was sent, so a per-dataset filter, such as the
-brand or the country, that is missing from it was not sent:
+`operator` and `datasets` it was created from. Its `recipe_hash` is computed
+from the `operator` and `datasets` only, so the name does not change it. It
+echoes what was sent, so a per-dataset filter, such as the brand or the
+country, that is missing from it was not sent:
 
 ```bash
 intuizi audiences show <id> --json | jq '.data[0].normalized_payload.datasets[0].location'
@@ -967,8 +968,8 @@ Three things to know about the field:
   `Single` is not a value the operators catalog accepts on the way in, so do
   not copy it into a new payload.
 - Only an API create sets it. It is `null` for audiences built in Audience
-  Manager, for Lookalike Model results, and for audiences created before the
-  field existed.
+  Manager, for Lookalike Model results, for the audiences a schedule builds
+  each cycle, and for audiences created before the field existed.
 
 Building creates from flags avoids most of this: names are resolved against the
 catalogs before anything is sent, and the payload is assembled from typed fields
