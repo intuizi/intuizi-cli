@@ -825,9 +825,9 @@ prints nothing on stdout; only the stderr line explains it.
 
 A `--wait` that fails, times out or gives up is different: the record it
 prints was read successfully, so stdout carries that record's own success
-envelope (or the last polled record, when the final re-read fails or the wait
-gave up after failed reads) while the exit code is 1. See
-[The async model](#the-async-model).
+envelope after a failure, or the last polled record itself after a timeout, a
+wait that gave up after failed reads, or a failed re-read, while the exit code
+is 1. See [The async model](#the-async-model).
 
 ### Envelope shapes
 
@@ -900,16 +900,21 @@ and the exit code alone says which: 0 for Completed, 1 for a failed state, a
 failed datastream, a timeout, or three failed reads in a row. When the wait
 is abandoned - timed out, or given up after three failed reads - the record is
 the last one read, so it shows where the job stood; the job keeps running
-server-side. With `--json` the record is re-read and printed as the server's
-own envelope, so a failed wait exits 1 with a `"status": "success"` envelope
-on stdout: branch on the exit code or on `.data[0].status.id`, not on
-`.status`. That re-read is one more request after the wait ends, tried up to
-three times after a success and once after a failure or a timeout. If it
-fails, or the wait gave up after three failed reads in a row (then there is no
-re-read), stdout carries the last polled record itself rather than an
-envelope, so read it as `.status.id`, not `.data[0].status.id`; stderr says
-`printing the last polled record, not the server's envelope:` and why. With
-`--quiet` only the id is printed, whatever the outcome.
+server-side. The exit code is the one to branch on.
+
+With `--json` a Completed or failed record is re-read and printed as the
+server's own envelope, so a failed wait exits 1 with a `"status": "success"`
+envelope on stdout, whose `.status` says nothing about the job: read
+`.data[0].status.id`. That re-read is one more request after the wait ends,
+tried up to three times after a success and once after a failure. An abandoned
+wait makes no request once it ends, so a timed-out command exits at
+`--timeout`, and stdout carries the last polled record itself rather than an
+envelope: the record the error names. A re-read that fails prints the polled
+record the same way. Read that record as `.status.id`, not
+`.data[0].status.id`, which is null there; stderr says `printing the last
+polled record, not the server's envelope:` and why (`the wait timed out`, `the
+last 3 reads failed`, or `re-reading it failed (...)`). With `--quiet` only the
+id is printed, whatever the outcome.
 
 Nothing is printed on stdout when the wait ends with no record to show: a
 timeout or three failed reads before any status was read, a 401, 403 or 404

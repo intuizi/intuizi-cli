@@ -673,20 +673,62 @@ func TestWaitJSONPrintsTheFailedEnvelope(t *testing.T) {
 	}
 }
 
-// A timed-out --json wait prints the record as it stands at the re-read.
-func TestWaitJSONPrintsTheRecordOnTimeout(t *testing.T) {
-	fast(t)
-	srv, _ := stubSeq(t, activation(101, "Processing"))
+// A timed-out --json wait prints the record the timeout error names, as
+// polled. A re-read after the deadline used to print whatever the job had
+// reached since - Completed, beside an error saying it was still running.
+// The poll interval stays at 15s here, so the 30ms deadline lands in the
+// sleep after the first read.
+func TestWaitJSONPrintsThePolledRecordOnTimeout(t *testing.T) {
+	srv, got := stubSeq(t, activation(101, "Processing"), activation(104, "Completed"))
 
-	out, _, err := runJSON(t, activationsShowCommand(), srv, "501", "--wait", "--timeout", "30ms")
+	out, errb, err := runJSON(t, activationsShowCommand(), srv, "501", "--wait", "--timeout", "30ms")
+	if !errors.Is(err, errWaitTimeout) || !strings.Contains(err.Error(), "last status Processing") {
+		t.Fatalf("err = %v, want a timeout at Processing", err)
+	}
+	if len(got.paths) != 1 {
+		t.Errorf("expected one poll and no re-read after the deadline, got %d calls", len(got.paths))
+	}
+	var rec map[string]any
+	if err := json.Unmarshal([]byte(out), &rec); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, out)
+	}
+	if status, _ := rec["status"].(map[string]any); status["name"] != "Processing" {
+		t.Errorf("stdout should be the record the error names:\n%s", out)
+	}
+	if !strings.Contains(errb, fallbackNote+" the wait timed out") {
+		t.Errorf("stderr should say the shape is the polled record, and why, got %q", errb)
+	}
+}
+
+// --timeout bounds the whole command: nothing is read after the deadline, so
+// a server that stops answering cannot hold the exit for the HTTP client's
+// own 30 seconds.
+func TestWaitJSONTimeoutMakesNoLateRequest(t *testing.T) {
+	var (
+		mu sync.Mutex
+		n  int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n++
+		first := n == 1
+		mu.Unlock()
+		if !first {
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(activation(101, "Processing").body))
+	}))
+	t.Cleanup(srv.Close)
+
+	start := time.Now()
+	_, _, err := runJSON(t, activationsShowCommand(), srv, "501", "--wait", "--timeout", "30ms")
 	if !errors.Is(err, errWaitTimeout) {
 		t.Fatalf("err = %v, want errWaitTimeout", err)
 	}
-	var env struct {
-		Code int `json:"code"`
-	}
-	if err := json.Unmarshal([]byte(out), &env); err != nil || env.Code != 200 || !strings.Contains(out, "Processing") {
-		t.Errorf("stdout should be the record's envelope:\n%s", out)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("a 30ms --timeout took %s", elapsed)
 	}
 }
 
@@ -765,9 +807,9 @@ func TestWaitGiveUpPrintsTheLastRecord(t *testing.T) {
 	})
 }
 
-// After a failed or timed-out wait the exit code is already 1, so the --json
-// re-read is tried once and then falls back to the polled record, rather than
-// retrying for up to two more poll intervals.
+// After a failed wait the exit code is already 1, so the --json re-read is
+// tried once and then falls back to the polled record, rather than retrying
+// for up to two more poll intervals.
 func TestWaitJSONReReadsOnceAfterAFailure(t *testing.T) {
 	fast(t)
 	boom := reply{status: 500, body: `{"status":"error","code":500,"message":"boom","data":[]}`}

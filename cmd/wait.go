@@ -81,8 +81,9 @@ func waitFlags(cmd *cobra.Command) func() (bool, time.Duration, error) {
 }
 
 // waitAndPrint follows one resource to a terminal status and prints the final
-// state. With --json the envelope is re-read so the bytes printed are the
-// server's own, as every other --json path does.
+// state. With --json a completed or failed record is re-read so the bytes
+// printed are the server's own, as every other --json path does; an abandoned
+// wait prints the record as last polled, which is the one its error names.
 //
 // A wait that fails, times out or gives up after repeated failed reads still
 // prints the last record read, then returns its error, so the exit code is
@@ -121,12 +122,17 @@ func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Re
 			raw []byte
 			err error
 		)
-		if errors.Is(waitErr, errWaitGaveUp) {
+		switch {
+		case errors.Is(waitErr, errWaitTimeout):
+			// A read after the deadline would overrun --timeout, and could
+			// show a later status than the one the timeout error names.
+			raw, err = polledRecord(cmd, final, "the wait timed out")
+		case errors.Is(waitErr, errWaitGaveUp):
 			// The last three reads failed; a fourth would only delay the exit.
 			raw, err = polledRecord(cmd, final, fmt.Sprintf("the last %d reads failed", maxPollFailures))
-		} else {
-			// After a failure or a timeout the exit code is 1 whatever this
-			// read does, so it is not worth up to two more poll intervals.
+		default:
+			// After a failure the exit code is 1 whatever this read does, so
+			// it is not worth up to two more poll intervals.
 			attempts := maxPollFailures
 			if waitErr != nil {
 				attempts = 1
