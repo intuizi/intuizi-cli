@@ -243,10 +243,14 @@ func retryAfter(header string) (wait time.Duration, known bool) {
 }
 
 // fromRateLimiter reports a 429 from the per-minute rate limiter, which
-// answers before the route runs and sends its X-RateLimit-* headers. A 429
-// without them came from inside the route, such as the build budget's.
+// answers before the route runs. X-RateLimit-Limit cannot tell it apart:
+// Laravel's throttle middleware adds that header and X-RateLimit-Remaining to
+// every response on its way out, a 429 the route itself returned included,
+// such as the build budget's. X-RateLimit-Reset it sends only on its own 429,
+// beside Retry-After. Without it the 429 counts as the route's, which is the
+// safe way to be wrong: that create is not retried.
 func fromRateLimiter(resp *http.Response) bool {
-	return resp.Header.Get("X-RateLimit-Limit") != ""
+	return resp.Header.Get("X-RateLimit-Reset") != ""
 }
 
 // claimsUpload reports a JSON body that claims an upload reference, whether

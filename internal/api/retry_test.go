@@ -15,20 +15,24 @@ import (
 )
 
 // budget429 answers the way the build budget does: a 429 from inside the
-// route, carrying Retry-After and none of the rate limiter's X-RateLimit-*
-// headers.
+// route, carrying Retry-After, plus the X-RateLimit-Limit and -Remaining the
+// throttle middleware adds to every response on its way out - but not the
+// X-RateLimit-Reset it sends only on its own 429.
 func budget429(w http.ResponseWriter, retryAfter string) {
 	w.Header().Set("Retry-After", retryAfter)
+	w.Header().Set("X-RateLimit-Limit", "30")
+	w.Header().Set("X-RateLimit-Remaining", "0")
 	w.WriteHeader(http.StatusTooManyRequests)
 	_, _ = w.Write([]byte(`{"status":"error","code":429,"message":"Your organization has reached its build limit.","data":[]}`))
 }
 
 // limiter429 answers the way the per-minute rate limiter does: before the
-// route runs, with X-RateLimit-Limit beside Retry-After.
+// route runs, with X-RateLimit-Reset beside Retry-After.
 func limiter429(w http.ResponseWriter, retryAfter string) {
 	w.Header().Set("Retry-After", retryAfter)
 	w.Header().Set("X-RateLimit-Limit", "30")
 	w.Header().Set("X-RateLimit-Remaining", "0")
+	w.Header().Set("X-RateLimit-Reset", "1790000000")
 	w.WriteHeader(http.StatusTooManyRequests)
 	_, _ = w.Write([]byte(`{"status":"error","code":429,"message":"Too many requests. Please retry after the time indicated by the Retry-After header.","data":[]}`))
 }
