@@ -34,11 +34,15 @@ macOS, Linux and Windows, amd64 and arm64. The npm package is a small launcher
 that pulls in the binary for your platform as an optional dependency; nothing
 is downloaded at install time beyond the packages themselves.
 
-Or build from source, which needs the Go toolchain:
+Or build from source, which needs the Go toolchain. Name the binary
+`intuizi` and put it on your PATH, since every command below uses that name:
 
 ```bash
-go install github.com/intuizi/intuizi-cli@latest   # or: make build
+git clone https://github.com/intuizi/intuizi-cli && cd intuizi-cli
+go build -o "$(go env GOPATH)/bin/intuizi" .   # or: make build, which writes ./bin/intuizi
 ```
+
+A source build reports its version as `dev`.
 
 ## Quickstart
 
