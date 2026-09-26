@@ -319,13 +319,11 @@ func TestAudiencesCreateBrandHintPerType(t *testing.T) {
 		"Apps":                 "; use --category",
 		"WebDomain":            "; use --category",
 		"CTV":                  "",
-		"Cohorts":              "",
-		"Demographics":         "",
 		"Deidentified":         "",
-		"ProfileAttributes":    "",
 	}
 	for _, typ := range datasetTypes {
-		if typ == "POI" {
+		// The file-only types are refused before --brand is looked at.
+		if _, fileOnly := fileOnlyTypes[typ]; typ == "POI" || fileOnly {
 			continue
 		}
 		hint, ok := hints[typ]
@@ -342,6 +340,45 @@ func TestAudiencesCreateBrandHintPerType(t *testing.T) {
 				t.Errorf("err = %q\nwant  %q", err, want)
 			}
 		})
+	}
+}
+
+// Cohorts, Demographics and ProfileAttributes each require a field no flag
+// writes, so every body the flags could build is a 422. They are refused
+// before anything is read or sent, --dry-run included, and before the
+// missing-flag check, which would otherwise ask for dates Demographics
+// rejects.
+func TestAudiencesCreateRefusesTheTypesFlagsCannotBuild(t *testing.T) {
+	for typ, field := range map[string]string{
+		"cohorts":           "cohort_id",
+		"Demographics":      "demographic filter",
+		"PROFILEATTRIBUTES": "profile_attributes",
+	} {
+		for _, args := range [][]string{
+			{"--type", typ},
+			{"--type", typ, "--name", "x", "--start-date", "2026-09-01", "--end-date", "2026-09-07",
+				"--country", "USA", "--dry-run"},
+		} {
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				srv, got := stub(t, providersPOI)
+				_, _, err := run(t, audiencesCreateCommand(), srv, args...)
+				wantUsageErr(t, err, "cannot be built from flags", field, "--file")
+				if len(got.bodies) != 0 || len(got.paths) != 0 {
+					t.Errorf("nothing should be sent, got %v %v", got.paths, got.bodies)
+				}
+			})
+		}
+	}
+	if !strings.Contains(fileOnlyTypes["Demographics"], "rejects the dates and signal providers") {
+		t.Error("the Demographics refusal should say why the flag body is always rejected")
+	}
+}
+
+// Completion offers only the types the flag path builds.
+func TestFlagTypesLeavesOutTheFileOnlyTypes(t *testing.T) {
+	got := strings.Join(flagTypes(), ",")
+	if want := "affinitytransactions,apps,ctv,deidentified,origin,poi,webdomain"; got != want {
+		t.Errorf("flagTypes() = %s, want %s", got, want)
 	}
 }
 

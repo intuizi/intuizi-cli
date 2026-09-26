@@ -19,7 +19,7 @@ func TestFlagCompletionMatchesValidation(t *testing.T) {
 		{"frequency", []string{"schedules", "create"}, sortedKeys(scheduleFrequencies)},
 		{"purpose", []string{"uploads", "reserve"}, uploadPurposes},
 		{"purpose", []string{"uploads", "put"}, uploadPurposes},
-		{"type", []string{"audiences", "create"}, sortedKeys(datasetTypes)},
+		{"type", []string{"audiences", "create"}, flagTypes()},
 		{"signal", []string{"audiences", "lookalike", "create"}, sortedKeys(lookalikeSignals)},
 	} {
 		t.Run(strings.Join(append(tc.args, tc.flag), " "), func(t *testing.T) {

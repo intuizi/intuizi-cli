@@ -282,9 +282,13 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
 | `--dry-run` `--wait` `--timeout` | - | - |
 
-`--type` is case-insensitive in and canonical out: `poi` sends `POI`. Accepted
-types are POI, Apps, WebDomain, CTV, Cohorts, AffinityTransactions,
-Demographics, Deidentified, ProfileAttributes and Origin.
+`--type` is case-insensitive in and canonical out: `poi` sends `POI`. The
+flags build POI, Apps, WebDomain, CTV, AffinityTransactions, Deidentified and
+Origin. Cohorts, Demographics and ProfileAttributes are refused before
+anything is sent, exit 2, and go through `--file`: each requires a field no
+flag writes (a `cohort_id`, at least one demographic filter, or
+`profile_attributes` rows), and Demographics also rejects the dates and signal
+providers the flags always send.
 
 `--category` resolves against a different catalog for each type, and the
 resolved ids go into a different payload field:
@@ -499,8 +503,15 @@ earlier one is rejected with a 422 that names it. The dates here, and in
 Note that the selector field differs per type. Apps uses `categories`,
 WebDomain uses `iab_category_codes`, and POI uses `analysisdata` for brands.
 
-Needs `--file`: two datasets with an operator, and the nested `refine`,
-`crossvisitation` and `crosspurchase` blocks.
+Needs `--file`: two datasets with an operator; the nested `refine`,
+`crossvisitation` and `crosspurchase` blocks; the Cohorts, Demographics and
+ProfileAttributes types; and any other field no flag writes, such as
+`project_id` to file the audience under a project, POI `locations`, DMAs, the
+`analyses` block and `datastreams`. An audience built without the frequency
+analysis in `analyses` cannot have it added after the build, and Preview
+Activation needs it, so put it in the body when you plan to preview.
+`datastreams` asks for data stream visualizations, which the audience draws
+as status `109` before it completes.
 
 ```bash
 intuizi audiences create --file examples/audience-two-datasets.json

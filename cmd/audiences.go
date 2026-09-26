@@ -56,8 +56,9 @@ func audiencesCreateCommand() *cobra.Command {
 		Short: "Create an audience, from flags or a payload file",
 		Long: `Create an audience.
 
-A single-dataset audience has a shallow body, so it can be built from flags,
-with names resolved against the reference catalogs rather than pasted as ids:
+A single-dataset audience can be built from flags for any type whose required
+fields all have a flag, with names resolved against the reference catalogs
+rather than pasted as ids:
 
     intuizi audiences create \
       --type POI --brand starbucks \
@@ -104,8 +105,16 @@ doubles as a starting point for the file form:
     intuizi audiences create --type POI ... --dry-run > audience.json
 
 Two datasets need an operator, and refine, crossvisitation and crosspurchase
-are nested, so those are passed whole instead. The file is forwarded untouched,
-so a field this CLI has never heard of still reaches the API:
+are nested, so those are passed whole instead. So are the Cohorts,
+Demographics and ProfileAttributes types, which the flags refuse before
+anything is sent: they require fields no flag writes (a cohort_id, a
+demographic filter, profile_attributes rows), and Demographics also rejects
+the dates and signal providers the flags always send. The same goes for any
+other field no flag writes, such as project_id, POI locations, DMAs, the
+analyses block and datastreams. An audience built without the frequency
+analysis cannot have it added later, and Preview Activation needs it. The file
+is forwarded untouched, so a field this CLI has never heard of still reaches
+the API:
 
     intuizi audiences create --file examples/audience-two-datasets.json
     jq '.name = "Q3 rerun"' base.json | intuizi audiences create --file -
@@ -163,6 +172,16 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 		if dryRun && wait {
 			return usageErr("--dry-run creates nothing, so there is nothing to --wait for")
 		}
+		// The type first: a type the flags cannot build should not send the
+		// caller off to add the dates it would then reject.
+		if flags.Changed("type") {
+			if dsType, err = canonicalType(dsType); err != nil {
+				return err
+			}
+			if err := checkFlagType(dsType); err != nil {
+				return err
+			}
+		}
 		if err := missingFlags(flags, audienceRequired, "a single-dataset audience"); err != nil {
 			return err
 		}
@@ -170,10 +189,6 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 			return err
 		}
 		if err := parseWindow(startDate, endDate); err != nil {
-			return err
-		}
-		dsType, err = canonicalType(dsType)
-		if err != nil {
 			return err
 		}
 		if len(brands)+len(brandAll) > 0 && dsType != "POI" {
@@ -302,11 +317,11 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 	f.BoolVar(&dryRun, "dry-run", false,
 		"Print the body the flags produce; creates nothing (names still resolve)")
 	f.StringVar(&dsType, "type", "",
-		"Dataset type, case-insensitive: poi, apps, webdomain, ctv, cohorts,\n"+
-			"affinitytransactions, demographics, deidentified, profileattributes\n"+
-			"or origin")
+		"Dataset type, case-insensitive: poi, apps, webdomain, ctv,\n"+
+			"affinitytransactions, deidentified or origin (cohorts, demographics\n"+
+			"and profileattributes need --file)")
 	f.StringVar(&name, "name", "", "Name for the audience")
-	completeValues(cmd, "type", sortedKeys(datasetTypes))
+	completeValues(cmd, "type", flagTypes())
 	f.StringVar(&startDate, "start-date", "", "First day of the window, YYYY-MM-DD")
 	f.StringVar(&endDate, "end-date", "", "Last day of the window, YYYY-MM-DD")
 	// StringArray, not StringSlice: a city name may contain a comma.

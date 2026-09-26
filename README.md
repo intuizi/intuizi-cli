@@ -114,9 +114,12 @@ intuizi audiences create --type poi --brand starbucks ... --dry-run > audience.j
 
 `--file payload.json` (or `-` for stdin) stays for what the flags do not
 model: two datasets combined with an operator, the refine, crossvisitation and
-crosspurchase blocks, an activation's partner and per-stream inputs, a
-schedule's auto-export, cohort limits by visit frequency, distance or Lookalike
-Model score range, and Match Strictness on an SCID cohort import.
+crosspurchase blocks, the Cohorts, Demographics and ProfileAttributes audience
+types, any other audience field no flag writes (project_id, POI locations,
+DMAs, the analyses block Preview Activation needs, datastreams), an
+activation's partner and per-stream inputs, a schedule's auto-export, cohort
+limits by visit frequency, distance or Lookalike Model score range, and Match
+Strictness on an SCID cohort import.
 Ready-made payloads live in [`examples/`](examples).
 
 ```bash

@@ -243,6 +243,39 @@ var datasetTypes = map[string]string{
 	"origin":               "Origin",
 }
 
+// fileOnlyTypes are the types no flag set can build, with what stops them.
+// Each requires a field no flag writes, and Demographics also rejects the
+// dates and signal providers the flag path always sends, so every body the
+// flags could produce is a sure 422. They go through --file instead.
+var fileOnlyTypes = map[string]string{
+	"Cohorts":           "it needs a cohort_id, which no flag writes",
+	"Demographics":      "it needs at least one demographic filter (genders, ages, marital_statuses or incomes), which no flag writes, and it rejects the dates and signal providers the flags always send",
+	"ProfileAttributes": "it needs profile_attributes rows (category_id, key and value_ids), which no flag writes",
+}
+
+// flagTypes are the --type values the flag path builds: every dataset type
+// but fileOnlyTypes. Completion offers these, so a completed value is never
+// one the command then refuses.
+func flagTypes() []string {
+	var out []string
+	for _, k := range sortedKeys(datasetTypes) {
+		if _, fileOnly := fileOnlyTypes[datasetTypes[k]]; !fileOnly {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// checkFlagType refuses a type the flags cannot build, before any catalog is
+// read, pointing at --file.
+func checkFlagType(dsType string) error {
+	if why, ok := fileOnlyTypes[dsType]; ok {
+		return usageErr("--type " + dsType + " cannot be built from flags: " + why +
+			"; pass the whole body with --file")
+	}
+	return nil
+}
+
 // canonicalType makes --type case-insensitive and rejects unknown ones.
 func canonicalType(t string) (string, error) {
 	if canon, ok := datasetTypes[strings.ToLower(t)]; ok {
