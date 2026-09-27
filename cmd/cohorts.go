@@ -29,12 +29,14 @@ cloud file or an upload, or built from a completed audience. Once imported it
 becomes a dataset an audience can be built from.
 
 Cohort status ids are their own scale, not the audience one: 1 Uploading,
-2 Initiating, 3 Processing, 4 Completed. A failed import reports an error code
-outside 1 to 4 instead, which the table shows as Unknown; 5 Not Available is
-reserved and never reported. No cohort command takes --wait, so re-run
-'intuizi cohorts show <id>' until the status is 4, and stop on any status
-outside 1 to 4. With --json the id is .data.status.id: a cohort read returns
-the record itself, not an array of one.
+2 Initiating, 3 Processing, 4 Completed, 5 Not Available. 4 and 5 are final:
+5 means the import failed, and sends cohort.failed to a webhook receiver. No
+cohort command takes --wait, so re-run 'intuizi cohorts show <id>' until the
+status is 4 or 5. A cohort that failed before failures were reported as 5 can
+still read the error code it failed with, a status outside 1 to 5 that the
+table shows as Unknown: it has failed too. With --json the id is
+.data.status.id: a cohort read returns the record itself, not an array of
+one.
 
 After a failed import, fix the cause and create the cohort again. An
 --upload-reference is used up by the failed create, so upload the file again
@@ -174,7 +176,7 @@ file has to be uploaded again for a new one once the budget has room.`,
 			flags := cmd.Flags()
 
 			next := "importing - re-run 'intuizi cohorts show <id>' until its status is 4 Completed; " +
-				"a status outside 1 to 4 means the import failed"
+				"5 Not Available means the import failed"
 
 			if file != "" {
 				// Mixing the two would beg the question of which wins.

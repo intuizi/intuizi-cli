@@ -128,8 +128,9 @@ func TestCohortsCreateSendsAFolderURI(t *testing.T) {
 }
 
 // No cohort command waits, so the hint after a create is the whole guide to
-// following it: the one success, and the codes a failed import reports
-// instead, which the table shows as Unknown.
+// following it: the one success, and 5 Not Available, where a failed import
+// now ends (it used to end at an error code off the cohort scale, which the
+// table showed as Unknown).
 func TestCohortsCreateNamesWhenToStopPolling(t *testing.T) {
 	srv, _ := stub(t, `{"status":"success","code":201,"data":[{"id":77,"name":"Q3 customers","status":{"id":2,"name":"Initiating"}}]}`)
 
@@ -142,9 +143,29 @@ func TestCohortsCreateNamesWhenToStopPolling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	for _, want := range []string{"intuizi cohorts show <id>", "4 Completed", "outside 1 to 4", "failed"} {
+	for _, want := range []string{"intuizi cohorts show <id>", "4 Completed", "5 Not Available", "failed"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr should contain %q, got %q", want, stderr)
+		}
+	}
+	if strings.Contains(stderr, "outside 1 to 4") {
+		t.Errorf("stderr still says a failed import reads outside 1 to 4: %q", stderr)
+	}
+}
+
+// The cohorts help is where a script author learns the scale. A failed import
+// ends at 5 Not Available now, so 5 is no longer "reserved and never
+// reported"; a cohort that failed before that still reads Unknown.
+func TestCohortsHelpSaysAFailedImportEndsAt5(t *testing.T) {
+	long := cohortsCmd.Long
+	for _, want := range []string{"5 Not Available", "4 or 5", "Unknown", "cohort.failed"} {
+		if !strings.Contains(long, want) {
+			t.Errorf("cohorts help omits %q:\n%s", want, long)
+		}
+	}
+	for _, stale := range []string{"reserved", "never reported"} {
+		if strings.Contains(long, stale) {
+			t.Errorf("cohorts help still says %q:\n%s", stale, long)
 		}
 	}
 }
