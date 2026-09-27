@@ -1206,10 +1206,12 @@ for a new one. A regular audience keeps its failed cohort and makes at most
 one, so run `cohorts delete <id>` before creating from it again.
 
 Everything else is followed with `show <id>`, or by a webhook registered in the
-Console. Every failure sends one: `audience.failed` or `activation.failed` for
-a build or export that stops on `107` Additional Info or ends in a `4xx`
-error, the `400` a cancelled Lookalike Model ends at included, and
-`cohort.failed` for an import that ends at `5` Not Available. A webhook is a
+Console. A build or export that stops on `107` Additional Info or ends in a
+`4xx` error sends `audience.failed` or `activation.failed`, the `400` a
+cancelled Lookalike Model ends at included, and an import that ends at `5` Not
+Available sends `cohort.failed`. An activation that reaches `104` with a
+datastream that failed to deliver still sends `activation.completed`: check its
+`datastreams[]` on `show <id>`. A webhook is a
 notification, not a source of truth: keep a low-frequency `show <id>` poll as
 the fallback for a delivery that exhausts its retries.
 

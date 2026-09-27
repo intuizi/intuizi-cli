@@ -473,8 +473,8 @@ Manager; a 403 means they are not enabled for the account.`,
 			}
 			return postID(cmd, audiencesPrefix+"/cancel-lookalike", id,
 				fmt.Sprintf("cancellation requested for audience %d - once the run stops "+
-					"it ends at 400 Error, which is final; remove it with "+
-					"'intuizi audiences delete %d'", id, id))
+					"it ends at 400 Error, unless it was already publishing its result; "+
+					"remove it with 'intuizi audiences delete %d'", id, id))
 		},
 	}
 
