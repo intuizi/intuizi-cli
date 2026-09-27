@@ -397,7 +397,9 @@ are waited through:
 the wait exits non-zero at once, and waiting again cannot change that. The
 API does not return the reason, but Audience Manager in the Intuizi console
 shows it on the audience. A cancelled lookalike reads 108 until the run
-stops, then ends at 400 Error, so a wait on one exits non-zero there too.`,
+stops, then ends at 400 Error, so a wait on one exits non-zero there too. A
+lookalike that stopped on a cancel before cancelled runs ended at 400 still
+reads 108, so a wait on it ends only at --timeout.`,
 		Args: cobra.ExactArgs(1),
 	}
 	waitOpts := waitFlags(cmd)

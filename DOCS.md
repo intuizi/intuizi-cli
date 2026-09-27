@@ -590,7 +590,9 @@ receiver gets `audience.failed`. The API returns only `400` Error, and
 Audience Manager in the Intuizi console shows the status as
 `Cancelled on request.` A cancel that arrives once the result is already being
 published is ignored, and the run completes. A run that has already finished
-cannot be cancelled. Remove a cancelled run with `audiences delete <id>`.
+cannot be cancelled. A run that stopped on a cancel before cancelled runs
+ended at `400` still reads `108` Modeling, so a wait on it ends only at
+`--timeout`. Remove a cancelled run with `audiences delete <id>`.
 
 ```bash
 intuizi audiences lookalike create \

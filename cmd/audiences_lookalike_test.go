@@ -212,10 +212,10 @@ func TestLookalikeCancelSaysTheRunEndsAt400(t *testing.T) {
 			t.Errorf("cancel help omits %q:\n%s", want, long)
 		}
 	}
-	for name, text := range map[string]string{"cancel": long, "lookalike": group.Long,
-		"show": audiencesShowCommand().Long} {
+	show := audiencesShowCommand().Long
+	for name, text := range map[string]string{"cancel": long, "lookalike": group.Long, "show": show} {
 		for _, stale := range []string{"never reaches Completed and", "keeps reading", "for good",
-			"never does", "Do not follow", "only ends at --timeout", "polls until --timeout"} {
+			"never does", "Do not follow", "polls until --timeout"} {
 			if strings.Contains(text, stale) {
 				t.Errorf("%s help still says %q:\n%s", name, stale, text)
 			}
@@ -224,9 +224,26 @@ func TestLookalikeCancelSaysTheRunEndsAt400(t *testing.T) {
 	if !strings.Contains(group.Long, "400 Error") {
 		t.Errorf("lookalike help does not say how a cancelled run ends:\n%s", group.Long)
 	}
-	if !strings.Contains(audiencesShowCommand().Long, "400 Error") {
-		t.Errorf("show help does not say a wait on a cancelled lookalike ends at 400:\n%s",
-			audiencesShowCommand().Long)
+	if !strings.Contains(show, "400 Error") {
+		t.Errorf("show help does not say a wait on a cancelled lookalike ends at 400:\n%s", show)
+	}
+
+	// The console records the 400 when it hands the cancel to the worker, so a
+	// run that had already stopped on a cancel before that change still reads
+	// 108, and a wait on it still ends only at --timeout. The show help, where a
+	// wait on an existing run is described, names that one case; cancel and
+	// lookalike describe a cancel sent now, which always ends at 400.
+	flat := strings.Join(strings.Fields(show), " ")
+	for _, want := range []string{"stopped on a cancel before cancelled runs ended at 400",
+		"still reads 108", "ends only at --timeout"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("show help omits the run cancelled before the 400 ending (%q):\n%s", want, show)
+		}
+	}
+	for name, text := range map[string]string{"cancel": long, "lookalike": group.Long} {
+		if strings.Contains(text, "--timeout") {
+			t.Errorf("%s help still ties a cancelled run to --timeout:\n%s", name, text)
+		}
 	}
 }
 
