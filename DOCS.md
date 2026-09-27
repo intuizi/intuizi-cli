@@ -782,10 +782,10 @@ before anything is sent. A legacy name filed under a region, such as
 `Asia/Calcutta` for `Asia/Kolkata`, passes that check, `--dry-run` included,
 and the API rejects it with a 422.
 
-An `--end-date` before the `--start` date is rejected too: the API would
-accept it and count the gap forward from `--start`, so the schedule would run
-for that many days instead of not at all. So is a `--name`
-over 255 characters.
+An `--end-date` before the `--start` date, read in `--timezone`, is rejected
+before anything is sent, and so is a `--name` over 255 characters. The API
+rejects that end date as well, with a 422, so a `--file` body cannot carry
+one either.
 
 ```bash
 intuizi schedules create --name "Weekly coffee refresh" --audience-id 88 \
