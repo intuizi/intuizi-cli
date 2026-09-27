@@ -404,3 +404,56 @@ func TestAudiencesCreateOriginRejectsBrandAndCategory(t *testing.T) {
 		})
 	}
 }
+
+// --frequency runs the frequency analysis Preview Activation needs, which
+// cannot be added once the audience is built. Each dataset type stores it
+// under its own key, and without the flag no analyses block is sent at all.
+func TestAudiencesCreateFrequencyPicksTheTypesAnalysis(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+		want string
+	}{
+		{"poi", audiencesCreateCommand, append(swap(poiFlags, "--type", "poi"), "--frequency"), `{"frequency":true}`},
+		{"apps", audiencesCreateCommand, append(swap(poiFlags, "--type", "apps"), "--frequency"), `{"apps_frequency":true}`},
+		{"webdomain", audiencesCreateCommand, append(swap(poiFlags, "--type", "WebDomain"), "--frequency"), `{"web_frequency":true}`},
+		{"estimate", estimateCreateCommand, append(swap(poiFlags, "--type", "poi"), "--frequency"), `{"frequency":true}`},
+		{"no flag", audiencesCreateCommand, poiFlags, `null`},
+		{"--frequency=false", audiencesCreateCommand, append(swap(poiFlags, "--type", "poi"), "--frequency=false"), `null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, providersPOI)
+
+			body := dryRunBody(t, tc.cmd(), srv, tc.args...)
+
+			if raw, _ := json.Marshal(body["analyses"]); string(raw) != tc.want {
+				t.Errorf("analyses = %s, want %s", raw, tc.want)
+			}
+		})
+	}
+}
+
+// No other type has a frequency analysis. The API would 422 the flavour sent
+// without its dataset, so the flag is refused before anything is read - with
+// no token too, since it is a usage mistake whoever makes it.
+func TestAudiencesCreateFrequencyRefusedOnOtherTypes(t *testing.T) {
+	err := runLoggedOut(t, audiencesCreateCommand(), "--type", "ctv", "--name", "x",
+		"--start-date", "2026-09-02", "--end-date", "2026-09-09", "--country", "USA", "--frequency")
+
+	wantUsageErr(t, err, "--frequency", "POI", "Apps", "WebDomain", "CTV")
+}
+
+// A --file body writes its own analyses block, so the flag is refused with it
+// rather than silently dropped.
+func TestAudiencesCreateFrequencyIsABodyFlag(t *testing.T) {
+	srv, got := stub(t, created)
+
+	_, _, err := run(t, audiencesCreateCommand(), srv,
+		"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`), "--frequency")
+
+	wantUsageErr(t, err, "--file", "--frequency")
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}

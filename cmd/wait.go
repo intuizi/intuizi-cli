@@ -63,6 +63,79 @@ var (
 	errWaitGaveUp  = errors.New("giving up")
 )
 
+// lifecycle is what a --wait needs to know about one kind of record: where it
+// lives, how its status reads and which statuses end the wait, how to show the
+// record the wait ended on, and the command that resumes a wait cut short.
+// The polling itself - the interval, the retries, the timeout, a signal - is
+// the same for every kind, and stays in waitFor.
+type lifecycle struct {
+	singular string   // names the record in messages: "audience"
+	prefix   string   // the record reads at prefix/{id}
+	create   string   // the POST that creates one
+	resume   string   // the show command that resumes a wait, without the id
+	lead     []string // the fields the printed record leads with
+
+	read func(rec output.Record, id int) waitState
+	view func(rec output.Record) output.Record
+}
+
+// waitState is what one read of a record says about the wait.
+type waitState struct {
+	key   string // changes exactly when the status does
+	label string // the status as stderr prints it: "Completed (104)"
+	name  string // the bare status name, for the timeout message
+	done  bool   // the wait is over
+	err   error  // how it ended, when done: nil for a success
+	note  string // a line for stderr on a success that is not quite what it reads as
+}
+
+// resourceLifecycle is the {id, name} status scale that audiences and
+// activations share, read at prefix/{id} and created at prefix/create.
+func resourceLifecycle(singular, prefix string, lead []string) lifecycle {
+	return lifecycle{
+		singular: singular,
+		prefix:   prefix,
+		create:   prefix + "/create",
+		resume:   "intuizi " + singular + "s show",
+		lead:     lead,
+		read: func(rec output.Record, id int) waitState {
+			return readResource(singular, rec, id)
+		},
+		view: flatten,
+	}
+}
+
+// readResource reads one audience or activation. 104 Completed is the one
+// success, the waiting set keeps the wait going, and anything else ends it as
+// a failure.
+func readResource(singular string, rec output.Record, id int) waitState {
+	sid, name := statusOf(rec)
+	st := waitState{key: strconv.Itoa(sid), label: statusLabel(sid, name), name: name}
+	switch {
+	case sid == statusCompleted:
+		st.done = true
+		// Completed says the job finished, not that it delivered: staging
+		// activation 614 reads 104 with its only stream failed and results {}.
+		if failed, total, detail := failedDatastreams(rec); failed > 0 {
+			st.err = fmt.Errorf("%s %d %w: Completed, but %d of %d datastreams failed%s",
+				singular, id, errWaitFailed, failed, total, detail)
+		} else if singular == "activation" && noDatastreams(rec) {
+			// Not a failure - nothing was asked to deliver - but not the
+			// success a bare Completed reads as either.
+			st.note = fmt.Sprintf("note: %s %d has no datastreams, so nothing was delivered", singular, id)
+		}
+	case !waiting[sid]:
+		st.done = true
+		_, _, detail := failedDatastreams(rec)
+		if sid == statusAdditionalInfo {
+			st.err = additionalInfoError(singular, id, st.label, detail)
+		} else {
+			st.err = fmt.Errorf("%s %d %w: %s%s", singular, id, errWaitFailed, st.label, detail)
+		}
+	}
+	return st
+}
+
 // waitFlags registers --wait and --timeout on cmd and returns a reader that
 // validates them. --timeout without --wait is rejected rather than ignored: a
 // silently ignored flag hides a typo in a CI script.
@@ -103,9 +176,9 @@ func waitFlags(cmd *cobra.Command) func() (bool, time.Duration, error) {
 // unchanged and a CI log shows where the job stood. A hard API error or a
 // signal prints no record: it may be long stale, and the error says what went
 // wrong. With --json a refusal still prints its error envelope.
-func waitAndPrint(cmd *cobra.Command, c *api.Client, prefix, singular string, id int, cols []string, timeout time.Duration) error {
-	path := prefix + "/" + strconv.Itoa(id)
-	final, raw, err := waitFor(cmd, c, path, singular, id, timeout)
+func waitAndPrint(cmd *cobra.Command, c *api.Client, lc lifecycle, id int, timeout time.Duration) error {
+	path := lc.prefix + "/" + strconv.Itoa(id)
+	final, raw, err := waitFor(cmd, c, path, lc, id, timeout)
 	if quietOutput {
 		// The id exists either way; the exit code carries the outcome.
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), id)
@@ -117,7 +190,7 @@ func waitAndPrint(cmd *cobra.Command, c *api.Client, prefix, singular string, id
 		}
 		return err
 	}
-	perr := printWaited(cmd, c, path, final, raw, cols, err)
+	perr := printWaited(cmd, c, path, final, raw, lc, err)
 	if perr != nil && (err == nil || cmd.Context().Err() != nil) {
 		// A signal during the --json re-read ends the command with the
 		// context's error, as it does anywhere else in a wait.
@@ -136,7 +209,7 @@ func printsRecord(err error) bool {
 // printWaited prints the record a wait ended on, in the active output mode.
 // polled is the envelope final came in. waitErr is how the wait ended, nil
 // for a success.
-func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Record, polled []byte, cols []string, waitErr error) error {
+func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Record, polled []byte, lc lifecycle, waitErr error) error {
 	if jsonOutput {
 		raw := polled
 		// A timeout prints the envelope as polled: a read after the deadline
@@ -157,7 +230,7 @@ func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Re
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
 	}
-	return output.Detail(cmd.OutOrStdout(), flatten(final), cols)
+	return output.Detail(cmd.OutOrStdout(), lc.view(final), lc.lead)
 }
 
 // rawAfterWait re-reads the record a wait ended on, for --json, in up to
@@ -189,12 +262,12 @@ func rawAfterWait(cmd *cobra.Command, c *api.Client, path string, polled []byte,
 // createAndWait posts a body, reports the new id on stderr, then follows it.
 // stdout carries only the state the wait ended on, so --json emits one
 // document.
-func createAndWait(cmd *cobra.Command, prefix, singular string, body any, cols []string, timeout time.Duration) error {
+func createAndWait(cmd *cobra.Command, lc lifecycle, body any, timeout time.Duration) error {
 	c, err := client()
 	if err != nil {
 		return err
 	}
-	created, err := createRecord(cmd, c, prefix+"/create", body)
+	created, err := createRecord(cmd, c, lc.create, body)
 	if err != nil {
 		// Nothing was created, so there is no record to wait on: --json gets
 		// the error envelope, as it does from a create without --wait.
@@ -207,17 +280,15 @@ func createAndWait(cmd *cobra.Command, prefix, singular string, body any, cols [
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "created %s %d\n", singular, id)
-	return waitAndPrint(cmd, c, prefix, singular, id, cols, timeout)
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "created %s %d\n", lc.singular, id)
+	return waitAndPrint(cmd, c, lc, id, timeout)
 }
 
-// waitFor polls GET path until the resource's lifecycle status is terminal.
-// Each status change goes to stderr; the last record read is returned, nil if
-// none was, with the envelope it came in and how the wait ended, for the
-// caller to print on stdout. singular and id feed messages; singular
-// "activation" also turns on the stderr note for a Completed record with no
-// datastreams.
-func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, timeout time.Duration) (output.Record, []byte, error) {
+// waitFor polls GET path until lc reads the record as done. Each status
+// change goes to stderr; the last record read is returned, nil if none was,
+// with the envelope it came in and how the wait ended, for the caller to print
+// on stdout.
+func waitFor(cmd *cobra.Command, c *api.Client, path string, lc lifecycle, id int, timeout time.Duration) (output.Record, []byte, error) {
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 
@@ -226,8 +297,9 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 	var (
 		rec      output.Record
 		raw      []byte
-		last     = -1
+		last     string
 		lastName string
+		read     bool
 		failures int
 	)
 	for {
@@ -236,37 +308,20 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 		case err == nil:
 			failures = 0
 			rec, raw = next, body
-			sid, name := statusOf(rec)
-			if sid != last {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s %d: %s\n", singular, id, statusLabel(sid, name))
-				last, lastName = sid, name
+			st := lc.read(rec, id)
+			if !read || st.key != last {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s %d: %s\n", lc.singular, id, st.label)
+				last, lastName, read = st.key, st.name, true
 			}
-			if sid == statusCompleted {
-				// Completed says the job finished, not that it delivered: staging
-				// activation 614 reads 104 with its only stream failed and results {}.
-				if failed, total, detail := failedDatastreams(rec); failed > 0 {
-					return rec, raw, fmt.Errorf("%s %d %w: Completed, but %d of %d datastreams failed%s",
-						singular, id, errWaitFailed, failed, total, detail)
+			if st.done {
+				if st.note != "" {
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr(), st.note)
 				}
-				if singular == "activation" && noDatastreams(rec) {
-					// Not a failure - nothing was asked to deliver - but not
-					// the success a bare Completed reads as either.
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-						"note: %s %d has no datastreams, so nothing was delivered\n", singular, id)
-				}
-				return rec, raw, nil
-			}
-			if !waiting[sid] {
-				_, _, detail := failedDatastreams(rec)
-				if sid == statusAdditionalInfo {
-					return rec, raw, additionalInfoError(singular, id, statusLabel(sid, name), detail)
-				}
-				return rec, raw, fmt.Errorf("%s %d %w: %s%s", singular, id, errWaitFailed,
-					statusLabel(sid, name), detail)
+				return rec, raw, st.err
 			}
 
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
-			return rec, raw, timeoutError(singular, id, lastName, timeout)
+			return rec, raw, timeoutError(lc, id, lastName, timeout)
 
 		case ctx.Err() != nil:
 			// Ctrl-C or SIGTERM landed mid-request. Execute maps it to the
@@ -280,14 +335,14 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 		default:
 			failures++
 			if failures >= maxPollFailures {
-				return rec, raw, gaveUpError(singular, id, failures, err)
+				return rec, raw, gaveUpError(lc, id, failures, err)
 			}
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "poll failed (%d/%d), retrying: %v\n", failures, maxPollFailures, err)
 		}
 
 		if err := sleepCtx(ctx, pollInterval); err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return rec, raw, timeoutError(singular, id, lastName, timeout)
+				return rec, raw, timeoutError(lc, id, lastName, timeout)
 			}
 			return rec, raw, err
 		}
@@ -297,24 +352,24 @@ func waitFor(cmd *cobra.Command, c *api.Client, path, singular string, id int, t
 // timeoutError names the id, the last status seen and the exact command that
 // resumes the wait - the two things a CI log needs. The job keeps running
 // server-side; a timeout is the CLI giving up, not the export.
-func timeoutError(singular string, id int, lastName string, timeout time.Duration) error {
+func timeoutError(lc lifecycle, id int, lastName string, timeout time.Duration) error {
 	// With no read at all, nothing is known to be running.
 	seen := "no status was read"
 	if lastName != "" {
 		seen = fmt.Sprintf("last status %s - it is still running", lastName)
 	}
 	return fmt.Errorf("%w after %s waiting for %s %d: %s; "+
-		"rerun 'intuizi %ss show %d --wait' to keep waiting",
-		errWaitTimeout, timeout, singular, id, seen, singular, id)
+		"rerun '%s %d --wait' to keep waiting",
+		errWaitTimeout, timeout, lc.singular, id, seen, lc.resume, id)
 }
 
 // gaveUpError is timeoutError's twin for a wait abandoned after reads kept
 // failing, such as during a short API outage. The job was not seen to end, so
 // it names the command that resumes the wait, as a timeout does.
-func gaveUpError(singular string, id, failures int, err error) error {
+func gaveUpError(lc lifecycle, id, failures int, err error) error {
 	return fmt.Errorf("%w after %d consecutive failed reads: %w; the %s may still be running - "+
-		"rerun 'intuizi %ss show %d --wait' to keep waiting once the API answers again",
-		errWaitGaveUp, failures, err, singular, singular, id)
+		"rerun '%s %d --wait' to keep waiting once the API answers again",
+		errWaitGaveUp, failures, err, lc.singular, lc.resume, id)
 }
 
 // additionalInfoError explains a wait that ended on 107 Additional Info. The

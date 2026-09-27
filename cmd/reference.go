@@ -113,6 +113,11 @@ var referenceGroups = []referenceGroup{
 			{item: "datastreams", short: "Datastreams for an endpoint partner", params: []param{
 				{name: "partner_id", kind: num, required: true, help: "Endpoint partner id"},
 			}},
+			// Not the datastreams above: those are a partner's delivery
+			// outputs, these are the charts an audience can draw as it builds.
+			{item: "datastream-visualizations", short: "Data stream visualizations an audience can draw", params: []param{
+				{name: "dataset_type", kind: str, help: "Only the streams a dataset of this type accepts (e.g. POI)"},
+			}},
 			{item: "schedule-frequencies", short: "Schedule frequencies"},
 			{item: "schedule-windows", short: "Schedule date windows"},
 			{item: "schedule-endings", short: "Schedule ending rules"},

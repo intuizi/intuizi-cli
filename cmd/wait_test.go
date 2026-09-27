@@ -58,7 +58,7 @@ func waitShow() *cobra.Command {
 		if !wait {
 			return renderOne(cmd, "/analyses/activations/"+strconv.Itoa(id), nil)
 		}
-		return waitAndPrint(cmd, c, "/analyses/activations", "activation", id, nil, timeout)
+		return waitAndPrint(cmd, c, resourceLifecycle("activation", "/analyses/activations", nil), id, timeout)
 	}
 	return cmd
 }
@@ -122,11 +122,11 @@ func TestTimeoutBeforeAnyStatusSaysSo(t *testing.T) {
 
 // The two shapes of the timeout message, pinned side by side.
 func TestTimeoutErrorNamesWhatWasSeen(t *testing.T) {
-	seen := timeoutError("activation", 501, "Processing", 0).Error()
+	seen := timeoutError(activationLifecycle, 501, "Processing", 0).Error()
 	if !strings.Contains(seen, "last status Processing") || !strings.Contains(seen, "still running") {
 		t.Errorf("with a status: %s", seen)
 	}
-	unseen := timeoutError("activation", 501, "", 0).Error()
+	unseen := timeoutError(activationLifecycle, 501, "", 0).Error()
 	if !strings.Contains(unseen, "no status was read") || strings.Contains(unseen, "still running") {
 		t.Errorf("without one: %s", unseen)
 	}

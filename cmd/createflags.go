@@ -25,17 +25,23 @@ func rejectBodyFlags(flags *pflag.FlagSet, fields []string) error {
 
 // missingFlags names every unset required flag at once.
 func missingFlags(flags *pflag.FlagSet, required []string, what string) error {
-	var missing []string
-	for _, f := range required {
-		if !flags.Changed(f) {
-			missing = append(missing, "--"+f)
-		}
-	}
+	missing := unsetFlags(flags, required...)
 	if len(missing) == 0 {
 		return nil
 	}
 	return usageErr(what + " needs " + strings.Join(missing, ", ") +
 		" - or pass the whole body with --file")
+}
+
+// unsetFlags lists, as --name, each of names the command line did not set.
+func unsetFlags(flags *pflag.FlagSet, names ...string) []string {
+	var missing []string
+	for _, f := range names {
+		if !flags.Changed(f) {
+			missing = append(missing, "--"+f)
+		}
+	}
+	return missing
 }
 
 // nonEmpty rejects a blank value. Changed is true for --name "", so

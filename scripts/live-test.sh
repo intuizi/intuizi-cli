@@ -10,9 +10,11 @@
 # then cleanup, and the script exits 1 if any step failed, so it can gate a
 # scheduled workflow.
 #
-# It creates and then deletes: a project, two POI audiences (one built from a
-# piped --dry-run body), two cohorts, an upload, a schedule and two POI
-# submissions, all named cli-live-*. Cleanup runs from an EXIT trap, so an
+# It creates and then deletes: a project, three POI audiences (one built from
+# a piped --dry-run body, one with the frequency analysis a preview needs),
+# two cohorts, an upload, a schedule and two POI submissions, all named
+# cli-live-*. It also runs one size estimate, which has no delete: estimates
+# never appear in Audience Manager. Cleanup runs from an EXIT trap, so an
 # interrupted run still removes what it made: Ctrl-C stops the run once the
 # step in flight returns, logs that step as failed, cleans up and exits 130,
 # and SIGTERM stops it at once, logs the step it cut short as failed, cleans
@@ -25,6 +27,12 @@
 #
 # Point it at a test console. The audience build is the slow step; set
 # LIVE_WAIT_TIMEOUT (default 20m) if the console is slower than that.
+#
+# 'activations preview' needs an audience with devices in it, and a test
+# console's data can end well before today. LIVE_FREQ_START and LIVE_FREQ_END
+# (YYYY-MM-DD) give its --frequency audience a window the console has data
+# for, and LIVE_FREQ_BRAND a POI brand id with devices in California in it; by
+# default it uses the same recent window and brand as the other audiences.
 set -u
 
 BASE=${1:?usage: live-test.sh <base-url> [results-dir]}
@@ -169,6 +177,8 @@ common endpoint-partners
 common endpoint-connections
 common pricing-models --partner-id $PARTNER
 common datastreams --partner-id $PARTNER
+common datastream-visualizations
+common datastream-visualizations --dataset-type POI
 common schedule-frequencies
 common schedule-windows
 common schedule-endings
@@ -225,6 +235,9 @@ step 1 "bad token -> 401 exit 1" env INTUIZI_API_TOKEN=not-a-real-token "$B" --b
 step 2 "unknown flag -> exit 2" I audiences list --nope
 step 2 "unknown subcommand -> exit 2" I reference common state
 step 2 "missing required flag -> exit 2" I reference common states
+step 2 "activations preview without a range -> exit 2" I activations preview --audience-id 1
+step 2 "activations preview upside-down range -> exit 2" I activations preview --audience-id 1 --freq-min 5 --freq-max 2
+step 2 "activations preview --quiet -> exit 2" I activations preview --audience-id 1 --freq-min 1 --freq-max 2 --quiet
 
 # ------------------------------------------------------------------ create / delete
 STAMP=$(date -u +%Y%m%d-%H%M%S)
@@ -245,6 +258,18 @@ step 0 "audiences show" I audiences show "$AUD"
 step 0 "audiences show --json" I audiences show "$AUD" --json
 step 0 "audiences create --file - (body from --dry-run)" bash -c "'$B' --base-url '$BASE' audiences create --type poi --brand $SBUX --country USA --start-date $START --end-date $END --name 'cli-live-test file $STAMP' --dry-run | '$B' --base-url '$BASE' audiences create --file - --quiet"
 AUD2=$(first); [ -n "$AUD2" ] && AUDIENCES+=("$AUD2")
+# An estimate of the audience just built: the same flags, so the same recipe.
+# It carries an Idempotency-Key, so the same body sent again with the same key
+# replays it rather than scanning twice.
+EKEY="cli-live-$STAMP-$$"
+step 0 "audiences estimate create --dry-run" I audiences estimate create "${AUDFLAGS[@]}" --name "cli-live-test $STAMP" --dry-run
+step 0 "audiences estimate create --wait --quiet" I audiences estimate create "${AUDFLAGS[@]}" --name "cli-live-test $STAMP" --idempotency-key "$EKEY" --wait --timeout "$WAIT_TIMEOUT" --quiet
+EST=$(first)
+step 0 "audiences estimate create with the same key replays the estimate" bash -c "again=\$('$B' --base-url '$BASE' audiences estimate create --type poi --brand '$SBUX' --country USA --state CA --city 'San Francisco' --start-date '$START' --end-date '$END' --name 'cli-live-test $STAMP' --idempotency-key '$EKEY' --quiet); echo \"first $EST again \$again\"; [ -n '$EST' ] && [ \"\$again\" = '$EST' ]"
+step 0 "audiences estimate show" I audiences estimate show "$EST"
+step 0 "audiences estimate show --wait --json" I audiences estimate show "$EST" --wait --json
+step 0 "estimate and audience share a recipe_hash" bash -c "a=\$('$B' --base-url '$BASE' audiences show '$AUD' --json | jq -r '.data[0].recipe_hash'); e=\$('$B' --base-url '$BASE' audiences estimate show '$EST' --json | jq -r '.data[0].recipe_hash'); echo \"audience \$a estimate \$e\"; [ -n \"\$a\" ] && [ \"\$a\" != null ] && [ \"\$a\" = \"\$e\" ]"
+
 step any "audiences lookalike create --notify=false --dry-run (capability may be off)" I audiences lookalike create --name "cli-live-lal $STAMP" --source-audience-id "$AUD" --target-size 10000 --signal poi --country USA --notify=false --dry-run
 
 # Origin: a --dry-run only, and only where this console lists Origin providers;
@@ -283,6 +308,37 @@ step 0 "reference common pricing-models --quiet" I reference common pricing-mode
 PM=$(first)
 step 0 "reference common datastreams --quiet" I reference common datastreams --partner-id "$PARTNER" --quiet
 DS=$(first)
+
+# The frequency analysis is a gated feature (403 when it is off), so the
+# preview steps run only where the build succeeds. The whole range sums to
+# histogram_total. An audience with no devices has no histogram to preview,
+# but its 422 still shows the analysis was recorded: one built without it
+# names that instead.
+FREQ_START=${LIVE_FREQ_START:-$START}; FREQ_END=${LIVE_FREQ_END:-$END}; FREQ_BRAND=${LIVE_FREQ_BRAND:-$SBUX}
+step any "audiences create --frequency --wait --quiet (capability may be off)" I audiences create --type poi --brand "$FREQ_BRAND" --country USA --state CA --start-date "$FREQ_START" --end-date "$FREQ_END" --name "cli-live-freq $STAMP" --frequency --wait --timeout "$WAIT_TIMEOUT" --quiet
+FREQ_OK=$LAST_EXIT; AUD3=$(first); [ -n "$AUD3" ] && AUDIENCES+=("$AUD3")
+FREQ_COUNT=0
+if [ "$FREQ_OK" = 0 ] && [ -n "$AUD3" ]; then
+  FREQ_COUNT=$(I audiences show "$AUD3" --json | jq -r '.data[0].results_count // 0')
+fi
+if [ "$FREQ_OK" = 0 ] && [ -n "$AUD3" ] && [ "${FREQ_COUNT:-0}" = 0 ]; then
+  step 0 "activations preview of an empty --frequency audience names the missing histogram" bash -c "err=\$('$B' --base-url '$BASE' activations preview --audience-id '$AUD3' --freq-min 1 --freq-max 1 2>&1 >/dev/null); rc=\$?; echo \"\$err\"; [ \$rc = 1 ] && grep -q 'no frequency distribution' <<<\"\$err\""
+elif [ "$FREQ_OK" = 0 ] && [ -n "$AUD3" ]; then
+  step 0 "activations preview" I activations preview --audience-id "$AUD3" --freq-min 1 --freq-max 1
+  step 0 "activations preview --json" I activations preview --audience-id "$AUD3" --freq-min 1 --freq-max 1 --json
+  FMIN=$(jq -r '.data[0].frequency_bounds.min // empty' "$LAST_OUT"); FMAX=$(jq -r '.data[0].frequency_bounds.max // empty' "$LAST_OUT")
+  if [ -n "$FMIN" ] && [ -n "$FMAX" ]; then
+    step 0 "activations preview over the whole range sums the histogram" bash -c "'$B' --base-url '$BASE' activations preview --audience-id '$AUD3' --freq-min '$FMIN' --freq-max '$FMAX' --json | jq -e '.data[0] | .filtered_count == .histogram_total'"
+    step 1 "activations preview past the upper bound -> 422, exit 1" I activations preview --audience-id "$AUD3" --freq-min "$FMIN" --freq-max "$((FMAX + 1))"
+    HASH=$(I activations preview --audience-id "$AUD3" --freq-min "$FMIN" --freq-max "$FMAX" --json | jq -r '.data[0].filter_hash // empty')
+    if [ -n "$EC" ] && [ -n "$PM" ] && [ -n "$HASH" ]; then
+      # shellcheck disable=SC2086
+      step 0 "activations create --freq-min --freq-max --filter-hash --dry-run (never sent)" I activations create --audience-id "$AUD3" --endpoint-connection-id "$EC" --pricing-model-id "$PM" ${DS:+--datastream $DS} --freq-min "$FMIN" --freq-max "$FMAX" --filter-hash "$HASH" --dry-run
+    fi
+  fi
+fi
+step 0 "activations preview of an audience without a frequency analysis -> 422 naming it" bash -c "err=\$('$B' --base-url '$BASE' activations preview --audience-id '$AUD2' --freq-min 1 --freq-max 1 2>&1 >/dev/null); rc=\$?; echo \"\$err\"; [ \$rc = 1 ] && grep -q 'without a frequency analysis' <<<\"\$err\""
+
 if [ -n "$EC" ] && [ -n "$PM" ]; then
   # Without --datastream the body is valid but would deliver nothing, which
   # stderr says; pipefail keeps the CLI's own exit code in the result.
