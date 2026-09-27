@@ -914,9 +914,11 @@ func TestPoiSubmissionsCreateHelpDescribesMatching(t *testing.T) {
 		"an --upload-reference file is checked only in its first 64 KB",
 		"carry values for --key but match no POI archives every POI the brand had",
 		"no location has a value for --key",
-		"a location_id, store_id, master_id or external_id",
+		"a location_id, store_id, master_id, or external_id",
 		"a blank value counting as none",
 		"its locations are still added",
+		"If an approval is interrupted part way, its locations are still imported but --remove is not applied",
+		"Send the submission again to apply it",
 	} {
 		if !strings.Contains(long, want) {
 			t.Errorf("create help omits %q:\n%s", want, cmd.Long)
