@@ -1,7 +1,8 @@
 # @intuizi/cli
 
-The official command-line interface for the [Intuizi](https://intuizi.com)
-data signal platform, packaged for npm.
+The official command-line interface for the Large Behavioral Model,
+[Intuizi](https://intuizi.com)'s flagship large quantitative model (LQM),
+packaged for npm.
 
 ```bash
 npm install -g @intuizi/cli
