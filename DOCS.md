@@ -582,13 +582,15 @@ Training shows as status `108` Modeling, which is not terminal;
 `audiences show <id> --wait` follows the new audience through it to Completed.
 
 `audiences lookalike cancel <id>` takes the id `lookalike create` returned, not
-the seed's. The run stops at its next checkpoint and reports no further
-status, so from then on the audience keeps reading `108` Modeling and never
-reaches Completed: do not follow a cancelled run with `show <id> --wait`,
-which would poll until `--timeout` and exit `1`. A cancel that arrives once
-the result is already being published is ignored, and the run completes. A
-run that has already finished cannot be cancelled. Remove a cancelled run
-with `audiences delete <id>`.
+the seed's. The run stops at its next checkpoint, and until then the audience
+reads `108` Modeling. Once the run stops it ends at `400` Error, which is
+final: it never reaches Completed. `show <id> --wait` follows a cancelled run
+to that status and exits `1`, as it does for any failed build, and a webhook
+receiver gets `audience.failed`. The API returns only `400` Error, and
+Audience Manager in the Intuizi console shows the status as
+`Cancelled on request.` A cancel that arrives once the result is already being
+published is ignored, and the run completes. A run that has already finished
+cannot be cancelled. Remove a cancelled run with `audiences delete <id>`.
 
 ```bash
 intuizi audiences lookalike create \
@@ -1158,7 +1160,8 @@ Modeling and `109` Visualizing data streams. `105` comes before `104`, not
 after it. `108` is a Lookalike Model training. `109` is an audience drawing
 the data stream visualizations it opted into, before `105` and `104`. Any
 other id ends the wait with exit 1: `106` Expired, `107` Additional Info, the
-`4xx` errors, and any id the CLI does not know.
+`4xx` errors (a cancelled Lookalike Model ends at `400`), and any id the CLI
+does not know.
 
 `107` Additional Info means the worker could not run the request as given, so
 it stopped and nothing follows. The error says the build (or, for an

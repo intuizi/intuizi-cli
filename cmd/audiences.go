@@ -376,7 +376,8 @@ var audienceRequired = []string{"type", "name", "start-date", "end-date"}
 
 // audiencesShowCommand is the generic showCommand plus --wait, so a build can be
 // followed to Completed before it is activated. 108 Modeling and 109
-// Visualizing data streams are waited through; 107 Additional Info ends it.
+// Visualizing data streams are waited through; 107 Additional Info ends it, and
+// so do the 4xx errors, the 400 a cancelled lookalike ends at among them.
 func audiencesShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id>",
@@ -388,15 +389,15 @@ each status change to stderr and the last record read to stdout, and exiting
 non-zero if it fails, --timeout runs out or three reads in a row fail. A
 lookalike in 108 Modeling is still training, and an audience in 109
 Visualizing data streams is drawing its data stream visualizations, so both
-are waited through. A cancelled lookalike reads 108 for good, so a wait on one
-only ends at --timeout:
+are waited through:
 
     intuizi audiences show 1377 --wait
 
 107 Additional Info is a failure: the build stopped and will not continue, so
 the wait exits non-zero at once, and waiting again cannot change that. The
 API does not return the reason, but Audience Manager in the Intuizi console
-shows it on the audience.`,
+shows it on the audience. A cancelled lookalike reads 108 until the run
+stops, then ends at 400 Error, so a wait on one exits non-zero there too.`,
 		Args: cobra.ExactArgs(1),
 	}
 	waitOpts := waitFlags(cmd)
@@ -437,7 +438,8 @@ Manager; a 403 means they are not enabled for the account.
 
 Training shows as status 108 Modeling, which is not terminal - follow it with
 'intuizi audiences show <id> --wait' until it reads Completed. A cancelled run
-never does: see 'intuizi audiences lookalike cancel --help'.`,
+ends at 400 Error instead, which is final: see
+'intuizi audiences lookalike cancel --help'.`,
 	}
 
 	create := lookalikeCreateCommand()
@@ -447,12 +449,15 @@ never does: see 'intuizi audiences lookalike cancel --help'.`,
 		Short: "Cancel a lookalike run in progress",
 		Long: `Cancel a lookalike run in progress.
 
-The run stops at its next checkpoint and reports no further status, so from
-then on the audience keeps reading 108 Modeling and never reaches Completed.
-Do not follow a cancelled run with 'intuizi audiences show <id> --wait': it
-polls until --timeout and exits non-zero. A cancel that arrives once the
-result is already being published is ignored, and the run completes. A run
-that has already finished cannot be cancelled. Remove a cancelled run with
+The run stops at its next checkpoint, and until then the audience reads
+108 Modeling. Once the run stops it ends at 400 Error, which is final: it
+never reaches Completed. 'intuizi audiences show <id> --wait' follows a
+cancelled run to that status and exits non-zero, as it does for any failed
+build, and a webhook receiver gets audience.failed. The API returns only
+400 Error, and Audience Manager in the Intuizi console shows the status as
+"Cancelled on request." A run that has already finished cannot be
+cancelled, and a cancel that arrives once the result is already being
+published is ignored: the run completes. Remove a cancelled run with
 'intuizi audiences delete <id>'.
 
 Takes the id 'lookalike create' returned, not the seed's. Like create, it
@@ -465,8 +470,8 @@ Manager; a 403 means they are not enabled for the account.`,
 				return err
 			}
 			return postID(cmd, audiencesPrefix+"/cancel-lookalike", id,
-				fmt.Sprintf("cancellation requested for audience %d - once it stops it keeps "+
-					"reading 108 Modeling, so do not --wait on it; remove it with "+
+				fmt.Sprintf("cancellation requested for audience %d - once the run stops "+
+					"it ends at 400 Error, which is final; remove it with "+
 					"'intuizi audiences delete %d'", id, id))
 		},
 	}
