@@ -6,13 +6,17 @@
 # Uses the token the CLI already holds (auth login, or INTUIZI_API_TOKEN) and
 # the binary in $INTUIZI_BIN (default ./bin/intuizi). Every step logs the
 # command, its exit code and the first lines of both streams to results.md in
-# the results directory; the script never stops on a failure and exits 1 at the
-# end if any step failed, so it can gate a scheduled workflow.
+# the results directory. A failed step does not stop the run: every step runs,
+# then cleanup, and the script exits 1 if any step failed, so it can gate a
+# scheduled workflow.
 #
 # It creates and then deletes: a project, two POI audiences (one built from a
 # piped --dry-run body), two cohorts, an upload, a schedule and two POI
 # submissions, all named cli-live-*. Cleanup runs from an EXIT trap, so an
-# interrupted run still removes what it made. Activations are only ever
+# interrupted run still removes what it made: Ctrl-C stops the run once the
+# step in flight returns, cleans up and exits 130, and SIGTERM stops it at once,
+# cleans up and exits 143. A second Ctrl-C during cleanup abandons it,
+# leaving the rest for you to delete by name. Activations are only ever
 # --dry-run: a real one delivers to an endpoint and costs money.
 #
 # Point it at a test console. The audience build is the slow step; set
@@ -53,7 +57,7 @@ step() {
 first() { head -1 "$LAST_OUT"; }
 
 cleanup() {
-  local id
+  local rc=$? id  # first, before anything resets $?
   for id in "${SUBMISSIONS[@]}"; do step 0 "cleanup poi submissions delete $id" I poi submissions delete "$id" --yes; done
   for id in "${SCHEDULES[@]}";   do step 0 "cleanup schedules delete $id"       I schedules delete "$id" --yes; done
   for id in "${COHORTS[@]}";     do step 0 "cleanup cohorts delete $id"         I cohorts delete "$id" --yes; done
@@ -61,9 +65,18 @@ cleanup() {
   for id in "${PROJECTS[@]}";    do step 0 "cleanup projects delete $id"        I projects delete "$id" --yes; done
   { echo; echo "## Summary: $pass passed, $fail failed, $n steps"; } >> "$R"
   echo "== $pass passed, $fail failed, $n steps; report: $R"
-  [ "$fail" -eq 0 ]
+  # Bash discards an EXIT trap's return status, so a failed step has to turn a
+  # clean exit into exit 1 here. Any other exit keeps its own status: 2 from a
+  # setup check, 130 from the INT trap below. SIGTERM runs this trap with $?
+  # still 0, but bash then dies of the signal (143) whatever the trap does.
+  if [ "$rc" -eq 0 ] && [ "$fail" -gt 0 ]; then exit 1; fi
 }
 trap cleanup EXIT
+# The CLI catches Ctrl-C and exits 130 rather than dying of the signal, and bash
+# then goes on to the next step as if the command had just failed. Exiting here
+# ends the run instead, once the step in flight returns, and the EXIT trap
+# cleans up. The trap stays set during cleanup, so a second Ctrl-C ends that.
+trap 'exit 130' INT
 
 echo "# Live test: $BASE, $(date -u +%FT%TZ), binary $($B version)" >> "$R"; echo >> "$R"
 
