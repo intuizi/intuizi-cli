@@ -6,14 +6,15 @@ import (
 	"testing"
 )
 
-// activationPreviewEnvelope is Preview Activation's documented response for audience 88
-// over the range 2-5.
+// activationPreviewEnvelope is Preview Activation's documented response for
+// audience 88 over the range 2-5. recency reads MM/DD/YYYY, as the stored
+// audience keeps its dates.
 const activationPreviewEnvelope = `{"status":"success","code":200,"message":"Resource fetched successfully.","data":[{
  "audience":{"id":88,"name":"Coffee Buyers NYC","status":{"id":104,"name":"Completed"},
   "is_activation_allowed":true,
   "eligibility":{"allowed":true,"reasons":[],"metrics":{"unique_eids":5100,"unique_scids":null,"eid_scid_ratio":null,"is_affinity":false}}},
  "dataset_type":"POI","analysis_type":"frequency",
- "recency":[{"dataset_type":"POI","start_date":"2026-06-01","end_date":"2026-07-31"}],
+ "recency":[{"dataset_type":"POI","start_date":"06/01/2026","end_date":"07/31/2026"}],
  "source_count":5100,"histogram_total":5000,"filtered_count":2000,
  "frequency_bounds":{"min":1,"max":5},
  "histogram":[{"index":1,"counts":3000},{"index":2,"counts":1200},{"index":3,"counts":500},{"index":5,"counts":300}],
@@ -58,7 +59,7 @@ func TestActivationsPreviewShowsTheCountAndHistogram(t *testing.T) {
 	for _, want := range []string{
 		"Coffee Buyers NYC", "filtered_count", "2000", "freq_range", "2-5",
 		"frequency_bounds", "1-5", "sha256:4f9d0c7e1b2a8d3f6e5c4b3a2918f7e6d5c4b3a291807f6e5d4c3b2a19180706",
-		"POI 2026-06-01..2026-07-31",
+		"POI 06/01/2026..07/31/2026",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout missing %q:\n%s", want, out)

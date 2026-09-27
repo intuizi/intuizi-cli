@@ -92,6 +92,9 @@ func blockedText(rec output.Record, sep string) string {
 // blocked reason reads "CODE: reason". The rest of what is nested - the
 // normalized payload, query_metrics, the totals row - stays summarised, in
 // full under --json. A field of the estimate never shadows one of the record.
+//
+// normalized_payload is put back after flatten: it has a name of its own, and
+// the {id, name} collapse would print the whole payload as that name.
 func estimateView(rec output.Record) output.Record {
 	view := make(output.Record, len(rec))
 	for k, v := range rec {
@@ -108,7 +111,11 @@ func estimateView(rec output.Record) output.Record {
 	if text := blockedText(rec, ": "); text != "" {
 		view["blocked"] = text
 	}
-	return flatten(view)
+	view = flatten(view)
+	if payload, ok := rec["normalized_payload"].(map[string]any); ok {
+		view["normalized_payload"] = payload
+	}
+	return view
 }
 
 // --------------------------------------------------------------------------------- commands
@@ -159,6 +166,11 @@ Audience Size instead of Create Audience:
 body and sends nothing, and swapping 'estimate create' for 'create' in the
 same command line builds that audience.
 
+--frequency is accepted, and checked as on create - it needs the same
+permissions - but an estimate never runs an analysis, so it changes neither
+the figures nor recipe_hash. It is there so the command line that builds the
+audience can be estimated unchanged.
+
 An estimate runs as long as a real build and comes back pending, with no
 figures. Add --wait to block until it reads completed, blocked or failed,
 with --timeout to bound it (default 60m). completed exits 0 with the figures
@@ -173,15 +185,17 @@ An audience created from the same body carries the same recipe_hash
 ('intuizi audiences show <id> --json'), which proves it is the audience that
 was estimated.
 
-The request carries an Idempotency-Key, and a retry after a 429 reuses it,
-so a retried estimate is not scanned twice. Running the command again sends a
-fresh key and starts a second estimate. When a create gets no response at all,
+The request carries an Idempotency-Key, and a retry after a 429 reuses it.
+Running the command again sends a fresh key and starts a second estimate. When a create gets no response at all,
 stderr prints the key it used: rerun with --idempotency-key <key> to retry it
 without risking a duplicate.`,
 		Args: cobra.NoArgs,
 	}
 	waitOpts := waitFlags(cmd)
 	req.register(cmd)
+	// The flag is shared with create, but an estimate never runs the analysis.
+	cmd.Flags().Lookup("frequency").Usage = "Accepted and checked as on create, but an estimate never runs\n" +
+		"the analysis: the figures and recipe_hash are the same without it"
 
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		wait, timeout, err := waitOpts()

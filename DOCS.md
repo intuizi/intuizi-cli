@@ -567,7 +567,9 @@ way, the same `--file` body, `--dry-run` - and sends it to Estimate Audience
 Size instead, which answers how many devices the audience would hold without
 creating it. Nothing appears in Audience Manager, and no export, cohort,
 schedule or activation follows. Swapping `estimate create` for `create` in the
-same command line builds the audience that was estimated.
+same command line builds the audience that was estimated. `--frequency` is
+accepted for that reason, and checked as on create, but an estimate never runs
+an analysis, so it changes neither the figures nor `recipe_hash`.
 
 ```bash
 intuizi audiences estimate create \
@@ -600,16 +602,17 @@ itself in `status_message`. Both are final and end a wait with exit 1.
 does not change it. An audience created from the same body carries the same
 `recipe_hash` on `audiences show <id> --json`, which is the proof it is the
 audience that was estimated. The request carries an Idempotency-Key like a
-create, so a retry after a 429 or a dropped connection
-(`--idempotency-key`) replays the estimate rather than scanning twice.
+create: a retry after a 429 reuses it, and when an estimate gets no response
+at all, rerunning it with the `--idempotency-key` stderr printed returns the
+estimate the first attempt started, if it did, rather than scanning twice.
 
 ```bash
 $ intuizi audiences estimate show 12
-id              12
-name            Starbucks visitors - SF - 1 week
-status          completed
-uniques         482311
-visits          1203440
+id                  12
+name                Starbucks visitors - SF - 1 week
+status              completed
+uniques             482311
+visits              1203440
 ...
 ```
 
@@ -747,8 +750,9 @@ nothing is created, exported or billed, so preview as many ranges as needed.
 `filtered_count` is the exact number of devices seen on `--freq-min` to
 `--freq-max` distinct days in the audience's date window - what Audience
 Manager shows as Limit Audience for the same Freq. Range - and the output
-leads with it, the range, the `frequency_bounds` a range must fall inside,
-the audience's totals, and the `filter_hash` to pass to `activations create`.
+leads with it after the audience's name: then the range, the
+`frequency_bounds` a range must fall inside, the audience's totals, and the
+`filter_hash` to pass to `activations create`.
 Under that is the whole histogram: devices per number of distinct days, the
 buckets a range sums. `source_count` is the audience total, an approximate
 count, and `histogram_total` the exact sum of the histogram, so the two can

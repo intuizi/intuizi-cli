@@ -247,6 +247,11 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 				"endpoint_connection_id": connectionID,
 				"pricing_model_id":       pricingModel,
 			}
+			// Its usage errors first, so nothing is printed for a command
+			// line that is then refused.
+			if err := addFrequencyFilter(flags, freqMin, freqMax, filterHash, m); err != nil {
+				return err
+			}
 			if len(streams) > 0 {
 				m["datastreams"] = streams
 			} else {
@@ -258,9 +263,6 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 			}
 			if flags.Changed("project-id") {
 				m["project_id"] = projectID
-			}
-			if err := addFrequencyFilter(flags, freqMin, freqMax, filterHash, m); err != nil {
-				return err
 			}
 			if dryRun {
 				enc := json.NewEncoder(cmd.OutOrStdout())

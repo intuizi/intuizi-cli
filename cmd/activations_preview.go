@@ -12,8 +12,8 @@ import (
 	"github.com/intuizi/intuizi-cli/internal/output"
 )
 
-// previewLead is what a preview leads with: the count for the range asked,
-// the range, and what bounds it.
+// previewLead is what a preview leads with: the audience it counts, the count
+// for the range asked, the range, and what bounds it.
 var previewLead = []string{
 	"audience", "filtered_count", "freq_range", "frequency_bounds",
 	"source_count", "histogram_total", "filter_hash", "as_of",
@@ -35,9 +35,9 @@ Nothing is created, exported or billed, so preview as many ranges as you like:
 
     intuizi activations preview --audience-id 88 --freq-min 2 --freq-max 5
 
-The output leads with filtered_count for the range, the frequency_bounds a
-range must fall inside, and the audience's totals, then prints the whole
-histogram: devices per number of distinct days. Use the upper bound as
+The output names the audience, then leads with filtered_count for the range,
+the frequency_bounds a range must fall inside, and the audience's totals, and
+prints the whole histogram under them: devices per number of distinct days. Use the upper bound as
 --freq-max for an open-ended "2+" range. --json adds the limitations, which
 explain how each count is made.
 
@@ -143,7 +143,7 @@ func previewActivation(cmd *cobra.Command, query url.Values) error {
 
 // previewView reads the nested fields a person picks a range from as plain
 // values: the range applied and the bounds as "2-5", the recency window as
-// "POI 2026-06-01..2026-07-31", and the audience's activation verdict. The
+// "POI 06/01/2026..07/31/2026", and the audience's activation verdict. The
 // histogram prints as its own table and the limitations are left to --json.
 func previewView(rec output.Record) output.Record {
 	view := flatten(rec)

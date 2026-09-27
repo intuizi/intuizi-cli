@@ -352,3 +352,33 @@ func TestEstimateCreateWaitFollowsToCompleted(t *testing.T) {
 		t.Errorf("stdout should be the completed estimate:\n%s", out)
 	}
 }
+
+// normalized_payload carries a name of its own, and the {id, name} collapse
+// made the whole payload read as that name. It is summarised like the other
+// nested objects instead.
+func TestEstimateShowSummarisesTheNormalizedPayload(t *testing.T) {
+	srv, _ := stubSeq(t, estimate("completed", completedNumbers, ""))
+
+	out, _, err := run(t, estimateShowCommand(), srv, "12")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !containsRow(out, "normalized_payload", "{...}") {
+		t.Errorf("normalized_payload should read {...}:\n%s", out)
+	}
+}
+
+// A wait that gives up names the same resume command a timeout does.
+func TestEstimateWaitGiveUpNamesTheResumeCommand(t *testing.T) {
+	fast(t)
+	down := reply{status: 500, body: errEnvelope}
+	srv, _ := stubSeq(t, estimate("processing", "null", ""), down, down, down)
+
+	_, _, err := run(t, estimateShowCommand(), srv, "12", "--wait", "--timeout", "5s")
+	if !errors.Is(err, errWaitGaveUp) {
+		t.Fatalf("err = %v, want errWaitGaveUp", err)
+	}
+	if !strings.Contains(err.Error(), "'intuizi audiences estimate show 12 --wait'") {
+		t.Errorf("error should name the resume command: %v", err)
+	}
+}

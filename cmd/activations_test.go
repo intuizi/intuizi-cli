@@ -899,9 +899,10 @@ func TestActivationsCreateSendsTheFrequencyFilter(t *testing.T) {
 	}
 }
 
-// Each mistake is refused before anything is sent: the API would 422 a lone
-// bound or a hash without its range, and an upside-down range filters out
-// every device.
+// Each mistake is refused before anything is sent. A range is both bounds, as
+// the preview takes them - stricter than the API, which takes a lone bound
+// under freq_limit - the API would 422 a hash without its range, and an
+// upside-down range filters out every device.
 func TestActivationsCreateRejectsABadFrequencyFilter(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -939,5 +940,19 @@ func TestActivationsCreateRejectsFrequencyFlagsWithFile(t *testing.T) {
 	wantUsageErr(t, err, "--file carries the whole body", "--freq-min", "--freq-max", "--filter-hash")
 	if len(got.paths) != 0 {
 		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
+// A usage error ends the command before anything else is said: the warning
+// that an activation without --datastream delivers nothing is for a body that
+// will actually be built.
+func TestActivationsCreateFrequencyErrorPrecedesTheDatastreamWarning(t *testing.T) {
+	srv, _ := stub(t, `{}`)
+
+	_, errb, err := run(t, activationsCreateCommand(), srv, append(append([]string(nil), threeIDs...), "--freq-min", "2")...)
+
+	wantUsageErr(t, err, "--freq-max")
+	if strings.Contains(errb, "deliver nothing") {
+		t.Errorf("warned before refusing the command line:\n%s", errb)
 	}
 }
