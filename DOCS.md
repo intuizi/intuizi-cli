@@ -819,7 +819,7 @@ counted run made. Create a new schedule instead.
 | `--upload-reference` | reference from an upload with `--purpose poi_submission` | `uploads put`, or `uploads reserve` |
 | `--key` | how each listed location is matched to the brand's existing POIs, below | - |
 | `--update` | update the brand's existing POIs that a listed location matches; needs `--key` | - |
-| `--remove` | archive the brand's existing POIs that no listed location matches, keeping the matched ones; needs `--key` | - |
+| `--remove` | archive the brand's existing POIs that no listed location matches, keeping the matched ones, once over the whole submission; needs `--key` | - |
 
 Exactly one of `--file`, `--list` and `--upload-reference`. `--file` and
 `--upload-reference` need `--name` and `--brand-id`; `--list` takes both from
@@ -832,13 +832,29 @@ replaces a different value in the body says so on stderr, as in
 reads stdin: `--file -` is refused and points at `--list -`.
 
 `--key` takes `location-id`, `gps-coordinates`, `store-id`, `master-id` or
-`external-id`, and the API matches on `gps-coordinates` when it is left out.
-A listed location that matches an existing POI is never added a second time:
-`--list ... --update --key store-id` changes the POIs it matches by store id,
-and without `--update` they are left as they are. `--remove` keeps the POIs
-you list and archives the rest of the brand's POIs, so list every location
-the brand should keep, not the ones to drop. Both take effect when Intuizi
-approves the submission.
+`external-id`, and the API matches on `gps-coordinates` when it is left out,
+or null in a `--list` body. A listed location that matches an existing POI is
+never added a second time: `--list ... --update --key store-id` changes the
+POIs it matches by store id, and without `--update` they are left as they
+are. A location that matches nothing is added as a new POI.
+
+`--remove` keeps the POIs the listed locations match and archives every other
+POI the brand had. It is applied once, after the whole submission has been
+matched, however many locations it has, so list every location the brand
+should keep, in one submission, not the ones to drop. A `--remove` submission
+in which no location matches archives every POI the brand had, and one that
+holds no location at all archives nothing. `--update` and `--remove` take
+effect when Intuizi approves the submission. If an approval is interrupted
+part way, its locations are still imported but `--remove` is not applied:
+send the submission again to apply it.
+
+With `--key location-id`, a location matches the brand's POI whose id is its
+`location_id`, the `id` column of `poi locations list`. A `location_id` must
+be the id of one of your POIs, as a whole number (`101` or `101.0`), or the
+API rejects the submission. A location with no `location_id`, or one that is
+not the id of one of the brand's POIs, is added as a new POI, and a
+`--remove` submission in which no location has a `location_id` archives
+nothing.
 
 Only the `--upload-reference` form sends an `Idempotency-Key`. The API reads
 none on the `--file` and `--list` forms, so there `--idempotency-key` has no

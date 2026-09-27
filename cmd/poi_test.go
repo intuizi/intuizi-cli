@@ -878,3 +878,36 @@ func TestPoiSubmissionsCreateByListNeedsNoFlags(t *testing.T) {
 		t.Fatalf("paths = %v", got.paths)
 	}
 }
+
+// The console now applies --remove once, over the whole submission, so one in
+// which no location matches archives every POI the brand had (it used to
+// archive nothing). --key location-id matches a location's location_id to the
+// id of one of the brand's POIs, and a null key in a --list body is stored as
+// gps-coordinates. The help is where a user learns all three before sending.
+func TestPoiSubmissionsCreateHelpDescribesMatching(t *testing.T) {
+	cmd := poiSubmissionCreateCommand()
+	for flag, wants := range map[string][]string{
+		"remove": {"once, over the whole submission"},
+		"key":    {"gps-coordinates", "null in a --list body"},
+	} {
+		usage := strings.Join(strings.Fields(cmd.Flags().Lookup(flag).Usage), " ")
+		for _, want := range wants {
+			if !strings.Contains(usage, want) {
+				t.Errorf("--%s help omits %q: %q", flag, want, usage)
+			}
+		}
+	}
+
+	long := strings.Join(strings.Fields(cmd.Long), " ")
+	for _, want := range []string{
+		"archives every POI the brand had",
+		"--key location-id",
+		"whose id is its location_id",
+		"poi locations list",
+		"added as a new POI",
+	} {
+		if !strings.Contains(long, want) {
+			t.Errorf("create help omits %q:\n%s", want, cmd.Long)
+		}
+	}
+}
