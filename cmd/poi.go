@@ -354,18 +354,19 @@ that matches nothing is added as a new POI.
 --remove keeps the POIs the listed locations match and archives every other
 POI the brand had. It is applied once, over the whole submission, so list
 every location the brand should keep, in one submission, not the ones to
-drop. A --remove submission in which no location matches archives every POI
-the brand had; one that holds no location at all archives nothing. --update
-and --remove take effect when Intuizi approves the submission, and both need
---key.
+drop. A --remove submission whose locations carry values for --key but match
+no POI archives every POI the brand had. One that holds no location at all,
+or in which no location has a value for --key (a location_id, store_id,
+master_id or external_id, a blank value counting as none), archives nothing:
+its locations are still added. --update and --remove take effect when
+Intuizi approves the submission, and both need --key.
 
 With --key location-id, a location matches the brand's POI whose id is its
 location_id, the id column of 'intuizi poi locations list'. A location_id
 must be the id of one of your POIs, or the API rejects the submission (an
 --upload-reference file is checked only in its first 64 KB). A location
 with no location_id, or one that is not the id of one of the brand's POIs,
-is added as a new POI, and a --remove submission in which no location has a
-location_id archives nothing.
+is added as a new POI.
 
 Only the --upload-reference form sends an Idempotency-Key, so only it can be
 retried safely with --idempotency-key; the API reads none on the --file and
@@ -478,7 +479,8 @@ retried safely with --idempotency-key; the API reads none on the --file and
 	flags.BoolVar(&update, "update", false, "Update the brand's existing POIs that a listed location matches")
 	flags.BoolVar(&remove, "remove", false,
 		"Archive the brand's existing POIs that no listed location matches (matched\n"+
-			"ones are kept), once, over the whole submission, when Intuizi approves it")
+			"ones are kept), once, over the whole submission, when Intuizi approves it;\n"+
+			"not applied when no location has a value for --key")
 	flags.StringVar(&key, "key", "",
 		"How listed locations are matched to the brand's existing POIs:\n"+
 			matchKeyList+"\n(the API uses gps-coordinates when omitted, or null in a --list body)")

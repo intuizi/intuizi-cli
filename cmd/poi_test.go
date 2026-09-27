@@ -879,18 +879,21 @@ func TestPoiSubmissionsCreateByListNeedsNoFlags(t *testing.T) {
 	}
 }
 
-// The console now applies --remove once, over the whole submission, so one in
-// which no location matches archives every POI the brand had (it used to
-// archive nothing). --key location-id matches a location's location_id to the
-// id of one of the brand's POIs, and a null key in a --list body is stored as
-// gps-coordinates. The help is where a user learns all three before sending.
+// The console now applies --remove once, over the whole submission, so one
+// whose locations carry values for --key but match no POI archives every POI
+// the brand had (it used to archive nothing). One in which no location has a
+// value for --key, whatever the key (a file without the key's column, or a
+// --list whose locations leave it out), still archives nothing. --key
+// location-id matches a location's location_id to the id of one of the
+// brand's POIs, and a null key in a --list body is stored as gps-coordinates.
+// The help is where a user learns all of this before sending.
 // A location_id that is not one of the account's POIs is rejected, but an
 // --upload-reference create checks only the file's first 64 KB (the console's
 // readObjectHeadAndRowCount head), so the help says so.
 func TestPoiSubmissionsCreateHelpDescribesMatching(t *testing.T) {
 	cmd := poiSubmissionCreateCommand()
 	for flag, wants := range map[string][]string{
-		"remove": {"once, over the whole submission"},
+		"remove": {"once, over the whole submission", "not applied when no location has a value for --key"},
 		"key":    {"gps-coordinates", "null in a --list body"},
 	} {
 		usage := strings.Join(strings.Fields(cmd.Flags().Lookup(flag).Usage), " ")
@@ -909,9 +912,25 @@ func TestPoiSubmissionsCreateHelpDescribesMatching(t *testing.T) {
 		"poi locations list",
 		"added as a new POI",
 		"an --upload-reference file is checked only in its first 64 KB",
+		"carry values for --key but match no POI archives every POI the brand had",
+		"no location has a value for --key",
+		"a location_id, store_id, master_id or external_id",
+		"a blank value counting as none",
+		"its locations are still added",
 	} {
 		if !strings.Contains(long, want) {
 			t.Errorf("create help omits %q:\n%s", want, cmd.Long)
+		}
+	}
+	// The rule that no value for the key archives nothing holds for every key,
+	// not only location-id, so neither the unconditional "no match archives
+	// everything" nor the location-id-only exception may come back.
+	for _, stale := range []string{
+		"in which no location matches archives every POI",
+		"no location has a location_id archives nothing",
+	} {
+		if strings.Contains(long, stale) {
+			t.Errorf("create help still says %q:\n%s", stale, cmd.Long)
 		}
 	}
 }

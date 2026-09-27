@@ -821,7 +821,7 @@ counted run made. Create a new schedule instead.
 | `--upload-reference` | reference from an upload with `--purpose poi_submission` | `uploads put`, or `uploads reserve` |
 | `--key` | how each listed location is matched to the brand's existing POIs, below | - |
 | `--update` | update the brand's existing POIs that a listed location matches; needs `--key` | - |
-| `--remove` | archive the brand's existing POIs that no listed location matches, keeping the matched ones, once over the whole submission; needs `--key` | - |
+| `--remove` | archive the brand's existing POIs that no listed location matches, keeping the matched ones, once over the whole submission; not applied when no location has a value for `--key`; needs `--key` | - |
 
 Exactly one of `--file`, `--list` and `--upload-reference`. `--file` and
 `--upload-reference` need `--name` and `--brand-id`; `--list` takes both from
@@ -844,9 +844,13 @@ are. A location that matches nothing is added as a new POI.
 POI the brand had. It is applied once, after the whole submission has been
 matched, however many locations it has, so list every location the brand
 should keep, in one submission, not the ones to drop. A `--remove` submission
-in which no location matches archives every POI the brand had, and one that
-holds no location at all archives nothing. `--update` and `--remove` take
-effect when Intuizi approves the submission. If an approval is interrupted
+whose locations carry values for `--key` but match no POI archives every POI
+the brand had. One that holds no location at all, or in which no location has
+a value for `--key` (a `location_id`, `store_id`, `master_id` or
+`external_id`, a blank value counting as none), archives nothing: its
+locations are still added. For example, a file without the key's column, or a
+`--list` whose locations leave it out. `--update` and `--remove` take effect
+when Intuizi approves the submission. If an approval is interrupted
 part way, its locations are still imported but `--remove` is not applied:
 send the submission again to apply it.
 
@@ -856,8 +860,7 @@ be the id of one of your POIs, as a whole number (`101` or `101.0`), or the
 API rejects the submission. The API checks every row of a `--file` or
 `--list` submission, but only the first 64 KB of an `--upload-reference`
 file. A location with no `location_id`, or one that is not the id of one of
-the brand's POIs, is added as a new POI, and a `--remove` submission in
-which no location has a `location_id` archives nothing.
+the brand's POIs, is added as a new POI.
 
 Only the `--upload-reference` form sends an `Idempotency-Key`. The API reads
 none on the `--file` and `--list` forms, so there `--idempotency-key` has no
