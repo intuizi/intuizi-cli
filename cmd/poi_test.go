@@ -915,8 +915,7 @@ func TestPoiSubmissionsCreateHelpDescribesMatching(t *testing.T) {
 		"carry values for --key but match no POI archives every POI the brand had",
 		"no location has a value for --key",
 		"a location_id, store_id, master_id, or external_id",
-		"a blank value counting as none",
-		"its locations are still added",
+		"a blank value counting as none), archives nothing.",
 		"If an approval is interrupted part way, its locations are still imported but --remove is not applied",
 		"Send the submission again to apply it",
 	} {
@@ -927,9 +926,15 @@ func TestPoiSubmissionsCreateHelpDescribesMatching(t *testing.T) {
 	// The rule that no value for the key archives nothing holds for every key,
 	// not only location-id, so neither the unconditional "no match archives
 	// everything" nor the location-id-only exception may come back.
+	// Nor may the promise that such a submission's locations are all added:
+	// a location with no value for a store-id, master-id or external-id key
+	// matches the brand's first POI that has none either, so it is not added
+	// when the brand has one. The console's CLI reference ends at "archives
+	// nothing." too.
 	for _, stale := range []string{
 		"in which no location matches archives every POI",
 		"no location has a location_id archives nothing",
+		"its locations are still added",
 	} {
 		if strings.Contains(long, stale) {
 			t.Errorf("create help still says %q:\n%s", stale, cmd.Long)

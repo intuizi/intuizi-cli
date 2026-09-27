@@ -847,11 +847,10 @@ should keep, in one submission, not the ones to drop. A `--remove` submission
 whose locations carry values for `--key` but match no POI archives every POI
 the brand had. One that holds no location at all, or in which no location has
 a value for `--key` (a `location_id`, `store_id`, `master_id`, or
-`external_id`, a blank value counting as none), archives nothing: its
-locations are still added. `--update` and `--remove` take effect when
-Intuizi approves the submission. If an approval is interrupted part way, its
-locations are still imported but `--remove` is not applied. Send the
-submission again to apply it.
+`external_id`, a blank value counting as none), archives nothing.
+`--update` and `--remove` take effect when Intuizi approves the submission.
+If an approval is interrupted part way, its locations are still imported but
+`--remove` is not applied. Send the submission again to apply it.
 
 With `--key location-id`, a location matches the brand's POI whose id is its
 `location_id`, the `id` column of `poi locations list`. A `location_id` must
