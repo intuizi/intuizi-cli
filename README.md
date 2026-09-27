@@ -6,9 +6,10 @@
 
 **Build, size, and deliver audiences from your terminal.**
 
-The Intuizi CLI is one small program, `intuizi`, for the
-[Intuizi](https://intuizi.com) data signal platform. What you do in the
-Intuizi console or with API calls, you can do with a command: type it
+The Intuizi CLI is one small program, `intuizi`, for the Large Behavioral
+Model, [Intuizi](https://intuizi.com)'s flagship large quantitative model
+(LQM), trained on de-identified, real-world behavioral signals. What you do in
+the Intuizi console or with API calls, you can do with a command: type it
 yourself, or put it in a script or a CI job.
 
 **Documentation:** [console.intuizi.com/developers/cli](https://console.intuizi.com/developers/cli)
@@ -21,8 +22,9 @@ read what the tool does before you run it. It is not open source; see
 
 ## What you can do
 
-- **Build audiences** from places visited, apps, web and CTV activity,
-  purchases, and more, using brand and category names instead of ids.
+- **Build audiences** from real-world behavior: places visited, apps, web
+  and CTV activity, purchases, and more, using brand and category names
+  instead of ids.
 - **Size before you build:** estimate how many devices an audience would
   hold, without creating it.
 - **Deliver** an audience to your destinations: all of it, or only the
