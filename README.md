@@ -1,20 +1,44 @@
 # Intuizi CLI
 
-The official command-line interface for the [Intuizi](https://intuizi.com) data
-signal platform. A single-binary client for the Intuizi API v2: manage
-audiences, activations, cohorts, and POI data from your terminal, scripts, or
-CI.
+[![Release](https://img.shields.io/github/v/release/intuizi/intuizi-cli)](https://github.com/intuizi/intuizi-cli/releases/latest)
+[![npm](https://img.shields.io/npm/v/@intuizi/cli)](https://www.npmjs.com/package/@intuizi/cli)
+[![CI](https://github.com/intuizi/intuizi-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/intuizi/intuizi-cli/actions/workflows/ci.yml)
 
-It talks to your Intuizi account, so you need one to use it. The source is
-published so you can read what the tool does before you run it. It is not open
-source; see [License](#license).
+**Build, size, and deliver audiences from your terminal.**
 
-## Why a CLI
+The Intuizi CLI is one small program, `intuizi`, for the
+[Intuizi](https://intuizi.com) data signal platform. What you do in the
+Intuizi console or with API calls, you can do with a command: type it
+yourself, or put it in a script or a CI job.
 
-Intuizi already has three surfaces: the web Console for browser users, the
-REST API v2 for integrations, and an MCP server for AI agents. The CLI
-completes the set for humans working in terminals and for automation in
-scripts and CI pipelines.
+**Documentation:** [console.intuizi.com/developers/cli](https://console.intuizi.com/developers/cli)
+(sign in with your Intuizi account), and [DOCS.md](DOCS.md) in this
+repository.
+
+You need an Intuizi account to use it. The source is published so you can
+read what the tool does before you run it. It is not open source; see
+[License](#license).
+
+## What you can do
+
+- **Build audiences** from places visited, apps, web and CTV activity,
+  purchases, and more, using brand and category names instead of ids.
+- **Size before you build:** estimate how many devices an audience would
+  hold, without creating it.
+- **Deliver** an audience to your destinations: all of it, or only the
+  devices seen on several days.
+- **Bring your own data:** import your customer lists as cohorts, and submit
+  your own locations.
+- **Keep it fresh:** rebuild an audience every day, week, or month on a
+  schedule.
+- **Script it:** JSON output, ids alone, and clear exit codes, for scripts
+  and CI pipelines.
+
+The CLI, the [REST API](https://console.intuizi.com/developers/api/v2) and the
+[MCP server](https://console.intuizi.com/developers/mcp) reach the same
+platform with the same rules and limits: the CLI is for people at a terminal
+and for scripts and CI, the API for your own code, and the MCP server for AI
+agents.
 
 ## Installation
 
@@ -47,9 +71,19 @@ A source build reports its version as `dev`.
 ## Quickstart
 
 ```bash
-intuizi auth login                  # mints an API token and stores it
+# Log in once, with the email and password you use for the Intuizi console
+intuizi auth login
+
+# Find the brand you want to target
 intuizi reference poi brands --search starbucks
-intuizi audiences list
+
+# See how many devices the audience would hold, without creating it
+intuizi audiences estimate create --type poi --brand starbucks --country USA \
+  --start-date 2026-09-02 --end-date 2026-09-09 --name "Starbucks - 1 week" --wait
+
+# Build it, and wait until it is ready
+intuizi audiences create --type poi --brand starbucks --country USA \
+  --start-date 2026-09-02 --end-date 2026-09-09 --name "Starbucks - 1 week" --wait
 ```
 
 `auth login` asks for the email and password of your Intuizi account and
@@ -375,6 +409,7 @@ their own licenses, reproduced in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
   --help` lists every flag.
 - [examples/](examples) - ready-made payloads for the creates that take
   `--file`.
-- The Intuizi API v2 reference is the source of truth for every endpoint this
-  CLI wraps, and the Intuizi MCP server is the agent-facing surface on the same
-  API. Both are reachable from the console.
+- The [Intuizi developer docs](https://console.intuizi.com/developers/)
+  (sign in with your Intuizi account): the CLI pages, the API v2 reference,
+  which is the source of truth for every endpoint this CLI wraps, and the MCP
+  server, the agent-facing surface on the same API.
