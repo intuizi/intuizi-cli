@@ -15,12 +15,13 @@
 # submissions, all named cli-live-*. Cleanup runs from an EXIT trap, so an
 # interrupted run still removes what it made: Ctrl-C stops the run once the
 # step in flight returns, logs that step as failed, cleans up and exits 130,
-# and SIGTERM stops it at once, cleans up and exits 143. A Ctrl-C during
-# cleanup fails only the delete in flight: cleanup goes on, and the script
-# exits 1. A second Ctrl-C, counting the one that stopped the run, logs the
-# delete in flight as failed and abandons cleanup with exit 130, leaving the
-# rest for you to delete by name. Activations are only ever --dry-run: a real
-# one delivers to an endpoint and costs money.
+# and SIGTERM stops it at once, logs the step it cut short as failed, cleans
+# up and exits 143. A Ctrl-C during cleanup fails only the delete in flight:
+# cleanup goes on, and the script exits 1. A second Ctrl-C, counting the one
+# that stopped the run, logs the delete in flight as failed and abandons
+# cleanup with exit 130, leaving the rest for you to delete by name.
+# Activations are only ever --dry-run: a real one delivers to an endpoint and
+# costs money.
 #
 # Point it at a test console. The audience build is the slow step; set
 # LIVE_WAIT_TIMEOUT (default 20m) if the console is slower than that.
@@ -83,6 +84,7 @@ interrupted() {
   exec >&3 2>&4
   if [ "${#INFLIGHT[@]}" -gt 0 ]; then
     record FAIL "$got" "${INFLIGHT[0]}" "${INFLIGHT[1]} (interrupted by Ctrl-C)" "${INFLIGHT[@]:2}"
+    INFLIGHT=()  # logged; cleanup() must not log it again
   fi
   exit 130
 }
@@ -90,6 +92,14 @@ interrupted() {
 cleanup() {
   local rc=$? id  # first, before anything resets $?
   exec >&3 2>&4
+  # A step still in flight here was cut short by a signal with no trap, such as
+  # SIGTERM: bash runs this trap at once, without waiting for the step's
+  # command, so its exit status is unknown. Log it as failed, so the Summary
+  # does not read 0 failed for a killed run.
+  if [ "${#INFLIGHT[@]}" -gt 0 ]; then
+    record FAIL "?" "${INFLIGHT[0]}" "${INFLIGHT[1]} (cut short by a signal)" "${INFLIGHT[@]:2}"
+    INFLIGHT=()
+  fi
   # Unless a Ctrl-C stopped the run, the first one here costs only the delete
   # in flight, which fails like any other step; the next one ends cleanup.
   [ "$rc" -eq 130 ] || trap 'trap interrupted INT' INT

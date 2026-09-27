@@ -233,9 +233,10 @@ command group end to end, creating and then deleting a project, audiences,
 cohorts, an upload, a schedule and POI submissions, and keeping activations to
 `--dry-run`. It writes `results.md` with every command's exit code and output,
 and exits 1 if any step failed. Ctrl-C stops it after the step in flight,
-cleans up and exits 130. A Ctrl-C during cleanup fails only the delete in
-flight and cleanup goes on; a second one abandons cleanup. Point it only at a
-test environment.
+cleans up and exits 130. SIGTERM stops it at once, logs the step it cut short
+as failed, cleans up and exits 143. A Ctrl-C during cleanup fails only the
+delete in flight and cleanup goes on; a second one abandons cleanup. Point it
+only at a test environment.
 
 ### CI
 
