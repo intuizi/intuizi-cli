@@ -15,9 +15,11 @@
 # submissions, all named cli-live-*. Cleanup runs from an EXIT trap, so an
 # interrupted run still removes what it made: Ctrl-C stops the run once the
 # step in flight returns, cleans up and exits 130, and SIGTERM stops it at once,
-# cleans up and exits 143. A second Ctrl-C during cleanup abandons it,
-# leaving the rest for you to delete by name. Activations are only ever
-# --dry-run: a real one delivers to an endpoint and costs money.
+# cleans up and exits 143. A Ctrl-C during cleanup fails only the delete in
+# flight: cleanup goes on, and the script exits 1. A second Ctrl-C, counting
+# the one that stopped the run, abandons cleanup and exits 130, leaving the
+# rest for you to delete by name. Activations are only ever --dry-run: a real
+# one delivers to an endpoint and costs money.
 #
 # Point it at a test console. The audience build is the slow step; set
 # LIVE_WAIT_TIMEOUT (default 20m) if the console is slower than that.
@@ -58,6 +60,9 @@ first() { head -1 "$LAST_OUT"; }
 
 cleanup() {
   local rc=$? id  # first, before anything resets $?
+  # Unless a Ctrl-C stopped the run, the first one here costs only the delete
+  # in flight, which fails like any other step; the next one ends cleanup.
+  [ "$rc" -eq 130 ] || trap 'trap "exit 130" INT' INT
   for id in "${SUBMISSIONS[@]}"; do step 0 "cleanup poi submissions delete $id" I poi submissions delete "$id" --yes; done
   for id in "${SCHEDULES[@]}";   do step 0 "cleanup schedules delete $id"       I schedules delete "$id" --yes; done
   for id in "${COHORTS[@]}";     do step 0 "cleanup cohorts delete $id"         I cohorts delete "$id" --yes; done
@@ -75,7 +80,8 @@ trap cleanup EXIT
 # The CLI catches Ctrl-C and exits 130 rather than dying of the signal, and bash
 # then goes on to the next step as if the command had just failed. Exiting here
 # ends the run instead, once the step in flight returns, and the EXIT trap
-# cleans up. The trap stays set during cleanup, so a second Ctrl-C ends that.
+# cleans up. After a Ctrl-C this trap stays set, so a second one ends cleanup;
+# when the run ended some other way, cleanup() first sets a one-shot trap.
 trap 'exit 130' INT
 
 echo "# Live test: $BASE, $(date -u +%FT%TZ), binary $($B version)" >> "$R"; echo >> "$R"
