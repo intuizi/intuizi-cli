@@ -643,7 +643,43 @@ func setKey(t *testing.T, key string) {
 	t.Cleanup(func() { IdempotencyKey = prev })
 }
 
-// --idempotency-key's help says "on create commands", but only seven routes
+// Estimate Audience Size carries the same idempotency middleware as the
+// creates. An estimate runs a whole build against the data-scan limit, so a
+// retry must replay the first one rather than scan again.
+func TestEstimateIsAKeyedRoute(t *testing.T) {
+	ctx := context.Background()
+
+	var keys []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		w.Write([]byte(`{"status":"success","code":201,"data":[{"id":12}]}`))
+	}))
+	defer srv.Close()
+
+	if err := New(srv.URL, "t").Post(ctx, "/analyses/audiences/estimate", map[string]string{"name": "x"}, nil); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if len(keys[0]) != 36 {
+		t.Fatalf("Idempotency-Key = %q, want a UUID", keys[0])
+	}
+
+	// --idempotency-key reaches it too, without the unkeyed-route warning.
+	setKey(t, "abc-123")
+	c := New(srv.URL, "t")
+	var warn strings.Builder
+	c.Warn = &warn
+	if err := c.Post(ctx, "/analyses/audiences/estimate", map[string]string{"name": "x"}, nil); err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if keys[1] != "abc-123" {
+		t.Errorf("Idempotency-Key = %q, want abc-123", keys[1])
+	}
+	if warn.Len() != 0 {
+		t.Errorf("the estimate warned: %q", warn.String())
+	}
+}
+
+// --idempotency-key's help says "on create commands", but only eight routes
 // read the header. Silently ignoring it elsewhere breaks the promise.
 func TestIdempotencyKeyWarnsOnUnkeyedRoutes(t *testing.T) {
 	ctx := context.Background()

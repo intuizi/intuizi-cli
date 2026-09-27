@@ -194,8 +194,8 @@ means something else changed it.
 
 | Command | What it does |
 | --- | --- |
-| `audiences` | list, show, create, delete, and `lookalike create \| cancel` |
-| `activations` | Deliver a completed audience to an endpoint connection |
+| `audiences` | list, show, create, delete, `lookalike create \| cancel`, and `estimate create \| show` to size one without creating it |
+| `activations` | Deliver a completed audience to an endpoint connection, and `preview` the devices a frequency filter would export |
 | `cohorts` | Build from a cloud file, an upload, or an audience |
 | `poi` | First-party locations, brands, categories and submissions |
 | `reference <group> <catalog>` | Read-only catalogs; see below |
@@ -218,9 +218,10 @@ Two habits make this safe:
 
 - **`--dry-run`** prints the body the flags produce and creates nothing.
   Redirect it to a file for a starting point in the `--file` form. On
-  `audiences create` it still reads the catalogs to resolve names, so it needs
-  a token and counts against the read budget; the other creates send nothing
-  and need no token. It cannot be combined with `--wait`.
+  `audiences create` and `audiences estimate create` it still reads the
+  catalogs to resolve names, so it needs a token and counts against the read
+  budget; the other creates send nothing and need no token. It cannot be
+  combined with `--wait`.
 - **Names resolve, ids do not.** A name is looked up and must match exactly one
   entry. The lookup matches substrings, so when several come back and exactly
   one is labelled with the name itself, ignoring case, that one is taken:
@@ -303,6 +304,7 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--city` | city name, repeatable | `reference common cities --states CA` |
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
+| `--frequency` | boolean: run the type's frequency analysis; POI, Apps and WebDomain only | - |
 | `--dry-run` `--wait` `--timeout` | - | - |
 
 `--type` is case-insensitive in and canonical out: `poi` sends `POI`. The
@@ -333,6 +335,20 @@ resolves to IAB1 rather than failing because IAB10 to IAB19 also contain it.
 
 `--brand` is POI only. AffinityTransactions has brands too, in its own
 `brands` field, which no flag writes yet; that filter needs `--file`.
+
+`--frequency` runs the dataset type's frequency analysis as the audience
+builds, the toggle Audience Manager calls Visitation Frequency (POI), Apps
+Frequency (Apps) or Web Frequency (WebDomain). It sends the matching key in
+the `analyses` block - `frequency`, `apps_frequency` or `web_frequency` - and
+is refused on any other type before anything is sent, exit 2. The analysis
+counts the distinct days each device was seen, which is what
+[`activations preview`](#activations-preview) sums and what an activation's
+`--freq-min` and `--freq-max` filter on. It cannot be added after the build,
+and it requires additional permissions which need to be approved by your
+Account Manager: a 403 means they are not enabled for the account. The
+day-part variant (`frequency_day_part`) needs `--file`, and cannot be
+previewed. This is not `schedules create --frequency`, which sets how often a
+schedule runs.
 
 `--type origin` targets devices by their home location rather than the places
 they visited, so its only filters are geographic. `--country` is required,
@@ -529,16 +545,72 @@ WebDomain uses `iab_category_codes`, and POI uses `analysisdata` for brands.
 Needs `--file`: two datasets with an operator; the nested `refine`,
 `crossvisitation` and `crosspurchase` blocks; the Cohorts, Demographics and
 ProfileAttributes types; and any other field no flag writes, such as
-`project_id` to file the audience under a project, POI `locations`, DMAs, the
-`analyses` block and `datastreams`. An audience built without the frequency
-analysis in `analyses` cannot have it added after the build, and Preview
-Activation needs it, so put it in the body when you plan to preview.
-`datastreams` asks for data stream visualizations, which the audience draws
-as status `109` before it completes.
+`project_id` to file the audience under a project, POI `locations`, DMAs,
+`analyses` beyond the one key `--frequency` writes (the day-part variant, or
+a frequency analysis for each dataset of a two-dataset body), and
+`datastreams`. An audience built without a frequency analysis cannot have it
+added after the build, and `activations preview` needs it, so put it in the
+body when you plan to preview a `--file` audience. `datastreams` asks for data
+stream visualizations, which the audience draws as status `109` before it
+completes: `reference common datastream-visualizations --dataset-type <type>`
+lists the ids.
 
 ```bash
 intuizi audiences create --file examples/audience-two-datasets.json
 intuizi audiences create --file examples/audience-refine-crosspurchase.json
+```
+
+### audiences estimate create
+
+Takes everything `audiences create` takes - the same flags, resolved the same
+way, the same `--file` body, `--dry-run` - and sends it to Estimate Audience
+Size instead, which answers how many devices the audience would hold without
+creating it. Nothing appears in Audience Manager, and no export, cohort,
+schedule or activation follows. Swapping `estimate create` for `create` in the
+same command line builds the audience that was estimated.
+
+```bash
+intuizi audiences estimate create \
+  --type poi --brand starbucks \
+  --country USA --state CA --city "San Francisco" \
+  --start-date 2026-09-02 --end-date 2026-09-09 \
+  --name "Starbucks visitors - SF - 1 week" --wait
+
+intuizi audiences estimate create --file examples/audience-two-datasets.json --wait
+```
+
+An estimate runs the same build a create would, so it takes about as long,
+scans the same data, and counts toward the monthly data-scan limit (as the
+`estimate` operation in `usage`) and the organization's build budget. It
+comes back `pending` with no figures. Its status is a word, not an id:
+`pending`, then `processing`, then one of `completed`, `blocked` or `failed`.
+`--wait` follows it there as it follows a build (see
+[The async model](#the-async-model)), and `audiences estimate show <id>`
+reads it, with `--wait` to resume a wait that timed out.
+
+`completed` carries the figures, which lead the output: `uniques`, the
+approximate distinct device count, with a standard error of about 2.3%;
+`visits`, `signals` and `unique_eips` where the dataset types produce them;
+then `as_of`, `method`, `providers` and the rest. `blocked` means the request
+cannot be answered as sent - most often dates outside the dataset's data
+coverage - and shows its code and reason as `blocked`; `failed` explains
+itself in `status_message`. Both are final and end a wait with exit 1.
+
+`recipe_hash` is computed from the `operator` and `datasets` only, so renaming
+does not change it. An audience created from the same body carries the same
+`recipe_hash` on `audiences show <id> --json`, which is the proof it is the
+audience that was estimated. The request carries an Idempotency-Key like a
+create, so a retry after a 429 or a dropped connection
+(`--idempotency-key`) replays the estimate rather than scanning twice.
+
+```bash
+$ intuizi audiences estimate show 12
+id              12
+name            Starbucks visitors - SF - 1 week
+status          completed
+uniques         482311
+visits          1203440
+...
 ```
 
 ### audiences lookalike create
@@ -610,6 +682,8 @@ intuizi audiences lookalike create \
 | `--datastream` | datastream id, repeatable or comma-separated | `reference common datastreams` |
 | `--description` | any string | - |
 | `--project-id` | project id | `projects list` |
+| `--freq-min` `--freq-max` | a range of distinct days, both inclusive, both or neither | `activations preview` |
+| `--filter-hash` | the `filter_hash` a preview printed for that range | `activations preview` |
 | `--dry-run` | - | - |
 | `--wait` `--timeout` | - | - |
 
@@ -634,12 +708,80 @@ Per-stream `inputs`, `compression` or `service_account` need `--file`.
 With `--wait`, a Completed activation whose record lists no datastreams exits
 0 but notes on stderr that nothing was delivered.
 
+`--freq-min` and `--freq-max` export only the devices seen on that range of
+distinct days, and need an audience built with a frequency analysis
+(`audiences create --frequency`). They are sent with `"freq_limit": true`,
+without which the API refuses them. Preview the range first with
+[`activations preview`](#activations-preview) and pass the `filter_hash` it
+printed as `--filter-hash`: the API recomputes it from the audience as stored
+at create time, so an export whose range differs from the preview, or whose
+audience was rebuilt since, is refused with a 422 rather than exported. A
+lone bound, a hash without its range, and an upside-down range are refused
+before anything is sent, exit 2. The activation read echoes both as `filters`
+and `filter_hash`.
+
 ```bash
 intuizi activations create --audience-id 88 \
   --endpoint-connection-id 4 --pricing-model-id 3 --datastream 7 --wait
 
+# only the devices seen on 2 to 5 days, exactly as previewed
+intuizi activations create --audience-id 88 \
+  --endpoint-connection-id 4 --pricing-model-id 3 --datastream 7 \
+  --freq-min 2 --freq-max 5 --filter-hash sha256:4f9d... --wait
+
 # or the whole body, for fields these flags do not model
 intuizi activations create --file examples/activation.json --wait
+```
+
+### activations preview
+
+| Flag | Takes | Where the value comes from |
+| --- | --- | --- |
+| `--audience-id` | Completed audience built with a frequency analysis | `audiences list` |
+| `--freq-min` | fewest distinct days, inclusive | the `frequency_bounds` of an earlier preview |
+| `--freq-max` | most distinct days, inclusive; the upper bound for an open-ended range | the same |
+
+All three are required, and a negative or upside-down range is refused before
+anything is sent, exit 2. A read-only dry run of the frequency filter:
+nothing is created, exported or billed, so preview as many ranges as needed.
+`filtered_count` is the exact number of devices seen on `--freq-min` to
+`--freq-max` distinct days in the audience's date window - what Audience
+Manager shows as Limit Audience for the same Freq. Range - and the output
+leads with it, the range, the `frequency_bounds` a range must fall inside,
+the audience's totals, and the `filter_hash` to pass to `activations create`.
+Under that is the whole histogram: devices per number of distinct days, the
+buckets a range sums. `source_count` is the audience total, an approximate
+count, and `histogram_total` the exact sum of the histogram, so the two can
+differ slightly. `--json` adds `limitations`, which say how each count is
+made. `--quiet` does not apply: a preview returns a count, not an id.
+
+The audience must be Completed and built with exactly one frequency analysis:
+`audiences create --frequency`, or the matching `analyses` key in a `--file`
+body. Any other audience, a day-part analysis, a Lookalike Model or a cohort
+included, is refused with a 422. A range outside `frequency_bounds` is a 422
+naming the bounds.
+
+```bash
+$ intuizi activations preview --audience-id 88 --freq-min 2 --freq-max 5
+audience               Coffee Buyers NYC
+filtered_count         2000
+freq_range             2-5
+frequency_bounds       1-5
+source_count           5100
+histogram_total        5000
+filter_hash            sha256:4f9d0c7e1b2a8d3f6e5c4b3a2918f7e6d5c4b3a291807f6e5d4c3b2a19180706
+as_of                  2026-08-01 06:12:44
+analysis_type          frequency
+dataset_type           POI
+is_activation_allowed  true
+method                 histogram_sum
+recency                POI 2026-06-01..2026-07-31
+
+days  devices
+1     3000
+2     1200
+3     500
+5     300
 ```
 
 ### cohorts create
@@ -948,8 +1090,9 @@ not the text label (`--search F`, not `female`, for genders, and `M`, not
 
 - **common** - dataset-types, countries, states, cities, dmas, zipcodes,
   operators, languages, signal-providers, endpoint-partners,
-  endpoint-connections, pricing-models, datastreams, schedule-frequencies,
-  schedule-windows, schedule-endings
+  endpoint-connections, pricing-models, datastreams,
+  datastream-visualizations, schedule-frequencies, schedule-windows,
+  schedule-endings
 - **poi** - segments, categories, brands, locations
 - **apps** - categories, tags, os, bundle-ids, taxonomies
 - **web** - iab-categories, iab-subcategories, domains, ref-domains, browsers,
@@ -989,6 +1132,13 @@ catalog unfiltered:
   which `--quiet` prints and `domains --category-codes` takes; a WebDomain
   audience's `iab_category_codes` takes the number in its `id` column instead.
 
+`datastreams` and `datastream-visualizations` are different catalogs.
+`datastreams --partner-id <id>` lists a partner's delivery outputs, which an
+activation's `--datastream` enables. `datastream-visualizations` lists the
+charts an audience can draw as it builds, for the `datastreams` array of an
+audience `--file` body; `--dataset-type POI` narrows it to the streams a
+dataset of that type accepts.
+
 Table cells show a list of plain values inline, such as a datastream's
 `dataset_types`; a list of objects shows as a count, and `--json` has it in
 full.
@@ -1020,8 +1170,9 @@ Both are global and apply to reads, creates and deletes alike, with these
 exceptions:
 
 - `auth`, `version` and `completion` print text and ignore either flag.
-- `usage`, `cohorts preview` and `reference profile-attributes
-  recency-limits` return no ids, so they refuse `--quiet`; use `--json`.
+- `usage`, `cohorts preview`, `activations preview` and `reference
+  profile-attributes recency-limits` return no ids, so they refuse `--quiet`;
+  use `--json`.
 - `uploads put` prints the bare upload reference, which is also what
   `--quiet` prints; `--json` prints the reservation envelope.
 - Deletes, `audiences lookalike cancel`, and `schedules activate` and
@@ -1142,8 +1293,9 @@ rather than free-form JSON.
 ## The async model
 
 Creates return immediately and the resource completes in the background.
-`audiences create`, `audiences show`, `activations create` and
-`activations show` take `--wait` with an optional `--timeout` (default 60m).
+`audiences create`, `audiences show`, `audiences estimate create`,
+`audiences estimate show`, `activations create` and `activations show` take
+`--wait` with an optional `--timeout` (default 60m).
 Waiting polls every 15 seconds, prints status changes to stderr and the record
 the wait ended on to stdout, and exits non-zero on failure.
 
@@ -1182,6 +1334,12 @@ the data stream visualizations it opted into, before `105` and `104`. Any
 other id ends the wait with exit 1: `106` Expired, `107` Additional Info, the
 `4xx` errors (a cancelled Lookalike Model ends at `400`), and any id the CLI
 does not know.
+
+An estimate's status is a word instead: `pending` and `processing` keep the
+wait going, `completed` is the one success, and `blocked` and `failed` end it
+with exit 1, naming the blocked code and reason or the `status_message`. Any
+other word ends it too. With `--json` read it as `.data[0].status`, and the
+figures as `.data[0].estimate`.
 
 `107` Additional Info means the worker could not run the request as given, so
 it stopped and nothing follows. The error says the build (or, for an
@@ -1248,8 +1406,8 @@ install a script file instead of loading it at startup,
 locations.
 
 Completion covers commands, flag names, and the values of `--type`,
-`--signal`, `--file-format`, `--identifier-type`, `--frequency` and
-`--purpose`. Other flags that take a fixed set, such as `poi submissions list
+`--signal`, `--file-format`, `--identifier-type`, `schedules create
+--frequency` and `--purpose`. Other flags that take a fixed set, such as `poi submissions list
 --sort-by` and `--order`, `poi locations list --geometry` and `poi submissions
 create --key`, complete no values; their help lists them.
 
@@ -1263,6 +1421,19 @@ id=$(intuizi audiences create --type poi --brand starbucks \
 
 intuizi activations create --audience-id "$id" \
   --endpoint-connection-id 4 --pricing-model-id 3 --datastream 7 --wait
+
+# Size it, build it with the frequency analysis, preview a range, export it
+intuizi audiences estimate create --type poi --brand starbucks \
+  --country USA --start-date 2026-09-02 --end-date 2026-09-09 \
+  --name "Starbucks visitors - 1 week" --wait
+id=$(intuizi audiences create --type poi --brand starbucks \
+       --country USA --start-date 2026-09-02 --end-date 2026-09-09 \
+       --name "Starbucks visitors - 1 week" --frequency --wait --quiet)
+hash=$(intuizi activations preview --audience-id "$id" --freq-min 2 --freq-max 5 \
+         --json | jq -r '.data[0].filter_hash')
+intuizi activations create --audience-id "$id" \
+  --endpoint-connection-id 4 --pricing-model-id 3 --datastream 7 \
+  --freq-min 2 --freq-max 5 --filter-hash "$hash" --wait
 
 # Cohort from a cloud file, columns confirmed first
 intuizi cohorts preview --file-uri s3://example-bucket/cohorts/q3.csv

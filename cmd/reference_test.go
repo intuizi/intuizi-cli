@@ -47,6 +47,7 @@ var wantPaths = []string{
 	"/analyses/reference/common/cities",
 	"/analyses/reference/common/countries",
 	"/analyses/reference/common/dataset-types",
+	"/analyses/reference/common/datastream-visualizations",
 	"/analyses/reference/common/datastreams",
 	"/analyses/reference/common/dmas",
 	"/analyses/reference/common/endpoint-connections",
@@ -118,8 +119,8 @@ func TestReferenceCoversEveryDocumentedPath(t *testing.T) {
 	for extra := range built {
 		t.Errorf("command builds %s, which is not in wantPaths", extra)
 	}
-	if len(wantPaths) != 60 {
-		t.Errorf("wantPaths has %d entries, want 60", len(wantPaths))
+	if len(wantPaths) != 61 {
+		t.Errorf("wantPaths has %d entries, want 61", len(wantPaths))
 	}
 }
 
@@ -262,6 +263,12 @@ func TestQueryBuilding(t *testing.T) {
 			group: "common", item: "countries",
 			args: []string{"--dataset-type", "WebDomain"},
 			want: "datasetType=WebDomain",
+		},
+		{
+			name:  "datastream-visualizations narrows by the API's dataset_type",
+			group: "common", item: "datastream-visualizations",
+			args: []string{"--dataset-type", "POI"},
+			want: "dataset_type=POI",
 		},
 		{
 			name:  "string slices repeat under a bracketed key",

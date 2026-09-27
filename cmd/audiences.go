@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -14,6 +15,9 @@ const audiencesPrefix = "/analyses/audiences"
 // audienceColumns lead both the list table and the show view. The index returns
 // thirteen fields per audience; --json prints all of them.
 var audienceColumns = []string{"id", "name", "status", "results_count", "created_at"}
+
+// audienceLifecycle is how --wait follows an audience build.
+var audienceLifecycle = resourceLifecycle("audience", audiencesPrefix, audienceColumns)
 
 var audiencesCmd = &cobra.Command{
 	Use:   "audiences",
@@ -28,28 +32,16 @@ Building is asynchronous. 'audiences create' returns as soon as the audience is
 queued, in an Initiating state; add --wait to 'create' or 'show' to block until
 it reads Completed. An audience that is still building is not a failure.
 
+'audiences estimate create' takes the same flags or file and reports how many
+devices the audience would hold, without creating it.
+
 The ids and codes a payload is built from come from 'intuizi reference'.`,
 }
 
 // --------------------------------------------------------------------------------- create
 
 func audiencesCreateCommand() *cobra.Command {
-	var (
-		file       string
-		dryRun     bool
-		dsType     string
-		name       string
-		startDate  string
-		endDate    string
-		brands     []string
-		brandAll   []string
-		categories []string
-		providers  []string
-		countries  []string
-		states     []string
-		cities     []string
-		zipcodes   []string
-	)
+	var req audienceRequest
 
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -111,13 +103,23 @@ anything is sent: they require fields no flag writes (a cohort_id, a
 demographic filter, profile_attributes rows), and Demographics also rejects
 the dates and signal providers the flags always send. The same goes for any
 other field no flag writes, such as project_id, POI locations, DMAs, the
-analyses block and datastreams. An audience built without the frequency
-analysis cannot have it added later, and Preview Activation needs it. The file
-is forwarded untouched, so a field this CLI has never heard of still reaches
-the API:
+day-part frequency analysis and datastreams. The file is forwarded untouched,
+so a field this CLI has never heard of still reaches the API:
 
     intuizi audiences create --file examples/audience-two-datasets.json
     jq '.name = "Q3 rerun"' base.json | intuizi audiences create --file -
+
+--frequency runs the dataset type's frequency analysis as the audience builds:
+Visitation Frequency on POI, Apps Frequency on Apps and Web Frequency on
+WebDomain, each counting the distinct days every device was seen. 'intuizi
+activations preview' counts a range of those days, and an activation's
+--freq-min and --freq-max export only that range. The analysis cannot be added
+after the build, and it requires additional permissions which need to be
+approved by your Account Manager; a 403 means they are not enabled for the
+account.
+
+To see how many devices the audience would hold before building it, run the
+same command line as 'intuizi audiences estimate create'.
 
 Creation is asynchronous: the new audience comes back Initiating with a
 results_count of 0. That is expected. Add --wait to block until the build
@@ -143,207 +145,267 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 		Args: cobra.NoArgs,
 	}
 	waitOpts := waitFlags(cmd)
+	req.register(cmd)
 
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		flags := cmd.Flags()
 		wait, timeout, err := waitOpts()
 		if err != nil {
 			return err
 		}
-
-		if file != "" {
-			if err := rejectBodyFlags(flags, audienceFields); err != nil {
-				return err
-			}
-			if dryRun {
-				return usageErr("--dry-run builds a body from flags; --file already has one")
-			}
-			if !wait {
-				return createFromFile(cmd, audiencesPrefix+"/create", file, audienceColumns,
-					"still building - run 'intuizi audiences show <id> --wait' to follow it")
-			}
-			payload, err := readPayload(cmd, file)
-			if err != nil {
-				return err
-			}
-			return createAndWait(cmd, audiencesPrefix, "audience", payload, audienceColumns, timeout)
-		}
-
-		if dryRun && wait {
-			return usageErr("--dry-run creates nothing, so there is nothing to --wait for")
-		}
-		// The type first: a type the flags cannot build should not send the
-		// caller off to add the dates it would then reject.
-		if flags.Changed("type") {
-			if dsType, err = canonicalType(dsType); err != nil {
-				return err
-			}
-			if err := checkFlagType(dsType); err != nil {
-				return err
-			}
-		}
-		if err := missingFlags(flags, audienceRequired, "a single-dataset audience"); err != nil {
-			return err
-		}
-		if err := nonEmpty("name", name); err != nil {
-			return err
-		}
-		if err := parseWindow(startDate, endDate); err != nil {
-			return err
-		}
-		if len(brands)+len(brandAll) > 0 && dsType != "POI" {
-			flag := "--brand"
-			if len(brands) == 0 {
-				flag = "--brand-all"
-			}
-			return usageErr(flag + " applies to --type POI, not " + dsType + brandHint(dsType))
-		}
-		// Before client(): a type with no category catalog is a usage error
-		// whether or not there is a token.
-		var cat categoryCatalog
-		if len(categories) > 0 {
-			if cat, err = categoryFor(dsType); err != nil {
-				return err
-			}
-		}
-		for _, r := range []struct {
-			flag   string
-			values []string
-		}{
-			{"brand", brands}, {"brand-all", brandAll}, {"category", categories}, {"provider", providers},
-			{"country", countries}, {"state", states}, {"city", cities}, {"zipcode", zipcodes},
-		} {
-			if err := nonEmpty(r.flag, r.values...); err != nil {
-				return err
-			}
-		}
-		// The API requires a country on Origin, and its geography is the
-		// whole filter; a body without one is a 422.
-		if dsType == "Origin" && len(countries) == 0 {
-			return usageErr("--type Origin needs --country; list the covered countries with " +
-				"'intuizi reference common countries --dataset-type Origin'")
-		}
-
-		c, err := client()
-		if err != nil {
-			return err
-		}
-		ctx := cmd.Context()
-
-		ds := audienceDataset{Type: dsType, StartDate: startDate, EndDate: endDate}
-
-		for _, b := range brands {
-			id, err := resolveOrID(ctx, c, brandsPath, "--brand", b, "brands")
-			if err != nil {
-				return err
-			}
-			ds.Analysisdata = append(ds.Analysisdata, id)
-		}
-		for _, search := range brandAll {
-			ids, err := resolveAll(ctx, c, brandsPath, search, "brands")
-			if err != nil {
-				return err
-			}
-			// One word becoming nine ids should be visible; stderr keeps a
-			// piped --dry-run to the payload.
-			noun := "brands"
-			if len(ids) == 1 {
-				noun = "brand"
-			}
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "--brand-all %q selected %d %s\n",
-				search, len(ids), noun)
-			ds.Analysisdata = append(ds.Analysisdata, ids...)
-		}
-		if len(categories) > 0 {
-			ids := make([]any, 0, len(categories))
-			for _, name := range categories {
-				id, err := resolveOrID(ctx, c, cat.path, "--category", name, "categories")
-				if err != nil {
-					return err
-				}
-				ids = append(ids, id)
-			}
-			// WebDomain reads the same selection from a different field.
-			if cat.key == "iab_category_codes" {
-				ds.IABCategoryCodes = ids
-			} else {
-				ds.Categories = ids
-			}
-		}
-
-		// The catalog is read either way: it is the default, and the check
-		// that a given --provider belongs to this type.
-		all, err := allProviders(ctx, c, dsType)
-		if err != nil {
-			return err
-		}
-		if len(providers) == 0 {
-			ds.SignalProviders = all
-		} else if ds.SignalProviders, err = checkProviders(providers, all, dsType); err != nil {
-			return err
-		}
-
-		if len(countries)+len(states)+len(cities)+len(zipcodes) > 0 {
-			ds.Location = &audienceLocation{
-				Countries: countries, States: states, Cities: cities, Zipcodes: zipcodes,
-			}
-		}
-
-		body := audienceBody{Name: name, Datasets: []audienceDataset{ds}}
-
-		if dsType == "Origin" {
-			// The dates stay as typed in the body; the API does the widening.
-			if from, to := originWeeks(startDate, endDate); from != startDate || to != endDate {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Origin data is weekly: the API widens %s..%s "+
-					"to the whole weeks %s..%s\n", startDate, endDate, from, to)
-			}
-		}
-
-		if dryRun {
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetIndent("", "  ")
-			return enc.Encode(body)
-		}
-		if !wait {
-			return createBody(cmd, audiencesPrefix+"/create", body, audienceColumns,
-				"still building - run 'intuizi audiences show <id> --wait' to follow it")
-		}
-		return createAndWait(cmd, audiencesPrefix, "audience", body, audienceColumns, timeout)
+		return req.send(cmd, audienceLifecycle, wait, timeout,
+			"still building - run 'intuizi audiences show <id> --wait' to follow it")
 	}
+	return cmd
+}
 
+// audienceRequest is the body that Create Audience and Estimate Audience Size
+// both take, with the flags that build it: one dataset from flags, names
+// resolved against the catalogs, or the whole body from --file. Both commands
+// register the same flags and run the same checks, so an estimate is always
+// of the audience the same command line would create.
+type audienceRequest struct {
+	file       string
+	dryRun     bool
+	dsType     string
+	name       string
+	startDate  string
+	endDate    string
+	brands     []string
+	brandAll   []string
+	categories []string
+	providers  []string
+	countries  []string
+	states     []string
+	cities     []string
+	zipcodes   []string
+	frequency  bool
+}
+
+// register adds the body flags to cmd.
+func (r *audienceRequest) register(cmd *cobra.Command) {
 	f := cmd.Flags()
-	f.StringVar(&file, "file", "",
+	f.StringVar(&r.file, "file", "",
 		`Path to the audience payload, or "-" to read it from stdin`)
-	f.BoolVar(&dryRun, "dry-run", false,
+	f.BoolVar(&r.dryRun, "dry-run", false,
 		"Print the body the flags produce; creates nothing (names still resolve)")
-	f.StringVar(&dsType, "type", "",
+	f.StringVar(&r.dsType, "type", "",
 		"Dataset type, case-insensitive: poi, apps, webdomain, ctv,\n"+
 			"affinitytransactions, deidentified or origin (cohorts, demographics\n"+
 			"and profileattributes need --file)")
-	f.StringVar(&name, "name", "", "Name for the audience")
+	f.StringVar(&r.name, "name", "", "Name for the audience")
 	completeValues(cmd, "type", flagTypes())
-	f.StringVar(&startDate, "start-date", "", "First day of the window, YYYY-MM-DD")
-	f.StringVar(&endDate, "end-date", "", "Last day of the window, YYYY-MM-DD")
+	f.StringVar(&r.startDate, "start-date", "", "First day of the window, YYYY-MM-DD")
+	f.StringVar(&r.endDate, "end-date", "", "Last day of the window, YYYY-MM-DD")
 	// StringArray, not StringSlice: a city name may contain a comma.
-	f.StringArrayVar(&brands, "brand", nil,
+	f.StringArrayVar(&r.brands, "brand", nil,
 		"Brand name or id, POI only (repeat the flag for more than one)")
-	f.StringArrayVar(&brandAll, "brand-all", nil,
+	f.StringArrayVar(&r.brandAll, "brand-all", nil,
 		"Take every brand matching this search, POI only (repeatable)")
-	f.StringArrayVar(&categories, "category", nil,
+	f.StringArrayVar(&r.categories, "category", nil,
 		"Category name or id, per the dataset type\n(repeat the flag for more than one)")
-	f.StringArrayVar(&providers, "provider", nil,
+	f.StringArrayVar(&r.providers, "provider", nil,
 		"Signal provider id (repeatable; default every provider for the type)")
-	f.StringArrayVar(&countries, "country", nil,
+	f.StringArrayVar(&r.countries, "country", nil,
 		"Country code, ISO-3 (repeat the flag for more than one)")
-	f.StringArrayVar(&states, "state", nil,
+	f.StringArrayVar(&r.states, "state", nil,
 		"State code (repeat the flag for more than one)")
-	f.StringArrayVar(&cities, "city", nil,
+	f.StringArrayVar(&r.cities, "city", nil,
 		"City name (repeat the flag for more than one)")
-	f.StringArrayVar(&zipcodes, "zipcode", nil,
+	f.StringArrayVar(&r.zipcodes, "zipcode", nil,
 		"Zip code (repeat the flag for more than one)")
+	f.BoolVar(&r.frequency, "frequency", false,
+		"Run the type's frequency analysis (POI, Apps or WebDomain), which\n"+
+			"'activations preview' and --freq-min need; it cannot be added later")
 	// No MarkFlagsOneRequired("file", "type"): cobra checks flag groups after
 	// PersistentPreRunE, so its error exits 1. missingFlags covers --type.
-	return cmd
+}
+
+// send builds the body and posts it to lc.create: printed as created, or
+// followed to its end with --wait. next is the hint a post without --wait
+// ends on.
+func (r *audienceRequest) send(cmd *cobra.Command, lc lifecycle, wait bool, timeout time.Duration, next string) error {
+	flags := cmd.Flags()
+
+	if r.file != "" {
+		if err := rejectBodyFlags(flags, audienceFields); err != nil {
+			return err
+		}
+		if r.dryRun {
+			return usageErr("--dry-run builds a body from flags; --file already has one")
+		}
+		payload, err := readPayload(cmd, r.file)
+		if err != nil {
+			return err
+		}
+		return postBody(cmd, lc, payload, wait, timeout, next)
+	}
+
+	if r.dryRun && wait {
+		return usageErr("--dry-run creates nothing, so there is nothing to --wait for")
+	}
+	body, err := r.build(cmd)
+	if err != nil {
+		return err
+	}
+	if r.dryRun {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(body)
+	}
+	return postBody(cmd, lc, body, wait, timeout, next)
+}
+
+// build turns the flags into a single-dataset body. The checks that need no
+// token come first, so a usage mistake costs no catalog read.
+func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
+	flags := cmd.Flags()
+	var err error
+
+	// The type first: a type the flags cannot build should not send the
+	// caller off to add the dates it would then reject.
+	if flags.Changed("type") {
+		if r.dsType, err = canonicalType(r.dsType); err != nil {
+			return audienceBody{}, err
+		}
+		if err := checkFlagType(r.dsType); err != nil {
+			return audienceBody{}, err
+		}
+	}
+	if err := missingFlags(flags, audienceRequired, "a single-dataset audience"); err != nil {
+		return audienceBody{}, err
+	}
+	if err := nonEmpty("name", r.name); err != nil {
+		return audienceBody{}, err
+	}
+	if err := parseWindow(r.startDate, r.endDate); err != nil {
+		return audienceBody{}, err
+	}
+	dsType := r.dsType
+	if len(r.brands)+len(r.brandAll) > 0 && dsType != "POI" {
+		flag := "--brand"
+		if len(r.brands) == 0 {
+			flag = "--brand-all"
+		}
+		return audienceBody{}, usageErr(flag + " applies to --type POI, not " + dsType + brandHint(dsType))
+	}
+	// Before client(): a type with no category catalog is a usage error
+	// whether or not there is a token, and so is one with no frequency
+	// analysis.
+	var cat categoryCatalog
+	if len(r.categories) > 0 {
+		if cat, err = categoryFor(dsType); err != nil {
+			return audienceBody{}, err
+		}
+	}
+	var analyses map[string]bool
+	if r.frequency {
+		key, ok := frequencyAnalyses[dsType]
+		if !ok {
+			return audienceBody{}, usageErr("--frequency applies to --type POI, Apps and WebDomain, not " + dsType)
+		}
+		analyses = map[string]bool{key: true}
+	}
+	for _, v := range []struct {
+		flag   string
+		values []string
+	}{
+		{"brand", r.brands}, {"brand-all", r.brandAll}, {"category", r.categories}, {"provider", r.providers},
+		{"country", r.countries}, {"state", r.states}, {"city", r.cities}, {"zipcode", r.zipcodes},
+	} {
+		if err := nonEmpty(v.flag, v.values...); err != nil {
+			return audienceBody{}, err
+		}
+	}
+	// The API requires a country on Origin, and its geography is the
+	// whole filter; a body without one is a 422.
+	if dsType == "Origin" && len(r.countries) == 0 {
+		return audienceBody{}, usageErr("--type Origin needs --country; list the covered countries with " +
+			"'intuizi reference common countries --dataset-type Origin'")
+	}
+
+	c, err := client()
+	if err != nil {
+		return audienceBody{}, err
+	}
+	ctx := cmd.Context()
+
+	ds := audienceDataset{Type: dsType, StartDate: r.startDate, EndDate: r.endDate}
+
+	for _, b := range r.brands {
+		id, err := resolveOrID(ctx, c, brandsPath, "--brand", b, "brands")
+		if err != nil {
+			return audienceBody{}, err
+		}
+		ds.Analysisdata = append(ds.Analysisdata, id)
+	}
+	for _, search := range r.brandAll {
+		ids, err := resolveAll(ctx, c, brandsPath, search, "brands")
+		if err != nil {
+			return audienceBody{}, err
+		}
+		// One word becoming nine ids should be visible; stderr keeps a
+		// piped --dry-run to the payload.
+		noun := "brands"
+		if len(ids) == 1 {
+			noun = "brand"
+		}
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "--brand-all %q selected %d %s\n",
+			search, len(ids), noun)
+		ds.Analysisdata = append(ds.Analysisdata, ids...)
+	}
+	if len(r.categories) > 0 {
+		ids := make([]any, 0, len(r.categories))
+		for _, name := range r.categories {
+			id, err := resolveOrID(ctx, c, cat.path, "--category", name, "categories")
+			if err != nil {
+				return audienceBody{}, err
+			}
+			ids = append(ids, id)
+		}
+		// WebDomain reads the same selection from a different field.
+		if cat.key == "iab_category_codes" {
+			ds.IABCategoryCodes = ids
+		} else {
+			ds.Categories = ids
+		}
+	}
+
+	// The catalog is read either way: it is the default, and the check
+	// that a given --provider belongs to this type.
+	all, err := allProviders(ctx, c, dsType)
+	if err != nil {
+		return audienceBody{}, err
+	}
+	if len(r.providers) == 0 {
+		ds.SignalProviders = all
+	} else if ds.SignalProviders, err = checkProviders(r.providers, all, dsType); err != nil {
+		return audienceBody{}, err
+	}
+
+	if len(r.countries)+len(r.states)+len(r.cities)+len(r.zipcodes) > 0 {
+		ds.Location = &audienceLocation{
+			Countries: r.countries, States: r.states, Cities: r.cities, Zipcodes: r.zipcodes,
+		}
+	}
+
+	if dsType == "Origin" {
+		// The dates stay as typed in the body; the API does the widening.
+		if from, to := originWeeks(r.startDate, r.endDate); from != r.startDate || to != r.endDate {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Origin data is weekly: the API widens %s..%s "+
+				"to the whole weeks %s..%s\n", r.startDate, r.endDate, from, to)
+		}
+	}
+
+	return audienceBody{Name: r.name, Datasets: []audienceDataset{ds}, Analyses: analyses}, nil
+}
+
+// postBody posts body to lc.create and prints the record that comes back, or
+// follows it to its end with --wait.
+func postBody(cmd *cobra.Command, lc lifecycle, body any, wait bool, timeout time.Duration, next string) error {
+	if wait {
+		return createAndWait(cmd, lc, body, timeout)
+	}
+	return createBodyAs(cmd, lc.create, body, lc.lead, lc.view, next)
 }
 
 // brandHint points a --brand on another type at what that type does take.
@@ -366,7 +428,7 @@ func brandHint(dsType string) string {
 var audienceFields = []string{
 	"type", "name", "start-date", "end-date",
 	"brand", "brand-all", "category",
-	"provider", "country", "state", "city", "zipcode",
+	"provider", "country", "state", "city", "zipcode", "frequency",
 }
 
 // audienceRequired is the minimum for a single dataset.
@@ -420,7 +482,7 @@ reads 108, so a wait on it ends only at --timeout.`,
 		if err != nil {
 			return err
 		}
-		return waitAndPrint(cmd, c, audiencesPrefix, "audience", id, audienceColumns, timeout)
+		return waitAndPrint(cmd, c, audienceLifecycle, id, timeout)
 	}
 	return cmd
 }
@@ -717,7 +779,7 @@ func init() {
 		audiencesListCommand(),
 		audiencesShowCommand(),
 		audiencesDeleteCommand(),
-		audiencesCreateCommand(), audiencesLookalikeCommand(),
+		audiencesCreateCommand(), audiencesLookalikeCommand(), audiencesEstimateCommand(),
 	)
 	rootCmd.AddCommand(audiencesCmd)
 }

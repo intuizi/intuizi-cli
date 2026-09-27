@@ -276,7 +276,7 @@ func keepsReference(err error) error {
 
 // warnUnkeyed says --idempotency-key has no effect on a POST to a route that
 // reads no Idempotency-Key, once per client. The flag's help says "on create
-// commands"; a route outside the seven that read the header would otherwise
+// commands"; a route outside the eight that read the header would otherwise
 // drop it in silence.
 func (c *Client) warnUnkeyed(path string) {
 	if IdempotencyKey == "" || c.warnedKey {

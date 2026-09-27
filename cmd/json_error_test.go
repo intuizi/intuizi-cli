@@ -35,8 +35,11 @@ func jsonRunners(t *testing.T) []jsonRunner {
 		{name: "previewCohort", cmd: wrap(func(cmd *cobra.Command) error {
 			return previewCohort(cmd, map[string]string{"file_uri": "s3://example-bucket/k.csv"})
 		})},
+		{name: "previewActivation", cmd: wrap(func(cmd *cobra.Command) error {
+			return previewActivation(cmd, url.Values{"audience_id": {"88"}, "freq_min": {"2"}, "freq_max": {"5"}})
+		})},
 		{name: "createAndWait", cmd: wrap(func(cmd *cobra.Command) error {
-			return createAndWait(cmd, "/analyses/projects", "project", map[string]string{"name": ""}, nil, time.Minute)
+			return createAndWait(cmd, resourceLifecycle("project", "/analyses/projects", nil), map[string]string{"name": ""}, time.Minute)
 		})},
 		{name: "usage", cmd: usageCommand()},
 		{name: "uploads put", cmd: uploadsPutCommand(), args: []string{uploadFile(t, "x"), "--purpose", "cohort"}},

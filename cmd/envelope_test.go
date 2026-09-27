@@ -191,6 +191,23 @@ func envelopeCases() []envelopeCase {
 			payload: createPayload, path: "/api/v2/analyses/schedules/create",
 			body: createdEnvelope, labels: []string{"name"},
 		},
+		{
+			name: "audiences estimate create", cmd: estimateCreateCommand,
+			payload: createPayload, path: "/api/v2/analyses/audiences/estimate",
+			body: createdEnvelope, labels: []string{"name"},
+		},
+
+		// --- the reads with a view of their own.
+		{
+			name: "audiences estimate show", cmd: estimateShowCommand,
+			args: []string{"12"}, path: "/api/v2/analyses/audiences/estimate/12",
+			body: estimate("completed", completedNumbers, "").body, labels: []string{"uniques", "as_of"},
+		},
+		{
+			name: "activations preview", cmd: activationsPreviewCommand,
+			args: activationPreviewArgs, path: "/api/v2/analyses/activations/preview",
+			body: activationPreviewEnvelope, labels: []string{"filtered_count", "frequency_bounds", "days"},
+		},
 
 		// --- postID: delete and the schedule toggles. Nothing on stdout,
 		// commentary on stderr.

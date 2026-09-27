@@ -139,6 +139,13 @@ func renderList(cmd *cobra.Command, path string, query url.Values, cols []string
 // renderOne performs a single-resource read, printed as key/value lines. lead
 // orders the fields worth seeing first; the rest follow alphabetically.
 func renderOne(cmd *cobra.Command, path string, lead []string) error {
+	return renderOneAs(cmd, path, lead, flatten)
+}
+
+// renderOneAs is renderOne with the record shaped by view before it prints,
+// for a read whose useful fields sit in a nested object. --json and --quiet
+// are unaffected: they print the envelope and the id as the server sent them.
+func renderOneAs(cmd *cobra.Command, path string, lead []string, view func(output.Record) output.Record) error {
 	c, err := client()
 	if err != nil {
 		return err
@@ -160,7 +167,7 @@ func renderOne(cmd *cobra.Command, path string, lead []string) error {
 	if quietOutput {
 		return output.IDs(cmd.OutOrStdout(), []output.Record{item})
 	}
-	return output.Detail(cmd.OutOrStdout(), flatten(item), lead)
+	return output.Detail(cmd.OutOrStdout(), view(item), lead)
 }
 
 // postID posts {"id": n} and reports success on stderr, keeping stdout empty
@@ -201,6 +208,12 @@ func createFromFile(cmd *cobra.Command, path, file string, lead []string, next s
 // createBody posts an already-built body, for the creates whose whole payload
 // fits in a flag or two.
 func createBody(cmd *cobra.Command, path string, payload any, lead []string, next string) error {
+	return createBodyAs(cmd, path, payload, lead, flatten, next)
+}
+
+// createBodyAs is createBody with the created record shaped by view before it
+// prints, as renderOneAs is to renderOne.
+func createBodyAs(cmd *cobra.Command, path string, payload any, lead []string, view func(output.Record) output.Record, next string) error {
 	c, err := client()
 	if err != nil {
 		return err
@@ -222,7 +235,7 @@ func createBody(cmd *cobra.Command, path string, payload any, lead []string, nex
 	if quietOutput {
 		return output.IDs(cmd.OutOrStdout(), []output.Record{created})
 	}
-	if err := output.Detail(cmd.OutOrStdout(), flatten(created), lead); err != nil {
+	if err := output.Detail(cmd.OutOrStdout(), view(created), lead); err != nil {
 		return err
 	}
 	if next != "" {

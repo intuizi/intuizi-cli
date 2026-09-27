@@ -7,11 +7,15 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 const activationsPrefix = "/analyses/activations"
 
 var activationColumns = []string{"id", "description", "status", "audience", "created_at"}
+
+// activationLifecycle is how --wait follows an export.
+var activationLifecycle = resourceLifecycle("activation", activationsPrefix, activationColumns)
 
 var activationsCmd = &cobra.Command{
 	Use:   "activations",
@@ -36,6 +40,9 @@ says that nothing was delivered. 107 Additional Info is a failure too: the
 export stopped and will not continue. The API does not return the reason, but
 Audience Manager in the Intuizi console shows it on the activation.
 
+'activations preview' counts the devices a frequency filter would export,
+before the export is created.
+
 An audience must hold at least 500 devices, 1,000 for a Lookalike Model
 result, and pass the other eligibility checks before it can be activated.
 'intuizi audiences show <id> --json' reports is_activation_allowed, and
@@ -49,6 +56,7 @@ blocks: a create whose pricing model delivers one of them is refused.`,
 // activationFields are the body-building flags, for --file to reject.
 var activationFields = []string{
 	"audience-id", "endpoint-connection-id", "pricing-model-id", "datastream", "description", "project-id",
+	"freq-min", "freq-max", "filter-hash",
 }
 
 // datastreamSelection enables one of the connection partner's datastreams.
@@ -74,6 +82,41 @@ func datastreamSelections(ids []int) ([]datastreamSelection, error) {
 	return out, nil
 }
 
+// addFrequencyFilter writes the frequency filter into a flag-built body: the
+// range under freq_limit, which the API requires beside any bound, and the
+// filter_hash of the preview it came from. A range is both bounds, as the
+// preview takes them, and a hash is refused without its range, as the API
+// would refuse it.
+func addFrequencyFilter(flags *pflag.FlagSet, lo, hi int, hash string, body map[string]any) error {
+	ranged := flags.Changed("freq-min") || flags.Changed("freq-max")
+	if ranged && len(unsetFlags(flags, "freq-min", "freq-max")) > 0 {
+		return usageErr("--freq-min and --freq-max go together: a frequency filter is a range, " +
+			"so pass both, as 'intuizi activations preview' takes them")
+	}
+	if flags.Changed("filter-hash") {
+		if !ranged {
+			return usageErr("--filter-hash certifies a previewed range: pass it with the same " +
+				"--freq-min and --freq-max the preview was given")
+		}
+		if err := nonEmpty("filter-hash", hash); err != nil {
+			return err
+		}
+	}
+	if !ranged {
+		return nil
+	}
+	if err := checkFreqRange(lo, hi); err != nil {
+		return err
+	}
+	body["freq_limit"] = true
+	body["freq_min"] = lo
+	body["freq_max"] = hi
+	if flags.Changed("filter-hash") {
+		body["filter_hash"] = hash
+	}
+	return nil
+}
+
 // warnNoDatastream says, in one line, that a flag-built activation without a
 // datastream will deliver nothing: the worker uploads only for enabled
 // streams, and the activation still reaches Completed.
@@ -94,6 +137,9 @@ func activationsCreateCommand() *cobra.Command {
 		datastreams  []int
 		description  string
 		projectID    int
+		freqMin      int
+		freqMax      int
+		filterHash   string
 	)
 
 	cmd := &cobra.Command{
@@ -111,6 +157,18 @@ A datastream is one of the connection partner's delivery outputs, and only an
 enabled one uploads anything: without --datastream the activation completes
 and delivers nothing, so the command warns on stderr. Repeat the flag for more
 than one.
+
+--freq-min and --freq-max export only the devices seen on that range of
+distinct days, both inclusive, and need an audience built with a frequency
+analysis ('intuizi audiences create --frequency'). Count a range first with
+'intuizi activations preview', and pass the filter_hash it prints as
+--filter-hash: the API then refuses the export if the range or the audience
+has changed since the preview, rather than exporting something else:
+
+    intuizi activations preview --audience-id 88 --freq-min 2 --freq-max 5
+    intuizi activations create --audience-id 88 \
+      --endpoint-connection-id 12 --pricing-model-id 3 --datastream 7 \
+      --freq-min 2 --freq-max 5 --filter-hash sha256:4f9d...
 
 Anything richer - per-partner audience_inputs, per-stream inputs or
 compression, caller-supplied credentials - is too nested for flags, so pass the
@@ -201,6 +259,9 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 			if flags.Changed("project-id") {
 				m["project_id"] = projectID
 			}
+			if err := addFrequencyFilter(flags, freqMin, freqMax, filterHash, m); err != nil {
+				return err
+			}
 			if dryRun {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
@@ -214,7 +275,7 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 				"delivering - run 'intuizi activations show <id> --wait' to follow it")
 		}
 
-		return createAndWait(cmd, activationsPrefix, "activation", body, activationColumns, timeout)
+		return createAndWait(cmd, activationLifecycle, body, timeout)
 	}
 
 	flags := cmd.Flags()
@@ -229,6 +290,12 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 		"Datastream id to deliver, from 'reference common datastreams'\n(repeatable or comma-separated; without one nothing is delivered)")
 	flags.StringVar(&description, "description", "", "A label for the activation")
 	flags.IntVar(&projectID, "project-id", 0, "Project to file the activation under")
+	flags.IntVar(&freqMin, "freq-min", 0,
+		"Export only devices seen on at least this many distinct days\n(with --freq-max)")
+	flags.IntVar(&freqMax, "freq-max", 0,
+		"Export only devices seen on at most this many distinct days\n(with --freq-min)")
+	flags.StringVar(&filterHash, "filter-hash", "",
+		"The filter_hash 'activations preview' printed for this range, so\nthe export is refused if it would differ from the preview")
 
 	return cmd
 }
@@ -274,7 +341,7 @@ returns at once:
 		if err != nil {
 			return err
 		}
-		return waitAndPrint(cmd, c, activationsPrefix, "activation", id, activationColumns, timeout)
+		return waitAndPrint(cmd, c, activationLifecycle, id, timeout)
 	}
 	return cmd
 }
@@ -300,7 +367,7 @@ func init() {
 		activationsListCommand(),
 		activationsShowCommand(),
 		deleteCommand("activation", activationsPrefix),
-		activationsCreateCommand(),
+		activationsCreateCommand(), activationsPreviewCommand(),
 	)
 	rootCmd.AddCommand(activationsCmd)
 }

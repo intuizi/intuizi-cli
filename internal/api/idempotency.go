@@ -21,8 +21,9 @@ func nextIdempotencyKey() string {
 	return newUUIDv4()
 }
 
-// idempotentRoutes are the seven create routes that read the Idempotency-Key
-// header, per the console docs (concepts/idempotency.md). Keys are the
+// idempotentRoutes are the eight routes that read the Idempotency-Key header:
+// the seven creates on the console docs' Idempotency page, and Estimate
+// Audience Size, whose route carries the same middleware. Keys are the
 // post-apiPrefix paths that callers pass to Post.
 //
 // The header is ignored everywhere else, so sending it everywhere would be
@@ -33,6 +34,7 @@ func nextIdempotencyKey() string {
 var idempotentRoutes = map[string]bool{
 	"/analyses/audiences/create":                 true,
 	"/analyses/audiences/create-lookalike":       true,
+	"/analyses/audiences/estimate":               true,
 	"/analyses/cohorts/create":                   true,
 	"/analyses/activations/create":               true,
 	"/analyses/projects/create":                  true,

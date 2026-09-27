@@ -72,17 +72,29 @@ the coffee brands" case.
 # Authenticate once; stores a bearer token for later commands
 intuizi auth login
 
-# Build an audience and block until it has built
-intuizi audiences create \
+# Size an audience without creating it: the same flags as create
+intuizi audiences estimate create \
   --type poi --brand starbucks \
   --country USA --state CA --city "San Francisco" \
   --start-date 2026-09-02 --end-date 2026-09-09 \
   --name "Starbucks visitors - SF - 1 week" --wait
 
-# Export it through one of the partner's datastreams, following the
-# delivery to Completed
+# Build it, with the frequency analysis a preview needs, and block until it
+# has built
+intuizi audiences create \
+  --type poi --brand starbucks \
+  --country USA --state CA --city "San Francisco" \
+  --start-date 2026-09-02 --end-date 2026-09-09 \
+  --name "Starbucks visitors - SF - 1 week" --frequency --wait
+
+# Count the devices seen on 2 to 5 distinct days
+intuizi activations preview --audience-id 88 --freq-min 2 --freq-max 5
+
+# Export exactly that range through one of the partner's datastreams,
+# following the delivery to Completed
 intuizi activations create --audience-id 88 \
-  --endpoint-connection-id 12 --pricing-model-id 3 --datastream 7 --wait
+  --endpoint-connection-id 12 --pricing-model-id 3 --datastream 7 \
+  --freq-min 2 --freq-max 5 --filter-hash sha256:4f9d... --wait
 
 # Import your own identifiers as a cohort from a cloud file
 intuizi cohorts create --name "Loyalty members" \
@@ -116,7 +128,7 @@ intuizi audiences create --type poi --brand starbucks ... --dry-run > audience.j
 model: two datasets combined with an operator, the refine, crossvisitation and
 crosspurchase blocks, the Cohorts, Demographics and ProfileAttributes audience
 types, any other audience field no flag writes (project_id, POI locations,
-DMAs, the analyses block Preview Activation needs, datastreams), an
+DMAs, the day-part frequency analysis, datastreams), an
 activation's partner and per-stream inputs, a schedule's auto-export, cohort
 limits by visit frequency, distance or Lookalike Model score range, and Match
 Strictness on an SCID cohort import.
@@ -137,14 +149,14 @@ in [DOCS.md](DOCS.md); `--help` on any command lists all of its flags.
 | Command | What it covers |
 | --- | --- |
 | `auth` | `login`, `status`, `logout` |
-| `audiences` | `list`, `show`, `create`, `delete`, `lookalike create\|cancel` |
-| `activations` | `list`, `show`, `create`, `delete` |
+| `audiences` | `list`, `show`, `create`, `delete`, `lookalike create\|cancel`, `estimate create\|show` |
+| `activations` | `list`, `show`, `create`, `preview`, `delete` |
 | `cohorts` | `list`, `show`, `create`, `preview`, `delete` |
 | `schedules` | `list`, `show`, `create`, `activate`, `deactivate`, `delete` |
 | `projects` | `list`, `show`, `create`, `delete` |
 | `poi` | `segments`, `categories`, `brands`, `locations`, `submissions` |
 | `uploads` | `reserve`, `put` |
-| `reference` | 60 read-only catalogs across 10 groups |
+| `reference` | 61 read-only catalogs across 10 groups |
 | `usage` | monthly data-scan usage |
 | `webhooks` | `list` |
 | `completion` | shell completion for bash, zsh, fish, powershell |
@@ -160,10 +172,10 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
   `completion`, `auth logout` and `auth status` without `--verify` call none.
   No server-side logic lives here.
 - **Most of the v2 surface.** Auth, audiences (including refine,
-  crossvisitation and crosspurchase), activations, cohorts, schedules,
-  projects, POI, uploads, usage and reference reads. Audience size estimates,
-  activation preview and datastream visualizations have no command; call the
-  API for those.
+  crossvisitation and crosspurchase, and size estimates), activations
+  (including the frequency preview), cohorts, schedules, projects, POI,
+  uploads, usage and reference reads, the data stream visualization catalog
+  among them.
 - **Human first, script friendly.** Readable tables by default, `--json` for
   raw responses, `--quiet` for ids alone, and exit codes scripts can branch on.
 - **Wrong input fails before it is sent.** Names are resolved against the

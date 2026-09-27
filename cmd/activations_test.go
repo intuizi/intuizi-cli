@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -40,6 +41,10 @@ func stubSeq(t *testing.T, replies ...reply) (*httptest.Server, *capture) {
 			i = len(replies) - 1
 		}
 		got.paths = append(got.paths, r.URL.Path)
+		got.queries = append(got.queries, r.URL.RawQuery)
+		got.keys = append(got.keys, r.Header.Get("Idempotency-Key"))
+		b, _ := io.ReadAll(r.Body)
+		got.bodies = append(got.bodies, string(b))
 		w.Header().Set("Content-Type", "application/json")
 		if replies[i].status != 0 {
 			w.WriteHeader(replies[i].status)
@@ -857,5 +862,82 @@ func TestWaitJSONReReadsOnceAfterAFailure(t *testing.T) {
 	}
 	if !strings.Contains(errb, fallbackNote+" re-reading it failed (") {
 		t.Errorf("stderr should say the shape is the fallback, and why, got %q", errb)
+	}
+}
+
+// The frequency filter from flags, so what 'activations preview' showed can be
+// exported without writing a --file body. The API applies freq_min and
+// freq_max only under freq_limit: true, and refuses bounds sent without it,
+// so a range always carries it.
+func TestActivationsCreateSendsTheFrequencyFilter(t *testing.T) {
+	const hash = "sha256:4f9d0c7e1b2a8d3f6e5c4b3a2918f7e6d5c4b3a291807f6e5d4c3b2a19180706"
+	for _, tc := range []struct {
+		name string
+		args []string
+		want map[string]any
+	}{
+		{"a range and its preview hash", []string{"--freq-min", "2", "--freq-max", "5", "--filter-hash", hash},
+			map[string]any{"freq_limit": true, "freq_min": 2.0, "freq_max": 5.0, "filter_hash": hash}},
+		{"a range alone", []string{"--freq-min", "2", "--freq-max", "5"},
+			map[string]any{"freq_limit": true, "freq_min": 2.0, "freq_max": 5.0}},
+		{"a range of one day", []string{"--freq-min", "3", "--freq-max", "3"},
+			map[string]any{"freq_limit": true, "freq_min": 3.0, "freq_max": 3.0}},
+		{"no range, no filter", nil, map[string]any{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, `{}`)
+
+			body := dryRunBody(t, activationsCreateCommand(), srv,
+				append(append([]string(nil), threeIDs...), append([]string{"--datastream", "7"}, tc.args...)...)...)
+
+			for _, k := range []string{"freq_limit", "freq_min", "freq_max", "filter_hash"} {
+				if body[k] != tc.want[k] {
+					t.Errorf("%s = %v, want %v", k, body[k], tc.want[k])
+				}
+			}
+		})
+	}
+}
+
+// Each mistake is refused before anything is sent: the API would 422 a lone
+// bound or a hash without its range, and an upside-down range filters out
+// every device.
+func TestActivationsCreateRejectsABadFrequencyFilter(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"min alone", []string{"--freq-min", "2"}, []string{"--freq-min", "--freq-max"}},
+		{"max alone", []string{"--freq-max", "5"}, []string{"--freq-min", "--freq-max"}},
+		{"hash without a range", []string{"--filter-hash", "sha256:abc"}, []string{"--filter-hash", "--freq-min", "--freq-max"}},
+		{"inverted", []string{"--freq-min", "5", "--freq-max", "2"}, []string{"--freq-min 5", "--freq-max 2"}},
+		{"negative", []string{"--freq-min", "-1", "--freq-max", "2"}, []string{"--freq-min"}},
+		{"empty hash", []string{"--freq-min", "2", "--freq-max", "5", "--filter-hash", " "}, []string{"--filter-hash"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, `{}`)
+
+			_, _, err := run(t, activationsCreateCommand(), srv,
+				append(append([]string(nil), threeIDs...), append([]string{"--datastream", "7"}, tc.args...)...)...)
+
+			wantUsageErr(t, err, tc.want...)
+			if len(got.paths) != 0 {
+				t.Errorf("should cost no round trip, got %v", got.paths)
+			}
+		})
+	}
+}
+
+// A --file body carries its own filter, so the flags are refused with it.
+func TestActivationsCreateRejectsFrequencyFlagsWithFile(t *testing.T) {
+	srv, got := stub(t, `{}`)
+
+	_, _, err := run(t, activationsCreateCommand(), srv,
+		"--file", payloadFile(t, `{"audience_id":88}`), "--freq-min", "2", "--freq-max", "5", "--filter-hash", "sha256:abc")
+
+	wantUsageErr(t, err, "--file carries the whole body", "--freq-min", "--freq-max", "--filter-hash")
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
 	}
 }

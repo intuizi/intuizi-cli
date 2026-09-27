@@ -347,6 +347,17 @@ type audienceDataset struct {
 type audienceBody struct {
 	Name     string            `json:"name"`
 	Datasets []audienceDataset `json:"datasets"`
+	Analyses map[string]bool   `json:"analyses,omitempty"`
+}
+
+// frequencyAnalyses is the analyses key --frequency sets, per dataset type:
+// Visitation Frequency, Apps Frequency and Web Frequency in Audience Manager.
+// Each stores the distinct-day histogram that Preview Activation sums and an
+// activation's --freq-min and --freq-max filter on. No other type has one.
+var frequencyAnalyses = map[string]string{
+	"POI":       "frequency",
+	"Apps":      "apps_frequency",
+	"WebDomain": "web_frequency",
 }
 
 // dateLayout is the payload's format. The summary "dataset" field renders

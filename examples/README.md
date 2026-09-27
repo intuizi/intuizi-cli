@@ -19,7 +19,7 @@ sending anything. The dates are examples too, and some go stale: see the
 
 | File | Command | Notes |
 | --- | --- | --- |
-| `audience-poi.json` | `audiences create` | The minimum: one POI dataset. |
+| `audience-poi.json` | `audiences create` | The minimum: one POI dataset. Every audience file here also works with `audiences estimate create`, which sizes the audience without creating it. |
 | `audience-two-datasets.json` | `audiences create` | Two datasets, so `operator` is required. |
 | `audience-refine-crosspurchase.json` | `audiences create` | `refine` sits **inside** the dataset; `crosspurchase` sits at the **top level**. Both are permission-gated. |
 | `activation.json` | `activations create --file` | From flags, an export needs `--audience-id`, `--endpoint-connection-id`, `--pricing-model-id` and at least one `--datastream`; without a datastream it completes and delivers nothing. Use this file for per-stream inputs or compression. Add `--wait` to follow it to Completed; `--timeout` defaults to 60m. |
@@ -39,7 +39,8 @@ intuizi reference web iab-categories              # WebDomain "iab_category_code
 intuizi reference transactions categories         # crosspurchase targets
 intuizi reference common endpoint-connections     # endpoint_connection_id
 intuizi reference common pricing-models --partner-id <id>
-intuizi reference common datastreams --partner-id <id>  # datastreams[].id
+intuizi reference common datastreams --partner-id <id>  # an activation's datastreams[].id
+intuizi reference common datastream-visualizations --dataset-type POI  # an audience's datastreams[].id
 intuizi reference common schedule-frequencies     # recurrence.frequency
 intuizi reference common schedule-windows         # recurrence.window_type
 intuizi reference common schedule-endings         # recurrence.ending.type
