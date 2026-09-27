@@ -361,10 +361,11 @@ and --remove take effect when Intuizi approves the submission, and both need
 
 With --key location-id, a location matches the brand's POI whose id is its
 location_id, the id column of 'intuizi poi locations list'. A location_id
-must be the id of one of your POIs, or the API rejects the submission. A
-location with no location_id, or one that is not the id of one of the
-brand's POIs, is added as a new POI, and a --remove submission in which no
-location has a location_id archives nothing.
+must be the id of one of your POIs, or the API rejects the submission (an
+--upload-reference file is checked only in its first 64 KB). A location
+with no location_id, or one that is not the id of one of the brand's POIs,
+is added as a new POI, and a --remove submission in which no location has a
+location_id archives nothing.
 
 Only the --upload-reference form sends an Idempotency-Key, so only it can be
 retried safely with --idempotency-key; the API reads none on the --file and

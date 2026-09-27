@@ -884,6 +884,9 @@ func TestPoiSubmissionsCreateByListNeedsNoFlags(t *testing.T) {
 // archive nothing). --key location-id matches a location's location_id to the
 // id of one of the brand's POIs, and a null key in a --list body is stored as
 // gps-coordinates. The help is where a user learns all three before sending.
+// A location_id that is not one of the account's POIs is rejected, but an
+// --upload-reference create checks only the file's first 64 KB (the console's
+// readObjectHeadAndRowCount head), so the help says so.
 func TestPoiSubmissionsCreateHelpDescribesMatching(t *testing.T) {
 	cmd := poiSubmissionCreateCommand()
 	for flag, wants := range map[string][]string{
@@ -905,6 +908,7 @@ func TestPoiSubmissionsCreateHelpDescribesMatching(t *testing.T) {
 		"whose id is its location_id",
 		"poi locations list",
 		"added as a new POI",
+		"an --upload-reference file is checked only in its first 64 KB",
 	} {
 		if !strings.Contains(long, want) {
 			t.Errorf("create help omits %q:\n%s", want, cmd.Long)
