@@ -775,7 +775,7 @@ analysis_type          frequency
 dataset_type           POI
 is_activation_allowed  true
 method                 histogram_sum
-recency                POI 2026-06-01..2026-07-31
+recency                POI 06/01/2026..07/31/2026
 
 days  devices
 1     3000

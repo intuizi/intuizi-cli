@@ -27,6 +27,11 @@
 #
 # Point it at a test console. The audience build is the slow step; set
 # LIVE_WAIT_TIMEOUT (default 20m) if the console is slower than that.
+#
+# 'activations preview' needs an audience with devices in it, and a test
+# console's data can end well before today. LIVE_FREQ_START and LIVE_FREQ_END
+# (YYYY-MM-DD) give its --frequency audience a window the console has data
+# for; by default it uses the same recent window as the other audiences.
 set -u
 
 BASE=${1:?usage: live-test.sh <base-url> [results-dir]}
@@ -253,9 +258,13 @@ step 0 "audiences show --json" I audiences show "$AUD" --json
 step 0 "audiences create --file - (body from --dry-run)" bash -c "'$B' --base-url '$BASE' audiences create --type poi --brand $SBUX --country USA --start-date $START --end-date $END --name 'cli-live-test file $STAMP' --dry-run | '$B' --base-url '$BASE' audiences create --file - --quiet"
 AUD2=$(first); [ -n "$AUD2" ] && AUDIENCES+=("$AUD2")
 # An estimate of the audience just built: the same flags, so the same recipe.
+# It carries an Idempotency-Key, so the same body sent again with the same key
+# replays it rather than scanning twice.
+EKEY="cli-live-$STAMP-$$"
 step 0 "audiences estimate create --dry-run" I audiences estimate create "${AUDFLAGS[@]}" --name "cli-live-test $STAMP" --dry-run
-step 0 "audiences estimate create --wait --quiet" I audiences estimate create "${AUDFLAGS[@]}" --name "cli-live-test $STAMP" --wait --timeout "$WAIT_TIMEOUT" --quiet
+step 0 "audiences estimate create --wait --quiet" I audiences estimate create "${AUDFLAGS[@]}" --name "cli-live-test $STAMP" --idempotency-key "$EKEY" --wait --timeout "$WAIT_TIMEOUT" --quiet
 EST=$(first)
+step 0 "audiences estimate create with the same key replays the estimate" bash -c "again=\$('$B' --base-url '$BASE' audiences estimate create --type poi --brand '$SBUX' --country USA --state CA --city 'San Francisco' --start-date '$START' --end-date '$END' --name 'cli-live-test $STAMP' --idempotency-key '$EKEY' --quiet); echo \"first $EST again \$again\"; [ -n '$EST' ] && [ \"\$again\" = '$EST' ]"
 step 0 "audiences estimate show" I audiences estimate show "$EST"
 step 0 "audiences estimate show --wait --json" I audiences estimate show "$EST" --wait --json
 step 0 "estimate and audience share a recipe_hash" bash -c "a=\$('$B' --base-url '$BASE' audiences show '$AUD' --json | jq -r '.data[0].recipe_hash'); e=\$('$B' --base-url '$BASE' audiences estimate show '$EST' --json | jq -r '.data[0].recipe_hash'); echo \"audience \$a estimate \$e\"; [ -n \"\$a\" ] && [ \"\$a\" != null ] && [ \"\$a\" = \"\$e\" ]"
@@ -300,11 +309,20 @@ step 0 "reference common datastreams --quiet" I reference common datastreams --p
 DS=$(first)
 
 # The frequency analysis is a gated feature (403 when it is off), so the
-# preview steps run only where the build succeeds. A two-day window keeps the
-# histogram to buckets 1 and 2, and the whole range sums to histogram_total.
-step any "audiences create --frequency --wait --quiet (capability may be off)" I audiences create "${AUDFLAGS[@]}" --name "cli-live-freq $STAMP" --frequency --wait --timeout "$WAIT_TIMEOUT" --quiet
+# preview steps run only where the build succeeds. The whole range sums to
+# histogram_total. An audience with no devices has no histogram to preview,
+# but its 422 still shows the analysis was recorded: one built without it
+# names that instead.
+FREQ_START=${LIVE_FREQ_START:-$START}; FREQ_END=${LIVE_FREQ_END:-$END}
+step any "audiences create --frequency --wait --quiet (capability may be off)" I audiences create --type poi --brand "$SBUX" --country USA --state CA --start-date "$FREQ_START" --end-date "$FREQ_END" --name "cli-live-freq $STAMP" --frequency --wait --timeout "$WAIT_TIMEOUT" --quiet
 FREQ_OK=$LAST_EXIT; AUD3=$(first); [ -n "$AUD3" ] && AUDIENCES+=("$AUD3")
+FREQ_COUNT=0
 if [ "$FREQ_OK" = 0 ] && [ -n "$AUD3" ]; then
+  FREQ_COUNT=$(I audiences show "$AUD3" --json | jq -r '.data[0].results_count // 0')
+fi
+if [ "$FREQ_OK" = 0 ] && [ -n "$AUD3" ] && [ "${FREQ_COUNT:-0}" = 0 ]; then
+  step 0 "activations preview of an empty --frequency audience names the missing histogram" bash -c "err=\$('$B' --base-url '$BASE' activations preview --audience-id '$AUD3' --freq-min 1 --freq-max 1 2>&1 >/dev/null); rc=\$?; echo \"\$err\"; [ \$rc = 1 ] && grep -q 'no frequency distribution' <<<\"\$err\""
+elif [ "$FREQ_OK" = 0 ] && [ -n "$AUD3" ]; then
   step 0 "activations preview" I activations preview --audience-id "$AUD3" --freq-min 1 --freq-max 1
   step 0 "activations preview --json" I activations preview --audience-id "$AUD3" --freq-min 1 --freq-max 1 --json
   FMIN=$(jq -r '.data[0].frequency_bounds.min // empty' "$LAST_OUT"); FMAX=$(jq -r '.data[0].frequency_bounds.max // empty' "$LAST_OUT")
@@ -318,7 +336,7 @@ if [ "$FREQ_OK" = 0 ] && [ -n "$AUD3" ]; then
     fi
   fi
 fi
-step 1 "activations preview of an audience without a frequency analysis -> 422, exit 1" I activations preview --audience-id "$AUD" --freq-min 1 --freq-max 1
+step 0 "activations preview of an audience without a frequency analysis -> 422 naming it" bash -c "err=\$('$B' --base-url '$BASE' activations preview --audience-id '$AUD2' --freq-min 1 --freq-max 1 2>&1 >/dev/null); rc=\$?; echo \"\$err\"; [ \$rc = 1 ] && grep -q 'without a frequency analysis' <<<\"\$err\""
 
 if [ -n "$EC" ] && [ -n "$PM" ]; then
   # Without --datastream the body is valid but would deliver nothing, which
