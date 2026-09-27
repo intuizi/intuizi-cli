@@ -35,6 +35,10 @@ WAIT_TIMEOUT=${LIVE_WAIT_TIMEOUT:-20m}
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 
 mkdir -p "$OUT"; R="$OUT/results.md"; : > "$R"
+# The script's own stdout and stderr, for the traps below: a signal can land
+# while this shell's output is redirected, as it is while record() writes, and
+# the rest of the run, cleanup included, would then print there.
+exec 3>&1 4>&2
 pass=0; fail=0; n=0
 declare -a PROJECTS=() AUDIENCES=() COHORTS=() SCHEDULES=() SUBMISSIONS=() INFLIGHT=()
 
@@ -45,7 +49,11 @@ I() { "$B" --base-url "$BASE" "$@"; }
 step() {
   local want=$1 label=$2; shift 2; n=$((n+1))
   INFLIGHT=("$want" "$label" "$@")
-  "$@" >"$OUT/$n.out" 2>"$OUT/$n.err"; local got=$?
+  # In a subshell, because the command is often the function I, and a function
+  # takes its redirections in this shell: a Ctrl-C inside it would leave this
+  # shell printing to the step's files. The subshell closes 3 and 4, so a
+  # command left running after the script is killed does not hold them.
+  ( exec 3>&- 4>&-; "$@" ) >"$OUT/$n.out" 2>"$OUT/$n.err"; local got=$?
   INFLIGHT=()
   local mark=PASS; [ "$want" = any ] || [ "$got" = "$want" ] || mark=FAIL
   record $mark "$got" "$want" "$label" "$@"
@@ -72,6 +80,7 @@ first() { head -1 "$LAST_OUT"; }
 # log it, so it logs that step here, as failed, and then ends the run.
 interrupted() {
   local got=$?  # first, before anything resets $?
+  exec >&3 2>&4
   if [ "${#INFLIGHT[@]}" -gt 0 ]; then
     record FAIL "$got" "${INFLIGHT[0]}" "${INFLIGHT[1]} (interrupted by Ctrl-C)" "${INFLIGHT[@]:2}"
   fi
@@ -80,6 +89,7 @@ interrupted() {
 
 cleanup() {
   local rc=$? id  # first, before anything resets $?
+  exec >&3 2>&4
   # Unless a Ctrl-C stopped the run, the first one here costs only the delete
   # in flight, which fails like any other step; the next one ends cleanup.
   [ "$rc" -eq 130 ] || trap 'trap interrupted INT' INT
