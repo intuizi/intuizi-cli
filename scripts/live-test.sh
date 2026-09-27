@@ -31,7 +31,8 @@
 # 'activations preview' needs an audience with devices in it, and a test
 # console's data can end well before today. LIVE_FREQ_START and LIVE_FREQ_END
 # (YYYY-MM-DD) give its --frequency audience a window the console has data
-# for; by default it uses the same recent window as the other audiences.
+# for, and LIVE_FREQ_BRAND a POI brand id with devices in California in it; by
+# default it uses the same recent window and brand as the other audiences.
 set -u
 
 BASE=${1:?usage: live-test.sh <base-url> [results-dir]}
@@ -313,8 +314,8 @@ DS=$(first)
 # histogram_total. An audience with no devices has no histogram to preview,
 # but its 422 still shows the analysis was recorded: one built without it
 # names that instead.
-FREQ_START=${LIVE_FREQ_START:-$START}; FREQ_END=${LIVE_FREQ_END:-$END}
-step any "audiences create --frequency --wait --quiet (capability may be off)" I audiences create --type poi --brand "$SBUX" --country USA --state CA --start-date "$FREQ_START" --end-date "$FREQ_END" --name "cli-live-freq $STAMP" --frequency --wait --timeout "$WAIT_TIMEOUT" --quiet
+FREQ_START=${LIVE_FREQ_START:-$START}; FREQ_END=${LIVE_FREQ_END:-$END}; FREQ_BRAND=${LIVE_FREQ_BRAND:-$SBUX}
+step any "audiences create --frequency --wait --quiet (capability may be off)" I audiences create --type poi --brand "$FREQ_BRAND" --country USA --state CA --start-date "$FREQ_START" --end-date "$FREQ_END" --name "cli-live-freq $STAMP" --frequency --wait --timeout "$WAIT_TIMEOUT" --quiet
 FREQ_OK=$LAST_EXIT; AUD3=$(first); [ -n "$AUD3" ] && AUDIENCES+=("$AUD3")
 FREQ_COUNT=0
 if [ "$FREQ_OK" = 0 ] && [ -n "$AUD3" ]; then
