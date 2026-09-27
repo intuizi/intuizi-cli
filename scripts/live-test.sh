@@ -6,14 +6,22 @@
 # Uses the token the CLI already holds (auth login, or INTUIZI_API_TOKEN) and
 # the binary in $INTUIZI_BIN (default ./bin/intuizi). Every step logs the
 # command, its exit code and the first lines of both streams to results.md in
-# the results directory; the script never stops on a failure and exits 1 at the
-# end if any step failed, so it can gate a scheduled workflow.
+# the results directory. A failed step does not stop the run: every step runs,
+# then cleanup, and the script exits 1 if any step failed, so it can gate a
+# scheduled workflow.
 #
 # It creates and then deletes: a project, two POI audiences (one built from a
 # piped --dry-run body), two cohorts, an upload, a schedule and two POI
 # submissions, all named cli-live-*. Cleanup runs from an EXIT trap, so an
-# interrupted run still removes what it made. Activations are only ever
-# --dry-run: a real one delivers to an endpoint and costs money.
+# interrupted run still removes what it made: Ctrl-C stops the run once the
+# step in flight returns, logs that step as failed, cleans up and exits 130,
+# and SIGTERM stops it at once, logs the step it cut short as failed, cleans
+# up and exits 143. A Ctrl-C during cleanup fails only the delete in flight:
+# cleanup goes on, and the script exits 1. A second Ctrl-C, counting the one
+# that stopped the run, logs the delete in flight as failed and abandons
+# cleanup with exit 130, leaving the rest for you to delete by name.
+# Activations are only ever --dry-run: a real one delivers to an endpoint and
+# costs money.
 #
 # Point it at a test console. The audience build is the slow step; set
 # LIVE_WAIT_TIMEOUT (default 20m) if the console is slower than that.
@@ -28,17 +36,34 @@ WAIT_TIMEOUT=${LIVE_WAIT_TIMEOUT:-20m}
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 
 mkdir -p "$OUT"; R="$OUT/results.md"; : > "$R"
+# The script's own stdout and stderr, for the traps below: a signal can land
+# while this shell's output is redirected, as it is while record() writes, and
+# the rest of the run, cleanup included, would then print there.
+exec 3>&1 4>&2
 pass=0; fail=0; n=0
-declare -a PROJECTS=() AUDIENCES=() COHORTS=() SCHEDULES=() SUBMISSIONS=()
+declare -a PROJECTS=() AUDIENCES=() COHORTS=() SCHEDULES=() SUBMISSIONS=() INFLIGHT=()
 
 I() { "$B" --base-url "$BASE" "$@"; }
 
 # step <expected-exit|any> <label> <cmd...>; stdout lands in $OUT/<n>.out.
+# INFLIGHT holds the step while it runs, for interrupted() below.
 step() {
   local want=$1 label=$2; shift 2; n=$((n+1))
-  local so="$OUT/$n.out" se="$OUT/$n.err"
-  "$@" >"$so" 2>"$se"; local got=$?
+  INFLIGHT=("$want" "$label" "$@")
+  # In a subshell, because the command is often the function I, and a function
+  # takes its redirections in this shell: a Ctrl-C inside it would leave this
+  # shell printing to the step's files. The subshell closes 3 and 4, so a
+  # command left running after the script is killed does not hold them.
+  ( exec 3>&- 4>&-; "$@" ) >"$OUT/$n.out" 2>"$OUT/$n.err"; local got=$?
+  INFLIGHT=()
   local mark=PASS; [ "$want" = any ] || [ "$got" = "$want" ] || mark=FAIL
+  record $mark "$got" "$want" "$label" "$@"
+}
+
+# record <PASS|FAIL> <exit> <expected-exit|any> <label> <cmd...>: logs step $n.
+record() {
+  local mark=$1 got=$2 want=$3 label=$4; shift 4
+  local so="$OUT/$n.out" se="$OUT/$n.err"
   [ $mark = PASS ] && pass=$((pass+1)) || fail=$((fail+1))
   {
     echo "### $n. $label  [$mark] exit=$got want=$want"
@@ -52,8 +77,32 @@ step() {
 }
 first() { head -1 "$LAST_OUT"; }
 
+# The INT trap. It runs once the command in flight returns, before step() can
+# log it, so it logs that step here, as failed, and then ends the run.
+interrupted() {
+  local got=$?  # first, before anything resets $?
+  exec >&3 2>&4
+  if [ "${#INFLIGHT[@]}" -gt 0 ]; then
+    record FAIL "$got" "${INFLIGHT[0]}" "${INFLIGHT[1]} (interrupted by Ctrl-C)" "${INFLIGHT[@]:2}"
+    INFLIGHT=()  # logged; cleanup() must not log it again
+  fi
+  exit 130
+}
+
 cleanup() {
-  local id
+  local rc=$? id  # first, before anything resets $?
+  exec >&3 2>&4
+  # A step still in flight here was cut short by a signal with no trap, such as
+  # SIGTERM: bash runs this trap at once, without waiting for the step's
+  # command, so its exit status is unknown. Log it as failed, so the Summary
+  # does not read 0 failed for a killed run.
+  if [ "${#INFLIGHT[@]}" -gt 0 ]; then
+    record FAIL "?" "${INFLIGHT[0]}" "${INFLIGHT[1]} (cut short by a signal)" "${INFLIGHT[@]:2}"
+    INFLIGHT=()
+  fi
+  # Unless a Ctrl-C stopped the run, the first one here costs only the delete
+  # in flight, which fails like any other step; the next one ends cleanup.
+  [ "$rc" -eq 130 ] || trap 'trap interrupted INT' INT
   for id in "${SUBMISSIONS[@]}"; do step 0 "cleanup poi submissions delete $id" I poi submissions delete "$id" --yes; done
   for id in "${SCHEDULES[@]}";   do step 0 "cleanup schedules delete $id"       I schedules delete "$id" --yes; done
   for id in "${COHORTS[@]}";     do step 0 "cleanup cohorts delete $id"         I cohorts delete "$id" --yes; done
@@ -61,9 +110,19 @@ cleanup() {
   for id in "${PROJECTS[@]}";    do step 0 "cleanup projects delete $id"        I projects delete "$id" --yes; done
   { echo; echo "## Summary: $pass passed, $fail failed, $n steps"; } >> "$R"
   echo "== $pass passed, $fail failed, $n steps; report: $R"
-  [ "$fail" -eq 0 ]
+  # Bash discards an EXIT trap's return status, so a failed step has to turn a
+  # clean exit into exit 1 here. Any other exit keeps its own status: 2 from a
+  # setup check, 130 from the INT trap below. SIGTERM runs this trap with $?
+  # still 0, but bash then dies of the signal (143) whatever the trap does.
+  if [ "$rc" -eq 0 ] && [ "$fail" -gt 0 ]; then exit 1; fi
 }
 trap cleanup EXIT
+# The CLI catches Ctrl-C and exits 130 rather than dying of the signal, and bash
+# then goes on to the next step as if the command had just failed. Exiting here
+# ends the run instead, once the step in flight returns, and the EXIT trap
+# cleans up. After a Ctrl-C this trap stays set, so a second one ends cleanup;
+# when the run ended some other way, cleanup() first sets a one-shot trap.
+trap interrupted INT
 
 echo "# Live test: $BASE, $(date -u +%FT%TZ), binary $($B version)" >> "$R"; echo >> "$R"
 

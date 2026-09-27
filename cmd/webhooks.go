@@ -13,14 +13,14 @@ var webhooksCmd = &cobra.Command{
 	Short: "Inspect webhook endpoints",
 	Long: `Inspect the webhook endpoints registered for your company.
 
-Webhooks are the efficient completion signal: audience.completed and
-activation.completed push the finished resource to your receiver, and
-audience.failed and activation.failed a build that ended in a 4xx error
-state. They are a notification channel, not a source of truth, so keep a
-low-frequency poll ('show <id>') as the fallback: for a delivery that
-exhausts its retries, and for the end states no webhook reports - an audience
-or activation that stops on 107 Additional Info, and a cohort import that
-fails, which stores an error code cohort.failed does not fire on.
+Webhooks are the efficient completion signal: audience.completed,
+activation.completed and cohort.completed push the finished resource to your
+receiver. audience.failed and activation.failed report a build or export that
+stopped at 107 Additional Info or ended in a 4xx error state, the 400 a
+cancelled Lookalike Model ends at included, and cohort.failed an import that
+ended at 5 Not Available. They are a notification channel, not a source of
+truth, so keep a low-frequency poll ('show <id>') as the fallback for a
+delivery that exhausts its retries.
 
 Registering and editing endpoints is console-only - the API exposes this read
 and nothing else.`,

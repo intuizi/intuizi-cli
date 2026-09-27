@@ -582,13 +582,17 @@ Training shows as status `108` Modeling, which is not terminal;
 `audiences show <id> --wait` follows the new audience through it to Completed.
 
 `audiences lookalike cancel <id>` takes the id `lookalike create` returned, not
-the seed's. The run stops at its next checkpoint and reports no further
-status, so from then on the audience keeps reading `108` Modeling and never
-reaches Completed: do not follow a cancelled run with `show <id> --wait`,
-which would poll until `--timeout` and exit `1`. A cancel that arrives once
-the result is already being published is ignored, and the run completes. A
-run that has already finished cannot be cancelled. Remove a cancelled run
-with `audiences delete <id>`.
+the seed's. The run stops at its next checkpoint, and until then the audience
+reads `108` Modeling. Once the run stops it ends at `400` Error, which is
+final: it never reaches Completed. `show <id> --wait` follows a cancelled run
+to that status and exits `1`, as it does for any failed build, and a webhook
+receiver gets `audience.failed`. The API returns only `400` Error, and
+Audience Manager in the Intuizi console shows the status as
+`Cancelled on request.` A cancel that arrives once the result is already being
+published is ignored, and the run completes. A run that has already finished
+cannot be cancelled. A run that stopped on a cancel before cancelled runs
+ended at `400` still reads `108` Modeling, so a wait on it ends only at
+`--timeout`. Remove a cancelled run with `audiences delete <id>`.
 
 ```bash
 intuizi audiences lookalike create \
@@ -780,10 +784,10 @@ before anything is sent. A legacy name filed under a region, such as
 `Asia/Calcutta` for `Asia/Kolkata`, passes that check, `--dry-run` included,
 and the API rejects it with a 422.
 
-An `--end-date` before the `--start` date is rejected too: the API would
-accept it and count the gap forward from `--start`, so the schedule would run
-for that many days instead of not at all. So is a `--name`
-over 255 characters.
+An `--end-date` before the `--start` date, read in `--timezone`, is rejected
+before anything is sent, and so is a `--name` over 255 characters. The API
+rejects that end date as well, with a 422, so a `--file` body cannot carry
+one either.
 
 ```bash
 intuizi schedules create --name "Weekly coffee refresh" --audience-id 88 \
@@ -817,7 +821,7 @@ counted run made. Create a new schedule instead.
 | `--upload-reference` | reference from an upload with `--purpose poi_submission` | `uploads put`, or `uploads reserve` |
 | `--key` | how each listed location is matched to the brand's existing POIs, below | - |
 | `--update` | update the brand's existing POIs that a listed location matches; needs `--key` | - |
-| `--remove` | archive the brand's existing POIs that no listed location matches, keeping the matched ones; needs `--key` | - |
+| `--remove` | archive the brand's existing POIs that no listed location matches, keeping the matched ones, once over the whole submission; not applied when no location has a value for `--key`; needs `--key` | - |
 
 Exactly one of `--file`, `--list` and `--upload-reference`. `--file` and
 `--upload-reference` need `--name` and `--brand-id`; `--list` takes both from
@@ -830,13 +834,31 @@ replaces a different value in the body says so on stderr, as in
 reads stdin: `--file -` is refused and points at `--list -`.
 
 `--key` takes `location-id`, `gps-coordinates`, `store-id`, `master-id` or
-`external-id`, and the API matches on `gps-coordinates` when it is left out.
-A listed location that matches an existing POI is never added a second time:
-`--list ... --update --key store-id` changes the POIs it matches by store id,
-and without `--update` they are left as they are. `--remove` keeps the POIs
-you list and archives the rest of the brand's POIs, so list every location
-the brand should keep, not the ones to drop. Both take effect when Intuizi
-approves the submission.
+`external-id`, and the API matches on `gps-coordinates` when it is left out,
+or null in a `--list` body. A listed location that matches an existing POI is
+never added a second time: `--list ... --update --key store-id` changes the
+POIs it matches by store id, and without `--update` they are left as they
+are. A location that matches nothing is added as a new POI.
+
+`--remove` keeps the POIs the listed locations match and archives every other
+POI the brand had. It is applied once, after the whole submission has been
+matched, however many locations it has, so list every location the brand
+should keep, in one submission, not the ones to drop. A `--remove` submission
+whose locations carry values for `--key` but match no POI archives every POI
+the brand had. One that holds no location at all, or in which no location has
+a value for `--key` (a `location_id`, `store_id`, `master_id`, or
+`external_id`, a blank value counting as none), archives nothing.
+`--update` and `--remove` take effect when Intuizi approves the submission.
+If an approval is interrupted part way, its locations are still imported but
+`--remove` is not applied. Send the submission again to apply it.
+
+With `--key location-id`, a location matches the brand's POI whose id is its
+`location_id`, the `id` column of `poi locations list`. A `location_id` must
+be the id of one of your POIs, as a whole number (`101` or `101.0`), or the
+API rejects the submission. The API checks every row of a `--file` or
+`--list` submission, but only the first 64 KB of an `--upload-reference`
+file. A location with no `location_id`, or one that is not the id of one of
+the brand's POIs, is added as a new POI.
 
 Only the `--upload-reference` form sends an `Idempotency-Key`. The API reads
 none on the `--file` and `--list` forms, so there `--idempotency-key` has no
@@ -1158,7 +1180,8 @@ Modeling and `109` Visualizing data streams. `105` comes before `104`, not
 after it. `108` is a Lookalike Model training. `109` is an audience drawing
 the data stream visualizations it opted into, before `105` and `104`. Any
 other id ends the wait with exit 1: `106` Expired, `107` Additional Info, the
-`4xx` errors, and any id the CLI does not know.
+`4xx` errors (a cancelled Lookalike Model ends at `400`), and any id the CLI
+does not know.
 
 `107` Additional Info means the worker could not run the request as given, so
 it stopped and nothing follows. The error says the build (or, for an
@@ -1170,24 +1193,27 @@ most often a date range outside the dataset's data coverage, or a filter the
 dataset needs. Fix the request and create it again.
 
 Cohort status ids are their own scale: `1` Uploading, `2` Initiating,
-`3` Processing, `4` Completed. A failed import reports an error code outside
-`1` to `4` instead, which the table shows as `Unknown`; `5` Not Available is
-reserved and never reported. No cohort command takes `--wait`, so re-run
-`cohorts show <id>` until the status is `4`, and stop on any status outside
-`1` to `4`. With `--json` the id is `.data.status.id`: a cohort read returns
-the record itself, not an array of one. After a failed import, fix the cause
-and create the cohort again. An `--upload-reference` is used up by the failed
-create, so upload the file again for a new one. A regular audience keeps its
-failed cohort and makes at most one, so run `cohorts delete <id>` before
-creating from it again.
+`3` Processing, `4` Completed, `5` Not Available. `4` and `5` are final: `5`
+means the import failed, and sends `cohort.failed` to a webhook receiver. No
+cohort command takes `--wait`, so re-run `cohorts show <id>` until the status
+is `4` or `5`. A cohort that failed before failures were reported as `5` can
+still read the error code it failed with, a status outside `1` to `5` that the
+table shows as `Unknown`: it has failed too. With `--json` the id is
+`.data.status.id`: a cohort read returns the record itself, not an array of
+one. After a failed import, fix the cause and create the cohort again. An
+`--upload-reference` is used up by the failed create, so upload the file again
+for a new one. A regular audience keeps its failed cohort and makes at most
+one, so run `cohorts delete <id>` before creating from it again.
 
 Everything else is followed with `show <id>`, or by a webhook registered in the
-Console. A webhook is a notification, not a source of truth: keep a
-low-frequency `show <id>` poll as the fallback for a delivery that exhausts
-its retries, and for the end states no webhook reports. An audience or
-activation that stops on `107` Additional Info sends none, and nor does a
-failed cohort import, whose error code is not the `5` that `cohort.failed`
-fires on.
+Console. A build or export that stops on `107` Additional Info or ends in a
+`4xx` error sends `audience.failed` or `activation.failed`, the `400` a
+cancelled Lookalike Model ends at included, and an import that ends at `5` Not
+Available sends `cohort.failed`. An activation that reaches `104` with a
+datastream that failed to deliver still sends `activation.completed`: check its
+`datastreams[]` on `show <id>`. A webhook is a
+notification, not a source of truth: keep a low-frequency `show <id>` poll as
+the fallback for a delivery that exhausts its retries.
 
 ## Shell completion
 

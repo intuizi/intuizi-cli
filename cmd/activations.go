@@ -237,8 +237,8 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 
 // activationsShowCommand is the generic showCommand plus --wait. It is its own
 // command rather than a flag on the shared helper because the terminal-state
-// table is per resource: cohorts finish at 4, audiences pass through 108 and
-// 109.
+// table is per resource: cohorts finish at 4 or 5, audiences pass through 108
+// and 109.
 func activationsShowCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id>",

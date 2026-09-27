@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -171,10 +172,12 @@ func TestLookalikeCreateNamesTheCommandThatFollowsTheRun(t *testing.T) {
 	}
 }
 
-// A cancelled run posts no further status, so the audience reads 108 Modeling
-// for good and a --wait on it only ends at --timeout. The confirmation and
-// the help both say so, and name the delete that removes it.
-func TestLookalikeCancelSaysTheRunNeverCompletes(t *testing.T) {
+// A cancelled run reads 108 Modeling until it reaches its next checkpoint,
+// then ends at 400 Error, which is final: the console records it when it
+// hands the cancel to the worker. show --wait follows it there and exits 1,
+// so neither the confirmation nor the help may warn off --wait any more, as
+// they did while a cancelled run read 108 for good.
+func TestLookalikeCancelSaysTheRunEndsAt400(t *testing.T) {
 	srv, got := stub(t, `{"status":"success","code":200,"message":"Cancellation requested.","data":[]}`)
 
 	_, stderr, err := run(t, audiencesLookalikeCommand(), srv, "cancel", "42")
@@ -184,26 +187,91 @@ func TestLookalikeCancelSaysTheRunNeverCompletes(t *testing.T) {
 	if len(got.paths) != 1 || !strings.HasSuffix(got.paths[0], "/cancel-lookalike") {
 		t.Errorf("paths = %v", got.paths)
 	}
-	for _, want := range []string{"cancellation requested for audience 42", "108 Modeling", "--wait",
+	for _, want := range []string{"cancellation requested for audience 42", "400 Error",
 		"intuizi audiences delete 42"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr omits %q: %q", want, stderr)
 		}
 	}
+	for _, stale := range []string{"keeps reading", "do not --wait"} {
+		if strings.Contains(stderr, stale) {
+			t.Errorf("stderr still says %q: %q", stale, stderr)
+		}
+	}
 
+	group := audiencesLookalikeCommand()
 	var long string
-	for _, c := range audiencesLookalikeCommand().Commands() {
+	for _, c := range group.Commands() {
 		if c.Name() == "cancel" {
 			long = c.Long
 		}
 	}
-	for _, want := range []string{"never reaches Completed", "show <id> --wait", "already finished",
-		"audiences delete <id>"} {
+	for _, want := range []string{"108 Modeling", "400 Error", "show <id> --wait", "exits non-zero",
+		"Cancelled on request.", "already finished", "audiences delete <id>"} {
 		if !strings.Contains(long, want) {
 			t.Errorf("cancel help omits %q:\n%s", want, long)
 		}
 	}
-	if strings.Contains(long, "short while") {
-		t.Errorf("cancel help still says the status lingers only briefly:\n%s", long)
+	show := audiencesShowCommand().Long
+	for name, text := range map[string]string{"cancel": long, "lookalike": group.Long, "show": show} {
+		for _, stale := range []string{"never reaches Completed and", "keeps reading", "for good",
+			"never does", "Do not follow", "polls until --timeout"} {
+			if strings.Contains(text, stale) {
+				t.Errorf("%s help still says %q:\n%s", name, stale, text)
+			}
+		}
+	}
+	if !strings.Contains(group.Long, "400 Error") {
+		t.Errorf("lookalike help does not say how a cancelled run ends:\n%s", group.Long)
+	}
+	if !strings.Contains(show, "400 Error") {
+		t.Errorf("show help does not say a wait on a cancelled lookalike ends at 400:\n%s", show)
+	}
+
+	// The console records the 400 when it hands the cancel to the worker, so a
+	// run that had already stopped on a cancel before that change still reads
+	// 108, and a wait on it still ends only at --timeout. The show help, where a
+	// wait on an existing run is described, names that one case; cancel and
+	// lookalike describe a cancel sent now, which always ends at 400.
+	flat := strings.Join(strings.Fields(show), " ")
+	for _, want := range []string{"stopped on a cancel before cancelled runs ended at 400",
+		"still reads 108", "ends only at --timeout"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("show help omits the run cancelled before the 400 ending (%q):\n%s", want, show)
+		}
+	}
+	for name, text := range map[string]string{"cancel": long, "lookalike": group.Long} {
+		if strings.Contains(text, "--timeout") {
+			t.Errorf("%s help still ties a cancelled run to --timeout:\n%s", name, text)
+		}
+	}
+}
+
+// A cancelled lookalike moves from 108 Modeling to 400 Error once the run
+// stops. 108 is waited through and 400 is a failure, so show --wait follows the
+// run to 400, stops polling there, prints the record and exits 1.
+func TestWaitOnACancelledLookalikeEndsAt400(t *testing.T) {
+	fast(t)
+	replies := []reply{audience(108, "Modeling"), audience(108, "Modeling"), audience(400, "Error")}
+	srv, got := stubSeq(t, replies...)
+
+	out, errb, err := run(t, audiencesShowCommand(), srv, "1377", "--wait", "--timeout", "5s")
+	if !errors.Is(err, errWaitFailed) {
+		t.Fatalf("err = %v, want errWaitFailed\nstderr:\n%s", err, errb)
+	}
+	if code := exitCode(err, nil, true); code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	if len(got.paths) != len(replies) {
+		t.Errorf("expected %d calls, got %d - the wait did not stop at 400", len(replies), len(got.paths))
+	}
+	if !strings.Contains(err.Error(), "Error (400)") {
+		t.Errorf("error should name the status it stopped on: %v", err)
+	}
+	if !strings.Contains(errb, "Modeling (108)") {
+		t.Errorf("stderr should show the wait going through 108:\n%s", errb)
+	}
+	if !strings.HasPrefix(out, "id") || !strings.Contains(out, "Error") {
+		t.Errorf("stdout should be the record the wait stopped on:\n%s", out)
 	}
 }

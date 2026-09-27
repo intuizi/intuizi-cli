@@ -286,10 +286,11 @@ func TestSchedulesCreateChecksTheNameCharacters(t *testing.T) {
 	}
 }
 
-// An --end-date before the --start date used to pass both the CLI and the
-// API, and the gap was counted forward from --start, so the schedule ran for
-// that many days instead of not at all. The end date is compared with the
-// start's own date in --timezone, so the start date itself is still allowed.
+// An --end-date before the --start date is refused before anything is sent.
+// The API answers one with a 422 now, but it used to accept it and count the
+// gap forward from --start, so the schedule ran for that many days instead of
+// not at all. The end date is compared with the start's own date in
+// --timezone, so the start date itself is still allowed, as it is by the API.
 func TestSchedulesCreateRejectsAnEndDateBeforeTheStart(t *testing.T) {
 	srv, got := stub(t, `{}`)
 	base := append(append([]string{}, scheduleBase...),

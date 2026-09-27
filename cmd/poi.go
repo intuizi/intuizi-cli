@@ -346,12 +346,29 @@ a true in the file). stderr notes each flag that replaces a different
 value in the file.
 
 Each listed location is matched to the brand's existing POIs on --key
-(the API uses gps-coordinates when it is omitted). A location that matches
-is never added a second time: --update changes the POI it matches, and
-without --update that POI is left as it is. --remove archives the brand's
-existing POIs that no listed location matches and keeps the matched ones, so
-list every location the brand should keep, not the ones to drop. Both take
-effect when Intuizi approves the submission, and both need --key.
+(the API uses gps-coordinates when it is omitted, or null in a --list body).
+A location that matches is never added a second time: --update changes the
+POI it matches, and without --update that POI is left as it is. A location
+that matches nothing is added as a new POI.
+
+--remove keeps the POIs the listed locations match and archives every other
+POI the brand had. It is applied once, over the whole submission, so list
+every location the brand should keep, in one submission, not the ones to
+drop. A --remove submission whose locations carry values for --key but match
+no POI archives every POI the brand had. One that holds no location at all,
+or in which no location has a value for --key (a location_id, store_id,
+master_id, or external_id, a blank value counting as none), archives
+nothing. --update and --remove take effect when Intuizi approves the
+submission, and both need --key. If an approval is interrupted part way, its
+locations are still imported but --remove is not applied. Send the
+submission again to apply it.
+
+With --key location-id, a location matches the brand's POI whose id is its
+location_id, the id column of 'intuizi poi locations list'. A location_id
+must be the id of one of your POIs, or the API rejects the submission (an
+--upload-reference file is checked only in its first 64 KB). A location
+with no location_id, or one that is not the id of one of the brand's POIs,
+is added as a new POI.
 
 Only the --upload-reference form sends an Idempotency-Key, so only it can be
 retried safely with --idempotency-key; the API reads none on the --file and
@@ -464,10 +481,11 @@ retried safely with --idempotency-key; the API reads none on the --file and
 	flags.BoolVar(&update, "update", false, "Update the brand's existing POIs that a listed location matches")
 	flags.BoolVar(&remove, "remove", false,
 		"Archive the brand's existing POIs that no listed location matches (matched\n"+
-			"ones are kept); applied when Intuizi approves the submission")
+			"ones are kept), once, over the whole submission, when Intuizi approves it;\n"+
+			"not applied when no location has a value for --key")
 	flags.StringVar(&key, "key", "",
 		"How listed locations are matched to the brand's existing POIs:\n"+
-			matchKeyList+"\n(the API uses gps-coordinates when omitted)")
+			matchKeyList+"\n(the API uses gps-coordinates when omitted, or null in a --list body)")
 
 	return cmd
 }

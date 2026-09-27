@@ -264,9 +264,11 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 			if err != nil {
 				return usageErr("--end-date must be YYYY-MM-DD, not " + endDate)
 			}
-			// Neither the API nor the run count rejects an earlier end date:
-			// the gap is counted forward from --start, so the schedule would
-			// run for that many days instead of not at all.
+			// The API rejects an earlier end date too, with a 422 on
+			// recurrence.ending.end_date; checking here names the flag
+			// before anything is sent. It used to accept one and count the
+			// gap forward from --start, so the schedule ran for that many
+			// days instead of not at all.
 			if first := startAt.Format(dateLayout); end.Format(dateLayout) < first {
 				return usageErr(fmt.Sprintf("--end-date %s is before the --start date %s; "+
 					"the schedule ends on or after the day it starts", endDate, first))
