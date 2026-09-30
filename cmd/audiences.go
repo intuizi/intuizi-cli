@@ -118,6 +118,23 @@ after the build, and it requires additional permissions which need to be
 approved by your Account Manager; a 403 means they are not enabled for the
 account.
 
+--filter applies the POI quality filters, none by default. anomalous_devices
+drops devices on Intuizi's list of known bad devices, anomalous_pois drops
+every visit to locations flagged as anomalous, and strict_gps (GPS Strict
+Filtering) drops every visit at a spot where more than 500 devices from one
+signal provider were seen at that location in the same month: city-center
+defaults and rounded coordinates reported for many devices at once. Use
+strict_gps for address-level lists such as offices and small businesses, and
+leave it off for stores, malls and venues, where real crowds gather on one
+spot and it removes them too. Audience Manager turns on anomalous_devices and
+anomalous_pois by default, so pass both to match an audience built there.
+--filter applies to POI only, and repeats for more than one:
+
+    intuizi audiences create --type poi --brand "Example Offices" \
+      --country USA --start-date 2026-06-01 --end-date 2026-08-31 \
+      --filter anomalous_devices --filter anomalous_pois --filter strict_gps \
+      --name "Example Offices - summer" --dry-run
+
 To see how many devices the audience would hold before building it, run the
 same command line as 'intuizi audiences estimate create'.
 
@@ -178,6 +195,7 @@ type audienceRequest struct {
 	states     []string
 	cities     []string
 	zipcodes   []string
+	filters    []string
 	frequency  bool
 }
 
@@ -213,6 +231,10 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 		"City name (repeat the flag for more than one)")
 	f.StringArrayVar(&r.zipcodes, "zipcode", nil,
 		"Zip code (repeat the flag for more than one)")
+	f.StringArrayVar(&r.filters, "filter", nil,
+		"POI quality filter: anomalous_devices, anomalous_pois or strict_gps\n"+
+			"(repeat the flag for more than one; none by default)")
+	completeValues(cmd, "filter", poiFilters)
 	f.BoolVar(&r.frequency, "frequency", false,
 		"Run the type's frequency analysis (POI, Apps or WebDomain), which\n"+
 			"'activations preview' and --freq-min need; it cannot be added later")
@@ -288,6 +310,9 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 		}
 		return audienceBody{}, usageErr(flag + " applies to --type POI, not " + dsType + brandHint(dsType))
 	}
+	if len(r.filters) > 0 && dsType != "POI" {
+		return audienceBody{}, usageErr("--filter applies to --type POI, not " + dsType)
+	}
 	// Before client(): a type with no category catalog is a usage error
 	// whether or not there is a token, and so is one with no frequency
 	// analysis.
@@ -311,10 +336,15 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 	}{
 		{"brand", r.brands}, {"brand-all", r.brandAll}, {"category", r.categories}, {"provider", r.providers},
 		{"country", r.countries}, {"state", r.states}, {"city", r.cities}, {"zipcode", r.zipcodes},
+		{"filter", r.filters},
 	} {
 		if err := nonEmpty(v.flag, v.values...); err != nil {
 			return audienceBody{}, err
 		}
+	}
+	filters, err := canonicalFilters(r.filters)
+	if err != nil {
+		return audienceBody{}, err
 	}
 	// The API requires a country on Origin, and its geography is the
 	// whole filter; a body without one is a 422.
@@ -329,7 +359,7 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 	}
 	ctx := cmd.Context()
 
-	ds := audienceDataset{Type: dsType, StartDate: r.startDate, EndDate: r.endDate}
+	ds := audienceDataset{Type: dsType, StartDate: r.startDate, EndDate: r.endDate, Filters: filters}
 
 	for _, b := range r.brands {
 		id, err := resolveOrID(ctx, c, brandsPath, "--brand", b, "brands")
@@ -428,7 +458,7 @@ func brandHint(dsType string) string {
 var audienceFields = []string{
 	"type", "name", "start-date", "end-date",
 	"brand", "brand-all", "category",
-	"provider", "country", "state", "city", "zipcode", "frequency",
+	"provider", "country", "state", "city", "zipcode", "filter", "frequency",
 }
 
 // audienceRequired is the minimum for a single dataset.

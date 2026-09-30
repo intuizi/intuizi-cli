@@ -171,6 +171,9 @@ permissions - but an estimate never runs an analysis, so it changes neither
 the figures nor recipe_hash. It is there so the command line that builds the
 audience can be estimated unchanged.
 
+--filter is part of the recipe: the filters change both the figures and
+recipe_hash, so estimate with the ones the audience will be built with.
+
 An estimate runs as long as a real build and comes back pending, with no
 figures. Add --wait to block until it reads completed, blocked or failed,
 with --timeout to bound it (default 60m). completed exits 0 with the figures

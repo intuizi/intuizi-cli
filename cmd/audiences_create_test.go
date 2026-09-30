@@ -457,3 +457,84 @@ func TestAudiencesCreateFrequencyIsABodyFlag(t *testing.T) {
 		t.Errorf("should cost no round trip, got %v", got.paths)
 	}
 }
+
+// --filter carries the POI quality filters into the dataset: lower-cased, in
+// the order given, a repeat collapsed. estimate create shares the flags, so
+// its body - and so its recipe_hash - matches the create's.
+func TestAudiencesCreateFilterReachesThePOIDataset(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+	}{
+		{"create", audiencesCreateCommand},
+		{"estimate", estimateCreateCommand},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, providersPOI)
+
+			body := dryRunBody(t, tc.cmd(), srv, append(append([]string(nil), poiFlags...),
+				"--filter", "strict_gps", "--filter", "ANOMALOUS_DEVICES", "--filter", "strict_gps")...)
+
+			raw, _ := json.Marshal(firstDataset(t, body)["filters"])
+			if want := `["strict_gps","anomalous_devices"]`; string(raw) != want {
+				t.Errorf("filters = %s, want %s", raw, want)
+			}
+		})
+	}
+}
+
+// Without --filter the dataset has no filters key at all, so every body the
+// flags built before it existed, and its recipe_hash, stays the same.
+func TestAudiencesCreateWithoutFilterSendsNoFiltersKey(t *testing.T) {
+	srv, _ := stub(t, providersPOI)
+
+	body := dryRunBody(t, audiencesCreateCommand(), srv, poiFlags...)
+
+	if _, ok := firstDataset(t, body)["filters"]; ok {
+		t.Errorf("filters sent without --filter: %v", body)
+	}
+}
+
+// The filters exist on POI datasets only, and the API rejects them on any
+// other type. Refused before anything is read, with no token too, like --brand.
+func TestAudiencesCreateFilterRefusedOnOtherTypes(t *testing.T) {
+	err := runLoggedOut(t, audiencesCreateCommand(), "--type", "ctv", "--name", "x",
+		"--start-date", "2026-09-02", "--end-date", "2026-09-09", "--country", "USA", "--filter", "strict_gps")
+
+	wantUsageErr(t, err, "--filter", "POI", "CTV")
+}
+
+// An unknown value is refused before anything is read, naming the three the
+// API takes. gps_only is not one of them on a POI dataset, and the values are
+// the API's own spelling, so strict-gps is refused too.
+func TestAudiencesCreateFilterRejectsAnUnknownValue(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  []string
+	}{
+		{"gps_only", []string{"--filter", "gps_only", "anomalous_devices", "anomalous_pois", "strict_gps"}},
+		{"strict-gps", []string{"--filter", "strict-gps", "strict_gps"}},
+		{" ", []string{"--filter", "empty"}},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			err := runLoggedOut(t, audiencesCreateCommand(),
+				append(append([]string(nil), poiFlags...), "--filter", tc.value)...)
+
+			wantUsageErr(t, err, tc.want...)
+		})
+	}
+}
+
+// A --file body carries its own filters, so the flag is refused with it rather
+// than silently dropped.
+func TestAudiencesCreateFilterIsABodyFlag(t *testing.T) {
+	srv, got := stub(t, created)
+
+	_, _, err := run(t, audiencesCreateCommand(), srv,
+		"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`), "--filter", "strict_gps")
+
+	wantUsageErr(t, err, "--file", "--filter")
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
