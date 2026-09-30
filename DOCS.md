@@ -304,6 +304,7 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--city` | city name, repeatable | `reference common cities --states CA` |
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
+| `--filter` | POI quality filter, repeatable: `anomalous_devices`, `anomalous_pois` or `strict_gps`; POI only, none by default | - |
 | `--frequency` | boolean: run the type's frequency analysis; POI, Apps and WebDomain only | - |
 | `--dry-run` `--wait` `--timeout` | - | - |
 
@@ -349,6 +350,28 @@ Account Manager: a 403 means they are not enabled for the account. The
 day-part variant (`frequency_day_part`) needs `--file`, and cannot be
 previewed. This is not `schedules create --frequency`, which sets how often a
 schedule runs.
+
+`--filter` sends the POI quality filters, the POI filter list in Audience
+Manager, in the dataset's `filters` field. None apply unless given.
+`anomalous_devices` drops devices on Intuizi's list of known bad devices,
+`anomalous_pois` drops every visit to locations flagged as anomalous, and
+`strict_gps` (GPS Strict Filtering) drops every visit at a spot where more than
+500 devices from one signal provider were seen at that location in the same
+month: city-center defaults and rounded coordinates reported for many devices
+at once. Use `strict_gps` for address-level lists such as offices and small
+businesses. Leave it off for stores, malls and venues, where real crowds
+gather on one spot and it removes them too. Audience Manager turns on
+`anomalous_devices` and `anomalous_pois` by default, so pass both to match an
+audience built there. Values are case-insensitive and a repeat is sent once.
+An unknown value, or `--filter` on any type but POI, is refused before
+anything is sent, exit 2.
+
+```bash
+intuizi audiences create --type poi --brand "Example Offices" --country USA \
+  --start-date 2026-06-01 --end-date 2026-08-31 \
+  --filter anomalous_devices --filter anomalous_pois --filter strict_gps \
+  --name "Example Offices - summer" --dry-run
+```
 
 `--type origin` targets devices by their home location rather than the places
 they visited, so its only filters are geographic. `--country` is required,
@@ -569,7 +592,9 @@ creating it. Nothing appears in Audience Manager, and no export, cohort,
 schedule or activation follows. Swapping `estimate create` for `create` in the
 same command line builds the audience that was estimated. `--frequency` is
 accepted for that reason, and checked as on create, but an estimate never runs
-an analysis, so it changes neither the figures nor `recipe_hash`.
+an analysis, so it changes neither the figures nor `recipe_hash`. `--filter` is
+part of the recipe: the filters change both, so estimate with the ones the
+audience will be built with.
 
 ```bash
 intuizi audiences estimate create \

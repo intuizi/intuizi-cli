@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -289,6 +290,20 @@ func canonicalType(t string) (string, error) {
 	return "", usageErr("unknown --type " + t + "; one of " + strings.Join(valid, ", "))
 }
 
+// canonicalFilters makes --filter case-insensitive, drops a repeated value and
+// rejects one the API does not take, before anything is sent.
+func canonicalFilters(values []string) ([]string, error) {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		canon := strings.ToLower(strings.TrimSpace(v))
+		if !slices.Contains(poiFilters, canon) {
+			return nil, usageErr("unknown --filter " + v + "; one of " + strings.Join(poiFilters, ", "))
+		}
+		out = append(out, canon)
+	}
+	return dedupe(out), nil
+}
+
 // resolveAll backs --brand-all: every match, where resolveOne insists on one.
 // A multi-page catalog is refused rather than quietly taking the first page.
 func resolveAll(ctx context.Context, c *api.Client, path, search, what string) ([]any, error) {
@@ -340,6 +355,7 @@ type audienceDataset struct {
 	IABCategoryCodes []any             `json:"iab_category_codes,omitempty"`
 	SignalProviders  []any             `json:"signal_providers,omitempty"`
 	Location         *audienceLocation `json:"location,omitempty"`
+	Filters          []string          `json:"filters,omitempty"`
 }
 
 // audienceBody is the single-dataset payload; two datasets go through --file.
@@ -359,6 +375,14 @@ var frequencyAnalyses = map[string]string{
 	"Apps":      "apps_frequency",
 	"WebDomain": "web_frequency",
 }
+
+// poiFilters are the values --filter takes: the POI quality filters Create
+// Audience accepts in a POI dataset's "filters", in the API's own spelling.
+// anomalous_devices drops known bad devices, anomalous_pois drops visits to
+// locations flagged as anomalous, and strict_gps (GPS Strict Filtering) drops
+// every visit at a spot where more than 500 devices from one signal provider
+// were seen at that location in the same month.
+var poiFilters = []string{"anomalous_devices", "anomalous_pois", "strict_gps"}
 
 // dateLayout is the payload's format. The summary "dataset" field renders
 // MM/DD/YYYY on read; normalized_payload echoes this one.
