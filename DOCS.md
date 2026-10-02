@@ -313,8 +313,8 @@ flags build POI, Apps, WebDomain, CTV, AffinityTransactions, Deidentified and
 Origin. Cohorts, Demographics and ProfileAttributes are refused before
 anything is sent, exit 2, and go through `--file`: each requires a field no
 flag writes (a `cohort_id`, at least one demographic filter, or
-`profile_attributes` rows or `profile_attribute_groups`), and Demographics also rejects the dates and signal
-providers the flags always send.
+`profile_attributes` rows or `profile_attribute_groups`), and Demographics
+also rejects the dates and signal providers the flags always send.
 
 `--category` resolves against a different catalog for each type, and the
 resolved ids go into a different payload field:
