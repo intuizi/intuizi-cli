@@ -251,7 +251,7 @@ var datasetTypes = map[string]string{
 var fileOnlyTypes = map[string]string{
 	"Cohorts":           "it needs a cohort_id, which no flag writes",
 	"Demographics":      "it needs at least one demographic filter (genders, ages, marital_statuses or incomes), which no flag writes, and it rejects the dates and signal providers the flags always send",
-	"ProfileAttributes": "it needs profile_attributes rows (category_id, key and value_ids), which no flag writes",
+	"ProfileAttributes": "it needs profile_attributes rows or profile_attribute_groups (category_id, key and value_ids), which no flag writes",
 }
 
 // flagTypes are the --type values the flag path builds: every dataset type

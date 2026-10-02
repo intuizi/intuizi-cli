@@ -100,7 +100,7 @@ Two datasets need an operator, and refine, crossvisitation and crosspurchase
 are nested, so those are passed whole instead. So are the Cohorts,
 Demographics and ProfileAttributes types, which the flags refuse before
 anything is sent: they require fields no flag writes (a cohort_id, a
-demographic filter, profile_attributes rows), and Demographics also rejects
+demographic filter, profile_attributes rows or profile_attribute_groups), and Demographics also rejects
 the dates and signal providers the flags always send. The same goes for any
 other field no flag writes, such as project_id, POI locations, DMAs, the
 day-part frequency analysis and datastreams. The file is forwarded untouched,
