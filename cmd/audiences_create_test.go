@@ -352,7 +352,7 @@ func TestAudiencesCreateRefusesTheTypesFlagsCannotBuild(t *testing.T) {
 	for typ, field := range map[string]string{
 		"cohorts":           "cohort_id",
 		"Demographics":      "demographic filter",
-		"PROFILEATTRIBUTES": "profile_attributes",
+		"PROFILEATTRIBUTES": "profile_attributes rows or profile_attribute_groups",
 	} {
 		for _, args := range [][]string{
 			{"--type", typ},
