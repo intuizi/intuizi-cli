@@ -296,8 +296,10 @@ A separate `package` job runs a goreleaser snapshot on every pull request,
 checks that the rendered Homebrew formula parses, builds the npm packages from
 the snapshot, installs the launcher from the tarballs and runs it. It also
 runs the launcher's own tests (`node --test npm/cli/test/launcher.test.mjs`),
-which check that exit codes and SIGTERM pass through it. Packaging breaks on
-the PR that causes them, not on the release tag.
+which check that exit codes and SIGTERM pass through it, and the tests of the
+release's npm step (`node --test npm/test/publish.test.mjs`), which run
+`npm/publish.sh` against a fake npm. Packaging breaks on the PR that causes
+them, not on the release tag.
 
 `.github/workflows/codeql.yml` runs CodeQL over the Go code on every pull
 request and weekly. Every action in every workflow is pinned to a commit rather
@@ -326,11 +328,13 @@ order:
    secret; it can write to that one repository and nothing else. A prerelease
    tag such as `v0.2.0-rc1` gets a GitHub Release but leaves the formula alone.
 3. **npm**: `npm/build.mjs` turns the release binaries into `@intuizi/cli` plus
-   six `@intuizi/cli-<os>-<cpu>` platform packages and publishes them, platform
-   packages first. A version below 0.1.0 is built but not published, so the
-   0.0.x tags that exercise this pipeline cannot put a package on the registry
-   before the repositories are public. It needs an npm automation token in the `NPM_TOKEN` secret;
-   without one it builds the packages and stops with a warning. A prerelease
+   six `@intuizi/cli-<os>-<cpu>` platform packages, and `npm/publish.sh`
+   publishes them by trusted publishing, platform packages first. It is all
+   seven or nothing: the script asks the registry about every package before
+   it uploads any (see
+   [How npm publishing is authorised](#how-npm-publishing-is-authorised)). A
+   version below 0.1.0 is built but not published, so the 0.0.x tags that
+   exercise this pipeline cannot put a package on the registry. A prerelease
    version is published under the `next` dist-tag, never `latest`. The job is
    idempotent, so re-running it after a partial publish finishes the set.
 
@@ -360,7 +364,8 @@ git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
 ```
 
 Then run the manual `brew-smoke` workflow, which installs the formula on clean
-macOS and Linux runners and checks the reported version.
+macOS and Linux runners and checks the reported version, and `npm-smoke`, which
+does the same for `npm install -g @intuizi/cli` on Windows, macOS and Linux.
 
 Test the packaging locally without publishing anything. Needs syft on PATH,
 which the snapshot shells out to for the SBOMs (`brew install syft`):
@@ -378,22 +383,47 @@ goreleaser v2, which the workflow pins.
 
 #### How npm publishing is authorised
 
-Today, with a granular access token in the `NPM_TOKEN` secret, scoped to the
-`@intuizi` packages and nothing else. Every publish also carries provenance, so
-a tarball on the registry can be traced back to the commit and the run that
-built it.
+By trusted publishing: there is no npm token. Each of the seven packages has a
+trusted publisher entry on npmjs.com naming this repository and `release.yml`,
+and the registry exchanges the release run's OIDC token for the right to
+publish that one package. Nothing can leak, expire or need rotating. Every
+upload also carries provenance, so a tarball on the registry can be traced back
+to the commit and the run that built it.
 
-That token is meant to be temporary. All seven packages are already registered
-to trust this repository's release workflow, which would remove the secret
-entirely, but the exchange fails for this repository: GitHub mints OIDC tokens
-with an immutable subject claim for repositories created after 15 July 2026,
-and the npm registry cannot yet validate that format, so it answers "package
-not found" ([npm/cli#9969](https://github.com/npm/cli/issues/9969)). The claim
-cannot be disabled. When npm fixes it, prove the exchange first with a
-throwaway workflow running `npm publish --loglevel verbose` against an
-already-published version - two releases failed by removing the token first.
-Only then drop `registry-url` and `NODE_AUTH_TOKEN`, revoke the token and
-delete the secret.
+`npm/publish.sh` asks the registry about every package before it uploads any:
+npm attempts the exchange before every publish, a dry one included, and a dry
+run uploads nothing. If the registry refuses one, the job fails with nothing
+uploaded and names the package with the registry's reason. "package not found"
+means the package has no entry that matches this workflow. Add one under the
+package's Settings > Trusted Publisher on npmjs.com:
+
+- Publisher: GitHub Actions
+- Organization or user: `intuizi`
+- Repository: `intuizi-cli`
+- Workflow filename: `release.yml`
+- Environment: none
+
+or from a terminal, with npm 11.5.1 or later:
+
+```bash
+npm trust github @intuizi/cli-linux-x64 --file release.yml --repo intuizi/intuizi-cli --allow-publish
+```
+
+Either way npm asks for 2FA. Then re-run the job: it leaves alone whatever is
+already on the registry.
+
+To see how a version was published, ask the registry who published it. A
+trusted publisher shows as GitHub Actions, anything else as a person:
+
+```bash
+npm view @intuizi/cli _npmUser    # GitHub Actions <npm-oidc-no-reply@github.com>
+```
+
+Two things follow from the entries being per package and bound to the
+workflow's filename. Renaming `release.yml` breaks publishing until every entry
+is recreated. And npm only lets a package that already exists have an entry, so
+a new platform package has to be published once by hand before the workflow can
+publish it.
 
 ## License
 

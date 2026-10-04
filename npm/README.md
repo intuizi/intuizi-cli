@@ -2,11 +2,16 @@
 
 `build.mjs` turns goreleaser's `dist/` into the seven npm packages described
 at the top of that file: `@intuizi/cli` plus one binary-only package per
-platform. The release workflow runs it after goreleaser and publishes the
-result; `cli/` holds the launcher and README that go into `@intuizi/cli`.
+platform. The release workflow runs it after goreleaser and hands the result
+to `publish.sh`, which publishes it by trusted publishing: all seven packages
+or none, with no npm token. `cli/` holds the launcher and README that go into
+`@intuizi/cli`.
 
 `cli/test/` tests the launcher against a fake platform package, with no
 build needed: `node --test npm/cli/test/launcher.test.mjs`.
+
+`test/` tests `publish.sh` against a fake `npm` that keeps a registry in a
+file, so nothing is uploaded: `node --test npm/test/publish.test.mjs`.
 
 To try it locally against a snapshot build:
 
