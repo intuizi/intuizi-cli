@@ -419,6 +419,11 @@ trusted publisher shows as GitHub Actions, anything else as a person:
 npm view @intuizi/cli _npmUser    # GitHub Actions <npm-oidc-no-reply@github.com>
 ```
 
+npm also prints a notice on every publish: "npm tokens that bypass 2FA are
+being restricted for account changes and direct publishing". It is harmless
+here. The registry attaches it even to requests that carry no token at all, so
+it says nothing about how a publish was authorised; the publisher above does.
+
 Two things follow from the entries being per package and bound to the
 workflow's filename. Renaming `release.yml` breaks publishing until every entry
 is recreated. And npm only lets a package that already exists have an entry, so
