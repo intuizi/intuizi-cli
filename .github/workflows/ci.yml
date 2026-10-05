@@ -85,6 +85,13 @@ jobs:
       - name: npm launcher tests
         run: node --test npm/cli/test/launcher.test.mjs
 
+      # The release workflow's npm step, run against a fake npm: that it
+      # publishes all seven packages or none, and that a re-run finishes a
+      # release without touching what is already out. Otherwise only a tag
+      # would exercise it.
+      - name: npm publish script tests
+        run: node --test npm/test/publish.test.mjs
+
       - run: node npm/build.mjs --dist dist --out dist/npm
 
       - name: npm launcher installs from the tarballs and runs the binary

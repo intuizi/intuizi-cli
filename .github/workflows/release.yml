@@ -97,40 +97,34 @@ jobs:
 
   # Its own job so a registry failure can be re-run on its own: by then the
   # GitHub Release and the formula are already out and must not be redone.
-  # Publishing is skipped, not failed, while the NPM_TOKEN secret is missing,
-  # so the GitHub Release and Homebrew keep working before npm is set up.
   npm:
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # id-token: write is for provenance, which ties each published tarball to
-    # this commit and this run.
+    # id-token: write is the whole authorisation: there is no npm token. Each
+    # of the seven packages has a trusted publisher entry on npmjs.com naming
+    # this repository and this workflow file, and the registry exchanges the
+    # run's OIDC token for the right to publish that one package. The same
+    # permission signs provenance, which ties each tarball to this commit and
+    # this run.
     #
-    # It is also what trusted publishing would use, and every package here is
-    # already registered to trust this workflow file. That path does not work
-    # yet: repositories created after 15 July 2026 mint OIDC tokens with
-    # GitHub's immutable subject claim, which the npm registry cannot validate,
-    # so the exchange is refused with "package not found" (npm/cli#9969). This
-    # repository was created on 20 July 2026 and the claim cannot be turned
-    # off. Until npm fixes it, publishing uses the NPM_TOKEN secret, which
-    # expires on 17 December 2026. Delete the token, the secret and this
-    # paragraph once the exchange succeeds.
+    # The entries are bound to this file's name, so renaming it breaks
+    # publishing until every entry is recreated.
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # registry-url writes the .npmrc line that reads NODE_AUTH_TOKEN. When
-      # trusted publishing starts working, this option and the token below both
-      # come out: an empty NODE_AUTH_TOKEN still counts as configured
-      # authentication and silently suppresses the OIDC exchange.
+      # registry-url is how npm's own trusted publishing setup configures the
+      # job. It writes an .npmrc holding a placeholder token, which the
+      # exchanged one replaces for the upload.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      # Newer than Node 22 ships, for the publishing behaviour this job relies on.
+      # Newer than Node 22 ships: trusted publishing needs npm 11.5.1.
       - run: npm install -g npm@^11
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -140,42 +134,7 @@ jobs:
 
       - run: node npm/build.mjs --dist dist --out dist/npm
 
+      # All seven packages or none: the script asks the registry about each one
+      # before it uploads any, and fails naming the ones the registry refuses.
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          version=$(node -p "require('./dist/npm/@intuizi/cli/package.json').version")
-
-          # Nothing below 0.1.0 reaches the registry. The 0.0.x tags exist to
-          # exercise this pipeline while both repositories are private, and a
-          # package published from one would carry a README whose every link
-          # 404s, on a version number npm will never let us reuse. v0.1.0 is
-          # the first public release, so this guard falls away on its own.
-          case "$version" in
-            0.0.*)
-              echo "::warning::$version is below 0.1.0, so the npm packages were built but not published"
-              exit 0
-              ;;
-          esac
-
-          # A prerelease must not become what a plain `npm install` resolves to.
-          tag=latest
-          case "$version" in *-*) tag=next ;; esac
-
-          # Idempotent so a re-run after a partial publish finishes the set
-          # instead of failing on the packages that already went out.
-          publish() {
-            local dir=$1 name
-            name=$(node -p "require('./$dir/package.json').name")
-            if [ -n "$(npm view "$name@$version" version 2>/dev/null)" ]; then
-              echo "$name@$version is already on the registry"
-              return
-            fi
-            (cd "$dir" && npm publish --access public --tag "$tag" --provenance)
-          }
-
-          # Platform packages first, so the launcher's optionalDependencies
-          # resolve the moment @intuizi/cli itself appears on the registry.
-          for dir in dist/npm/@intuizi/cli-*; do publish "$dir"; done
-          publish dist/npm/@intuizi/cli
+        run: npm/publish.sh dist/npm
