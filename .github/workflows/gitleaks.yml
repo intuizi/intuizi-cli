@@ -1,0 +1,34 @@
+name: gitleaks
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # scan every commit, not just the diff
+      - name: Install gitleaks 8.30.1 (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          V=8.30.1
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${V}/gitleaks_${V}_linux_x64.tar.gz"
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${V}/gitleaks_${V}_checksums.txt"
+          sha256sum --ignore-missing -c "gitleaks_${V}_checksums.txt"
+          tar -xzf "gitleaks_${V}_linux_x64.tar.gz" gitleaks
+          ./gitleaks version
+      - name: Scan full git history
+        run: ./gitleaks git . --redact --exit-code 1 --verbose --report-format json --report-path gitleaks-report.json
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
