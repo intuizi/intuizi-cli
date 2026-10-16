@@ -200,7 +200,7 @@ func login(cmd *cobra.Command, email, password string) error {
 		return err
 	}
 
-	_, _ = fmt.Fprintf(stderr, "Logged in to %s as %s\n", base, cfg.Email)
+	_, _ = fmt.Fprintf(stderr, "Logged in to %s as %s\n", displayURL(base), cfg.Email)
 	if heldHere {
 		reportReplaced(stderr, replaced, cfg.Email, dead)
 	}
@@ -252,12 +252,12 @@ func reportReplaced(w io.Writer, replaced, now string, dead bool) {
 // another: stderr, like the rest of login.
 func reportReuse(w io.Writer, base, email string) {
 	if email != "" {
-		_, _ = fmt.Fprintf(w, "Already logged in to %s as %s\n", base, email)
+		_, _ = fmt.Fprintf(w, "Already logged in to %s as %s\n", displayURL(base), email)
 		_, _ = fmt.Fprintln(w, "Pass --email to log in as another account, or run 'intuizi auth logout' "+
 			"first if you need a new token.")
 		return
 	}
-	_, _ = fmt.Fprintf(w, "Already logged in to %s (the account was not recorded for this token)\n", base)
+	_, _ = fmt.Fprintf(w, "Already logged in to %s (the account was not recorded for this token)\n", displayURL(base))
 	_, _ = fmt.Fprintln(w, "'intuizi auth login --email <address>' mints a token that records it; "+
 		"run 'intuizi auth logout' first if you need a new token.")
 }
@@ -456,12 +456,16 @@ func status(cmd *cobra.Command, verify bool) error {
 		}
 	}
 
-	_, _ = fmt.Fprintf(stdout, "Base URL: %s\n", base)
+	_, _ = fmt.Fprintf(stdout, "Base URL: %s\n", displayURL(base))
 
 	// Every other command refuses a plain-http console before sending, so a
 	// token is not reported as usable here, and --verify would send it in clear.
 	if err := checkBase(base); err != nil {
-		_, _ = fmt.Fprintln(stdout, "Token:    not checked (the console is plain http)")
+		reason := "the console is plain http"
+		if errors.Is(err, api.ErrBaseURLUnparsable) {
+			reason = "the console URL does not parse"
+		}
+		_, _ = fmt.Fprintf(stdout, "Token:    not checked (%s)\n", reason)
 		return err
 	}
 
@@ -476,7 +480,7 @@ func status(cmd *cobra.Command, verify bool) error {
 		// to this host; its account and expiry are another console's.
 		if err := otherConsole(cfg.BaseURL, base); err != nil {
 			_, _ = fmt.Fprintf(stdout, "Token:    none for this console (the stored one belongs to %s)\n",
-				trimURL(cfg.BaseURL))
+				displayURL(trimURL(cfg.BaseURL)))
 			return err
 		}
 		if source == config.SourceKeyring {

@@ -1169,3 +1169,20 @@ func TestPasswordFlagWarnsOnEveryOutcome(t *testing.T) {
 		})
 	}
 }
+
+// login names the console it logged in to, or reused a token for, without
+// the password written into its URL.
+func TestLoginDoesNotPrintAURLPassword(t *testing.T) {
+	srv, _ := fakeConsole(t, "tok", 200)
+	authEnv(t, strings.Replace(srv.URL, "http://", "http://bob:hunter2@", 1))
+
+	for _, step := range []string{"mint", "reuse"} {
+		_, errb, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "a@b.com")
+		if err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		if strings.Contains(errb, "hunter2") {
+			t.Errorf("%s: stderr repeats the URL's password: %q", step, errb)
+		}
+	}
+}

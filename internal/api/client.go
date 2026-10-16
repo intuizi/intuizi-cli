@@ -74,17 +74,21 @@ func New(baseURL, token string) *Client {
 func CheckBaseURL(base string) error {
 	u, err := url.Parse(base)
 	if err != nil {
-		return errors.New("the console URL does not parse; check --base-url, or the base_url " +
-			"stored by 'intuizi auth login'")
+		return ErrBaseURLUnparsable
 	}
 	if u.Scheme != "http" || isLoopback(u.Hostname()) {
 		return nil
 	}
+	// The URL offered is one to use, so it carries no userinfo at all.
 	secure := *u
-	secure.Scheme = "https"
+	secure.Scheme, secure.User = "https", nil
 	return fmt.Errorf("%s is plain http, which would send your credentials unencrypted; use %s",
-		strings.TrimRight(u.Redacted(), "/"), strings.TrimRight(secure.Redacted(), "/"))
+		strings.TrimRight(u.Redacted(), "/"), strings.TrimRight(secure.String(), "/"))
 }
+
+// ErrBaseURLUnparsable is CheckBaseURL's refusal of a console URL that does
+// not parse. It does not repeat the URL, which may carry a password.
+var ErrBaseURLUnparsable = errors.New("the console URL does not parse")
 
 // isLoopback reports a host that names this machine: localhost, or any address
 // in 127.0.0.0/8 or ::1.

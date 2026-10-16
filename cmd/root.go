@@ -88,22 +88,39 @@ var rootCmd = &cobra.Command{
 
 // checkBase refuses a plain-http console before anything is sent to it; the
 // api client refuses it again on every request. With no --base-url only a
-// stored value can be http, since the default is https, so that error also
-// names the command that replaces it. Checked where something is sent, not
-// with the flag, so 'auth logout' can still forget such a console's token.
+// stored value can be refused, since the default is https and a bad flag is
+// caught up front, so that error also says how to replace it. Checked where
+// something is sent, not with the flag, so 'auth logout' can still forget such
+// a console's token.
 func checkBase(base string) error {
 	err := api.CheckBaseURL(base)
 	if err == nil || baseURLFlag != "" {
 		return err
 	}
 	u, perr := url.Parse(base)
-	if perr != nil {
-		return err // the refusal already points at the stored base_url
+	if errors.Is(err, api.ErrBaseURLUnparsable) || perr != nil {
+		// Login would reuse the token over it, so the file is the fix.
+		where := "the config file"
+		if path, pathErr := config.Path(); pathErr == nil {
+			where = path
+		}
+		return fmt.Errorf("%w: it is the base_url stored in %s, so correct it there", err, where)
 	}
-	// No userinfo: the command is meant to be copied, password and all.
+	// No userinfo: the command is meant to be copied, and would carry the
+	// password with it.
 	u.Scheme, u.User = "https", nil
 	return fmt.Errorf("%w. It is the console stored by an earlier login: run "+
 		"'intuizi --base-url %s auth login' to replace it", err, strings.TrimRight(u.String(), "/"))
+}
+
+// displayURL is a console URL as printed: a password written into it is
+// masked, and one that does not parse is not repeated at all.
+func displayURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "(a URL that does not parse)"
+	}
+	return u.Redacted()
 }
 
 // client builds an authenticated client, or explains why it cannot.
@@ -148,7 +165,8 @@ func client() (*api.Client, error) {
 func otherConsole(stored, base string) error {
 	if stored = trimURL(stored); stored != "" && stored != trimURL(base) {
 		return fmt.Errorf("the stored token belongs to %s, not %s - run "+
-			"'intuizi auth login --base-url %s' or set %s", stored, base, base, config.EnvToken)
+			"'intuizi auth login --base-url %s' or set %s",
+			displayURL(stored), displayURL(base), displayURL(base), config.EnvToken)
 	}
 	return nil
 }

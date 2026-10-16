@@ -64,6 +64,23 @@ func TestCheckBaseURLRedactsAPassword(t *testing.T) {
 	if strings.Contains(err.Error(), "hunter2") {
 		t.Errorf("the refusal repeats the URL's password: %v", err)
 	}
+	// The https URL offered is one to use, so it carries no userinfo at all,
+	// not even a masked one.
+	if !strings.Contains(err.Error(), "use https://console.example.com") {
+		t.Errorf("the https URL offered should carry no userinfo: %v", err)
+	}
+}
+
+// A URL that does not parse is refused without repeating it, since it may
+// carry a password, and callers can tell this refusal from plain http.
+func TestUnparsableBaseURLIsNotRepeated(t *testing.T) {
+	err := CheckBaseURL("http://bob:hunter2@[::1")
+	if !errors.Is(err, ErrBaseURLUnparsable) {
+		t.Fatalf("err = %v, want ErrBaseURLUnparsable", err)
+	}
+	if strings.Contains(err.Error(), "hunter2") {
+		t.Errorf("the refusal repeats the URL's password: %v", err)
+	}
 }
 
 // Refused before anything is sent, on both send paths: a transport that

@@ -490,3 +490,42 @@ func TestBaseURLHelpStatesTheSchemeRule(t *testing.T) {
 		t.Errorf("--base-url help does not state the scheme rule:\n%s", res.stdout)
 	}
 }
+
+// A password written into a stored console URL is never printed: not in the
+// refusal, the hint, or the status lines, which reach CI logs.
+func TestStoredURLPasswordIsNeverPrinted(t *testing.T) {
+	for _, args := range [][]string{{"audiences", "list"}, {"auth", "status"}, {"auth", "status", "--verify"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			writeConfig(t, `{"base_url":"http://bob:hunter2@console.invalid","token":"tok"}`)
+			res := rootRun(t, args...)
+			if res.err == nil {
+				t.Fatal("a plain-http console was not refused")
+			}
+			for where, text := range map[string]string{"stdout": res.stdout, "stderr": res.stderr, "error": res.err.Error()} {
+				if strings.Contains(text, "hunter2") {
+					t.Errorf("%s repeats the URL's password: %q", where, text)
+				}
+			}
+			if !strings.Contains(res.err.Error(), "run 'intuizi --base-url https://console.invalid auth login'") {
+				t.Errorf("err = %v, want the replacing command without userinfo", res.err)
+			}
+		})
+	}
+}
+
+// A stored URL that does not parse is not called plain http, and the error
+// names the file that holds it, the one place it can be corrected.
+func TestStatusNamesAnUnparsableStoredURL(t *testing.T) {
+	writeConfig(t, `{"base_url":" https://console.invalid","token":"tok"}`)
+	res := rootRun(t, "auth", "status")
+	if res.code != 1 {
+		t.Fatalf("exit = %d, want 1 (err: %v)", res.code, res.err)
+	}
+	if !strings.Contains(res.stdout, "Token:    not checked (the console URL does not parse)") {
+		t.Errorf("stdout should give the parse failure as the reason:\n%s", res.stdout)
+	}
+	if res.err == nil || !strings.Contains(res.err.Error(), "does not parse") ||
+		!strings.Contains(res.err.Error(), "config.json") {
+		t.Errorf("err = %v, want the parse failure and the config file to correct", res.err)
+	}
+}
