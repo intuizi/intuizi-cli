@@ -86,12 +86,11 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-// checkBase refuses a plain-http console before anything is sent to it; the
-// api client refuses it again on every request. With no --base-url only a
-// stored value can be refused, since the default is https and a bad flag is
-// caught up front, so that error also says how to replace it. Checked where
-// something is sent, not with the flag, so 'auth logout' can still forget such
-// a console's token.
+// checkBase refuses a console URL before anything is sent to it; the api
+// client refuses it again on every request. Without --base-url the URL is the
+// stored one, since the default is https and always parses, so the error also
+// says how to fix the stored value. Checked where something is sent, not with
+// the flag, so 'auth logout' can still forget such a console's token.
 func checkBase(base string) error {
 	err := api.CheckBaseURL(base)
 	if err == nil || baseURLFlag != "" {
@@ -113,14 +112,14 @@ func checkBase(base string) error {
 		"'intuizi --base-url %s auth login' to replace it", err, strings.TrimRight(u.String(), "/"))
 }
 
-// displayURL is a console URL as printed: a password written into it is
-// masked, and one that does not parse is not repeated at all.
+// displayURL is a console URL as printed: as written, with a password in it
+// masked. One that does not parse is not repeated at all, and not tidied into
+// one that does, which would hide what is wrong with it.
 func displayURL(raw string) string {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
+	if _, err := url.Parse(raw); err != nil {
 		return "(a URL that does not parse)"
 	}
-	return u.Redacted()
+	return api.RedactURL(raw)
 }
 
 // client builds an authenticated client, or explains why it cannot.
@@ -164,9 +163,10 @@ func client() (*api.Client, error) {
 // host is named. An empty stored base predates per-console scoping.
 func otherConsole(stored, base string) error {
 	if stored = trimURL(stored); stored != "" && stored != trimURL(base) {
+		// The command carries no userinfo: it is meant to be copied.
 		return fmt.Errorf("the stored token belongs to %s, not %s - run "+
 			"'intuizi auth login --base-url %s' or set %s",
-			displayURL(stored), displayURL(base), displayURL(base), config.EnvToken)
+			displayURL(stored), displayURL(base), api.WithoutUserinfo(displayURL(base)), config.EnvToken)
 	}
 	return nil
 }

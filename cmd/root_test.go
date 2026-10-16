@@ -513,19 +513,65 @@ func TestStoredURLPasswordIsNeverPrinted(t *testing.T) {
 	}
 }
 
-// A stored URL that does not parse is not called plain http, and the error
-// names the file that holds it, the one place it can be corrected.
+// A stored URL that does not parse is not called plain http, is not printed
+// (it may carry a password, and a tidied copy would hide what is wrong with
+// it), and the error names the file that holds it, the one place it can be
+// corrected.
 func TestStatusNamesAnUnparsableStoredURL(t *testing.T) {
-	writeConfig(t, `{"base_url":" https://console.invalid","token":"tok"}`)
-	res := rootRun(t, "auth", "status")
-	if res.code != 1 {
-		t.Fatalf("exit = %d, want 1 (err: %v)", res.code, res.err)
+	// Named, not keyed by the URL: the subtest name becomes part of the temp
+	// dir, which the error prints.
+	for name, stored := range map[string]string{
+		"leading space":        " https://console.invalid",
+		"password, no ] in it": "http://bob:hunter2@[::1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeConfig(t, `{"base_url":"`+stored+`","token":"tok"}`)
+			res := rootRun(t, "auth", "status")
+			if res.code != 1 {
+				t.Fatalf("exit = %d, want 1 (err: %v)", res.code, res.err)
+			}
+			if !strings.Contains(res.stdout, "Base URL: (a URL that does not parse)") {
+				t.Errorf("stdout should not print the URL that does not parse:\n%s", res.stdout)
+			}
+			if !strings.Contains(res.stdout, "Token:    not checked (the console URL does not parse)") {
+				t.Errorf("stdout should give the parse failure as the reason:\n%s", res.stdout)
+			}
+			if res.err == nil || !strings.Contains(res.err.Error(), "does not parse") ||
+				!strings.Contains(res.err.Error(), "config.json") {
+				t.Errorf("err = %v, want the parse failure and the config file to correct", res.err)
+			}
+			if strings.Contains(res.stdout+res.stderr+res.err.Error(), "hunter2") {
+				t.Errorf("the URL's password was printed:\n%s%s%v", res.stdout, res.stderr, res.err)
+			}
+		})
 	}
-	if !strings.Contains(res.stdout, "Token:    not checked (the console URL does not parse)") {
-		t.Errorf("stdout should give the parse failure as the reason:\n%s", res.stdout)
-	}
-	if res.err == nil || !strings.Contains(res.err.Error(), "does not parse") ||
-		!strings.Contains(res.err.Error(), "config.json") {
-		t.Errorf("err = %v, want the parse failure and the config file to correct", res.err)
+}
+
+// The other-console refusal names both consoles as written, with any password
+// masked, so two spellings of one console never print alike, and the command
+// it offers carries no userinfo.
+func TestOtherConsoleMasksURLPasswords(t *testing.T) {
+	for _, args := range [][]string{{"audiences", "list"}, {"auth", "status"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			writeConfig(t, `{"base_url":"HTTPS://bob:hunter2@Console.Invalid/p","token":"tok"}`)
+			res := rootRun(t, append([]string{"--base-url", "https://eve:s3cret@other.invalid"}, args...)...)
+			if res.err == nil {
+				t.Fatal("another console's token was not refused")
+			}
+			printed := res.stdout + res.stderr + res.err.Error()
+			for _, secret := range []string{"hunter2", "s3cret"} {
+				if strings.Contains(printed, secret) {
+					t.Errorf("a URL's password %q was printed:\n%s", secret, printed)
+				}
+			}
+			for _, want := range []string{"HTTPS://bob:xxxxx@Console.Invalid/p", "https://eve:xxxxx@other.invalid"} {
+				if !strings.Contains(printed, want) {
+					t.Errorf("want %q, the console as written with its password masked:\n%s", want, printed)
+				}
+			}
+			if !strings.Contains(res.err.Error(), "--base-url https://other.invalid'") {
+				t.Errorf("err = %v, want the command offered without userinfo", res.err)
+			}
+		})
 	}
 }

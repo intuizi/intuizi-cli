@@ -100,7 +100,7 @@ func (c *Client) postMultipartRaw(ctx context.Context, path string, fields map[s
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return nil, nil, timeoutErr(filePath, multipartTimeout)
 			}
-			return nil, nil, fmt.Errorf("calling %s: %w", target, err)
+			return nil, nil, fmt.Errorf("calling %s: %w", RedactURL(target), err)
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {

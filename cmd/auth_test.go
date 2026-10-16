@@ -1174,15 +1174,26 @@ func TestPasswordFlagWarnsOnEveryOutcome(t *testing.T) {
 // the password written into its URL.
 func TestLoginDoesNotPrintAURLPassword(t *testing.T) {
 	srv, _ := fakeConsole(t, "tok", 200)
-	authEnv(t, strings.Replace(srv.URL, "http://", "http://bob:hunter2@", 1))
+	base := strings.Replace(srv.URL, "http://", "http://bob:hunter2@", 1)
+	path := authEnv(t, base)
 
-	for _, step := range []string{"mint", "reuse"} {
-		_, errb, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "a@b.com")
+	check := func(step string, args ...string) {
+		t.Helper()
+		_, errb, err := runAuth(t, authLoginCommand(), "pw\n", args...)
 		if err != nil {
 			t.Fatalf("%s: %v", step, err)
 		}
 		if strings.Contains(errb, "hunter2") {
 			t.Errorf("%s: stderr repeats the URL's password: %q", step, errb)
 		}
+		if !strings.Contains(errb, "bob:xxxxx@") {
+			t.Errorf("%s: stderr = %q, want the console named with its password masked", step, errb)
+		}
 	}
+	check("mint", "--email", "a@b.com")
+	check("reuse", "--email", "a@b.com")
+
+	// A token stored before accounts were recorded is reused with its own line.
+	storeAuthConfig(t, path, config.Config{BaseURL: base, Token: "old-token"})
+	check("reuse with no recorded account")
 }
