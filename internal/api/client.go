@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -62,6 +63,37 @@ func New(baseURL, token string) *Client {
 			},
 		},
 	}
+}
+
+// CheckBaseURL refuses plain http to any host but this machine. Every request
+// carries the bearer token, and the token mint the account password, so either
+// would cross the network readable to anyone on the path. Loopback is where a
+// local console runs. base is checked exactly as given, since the request is
+// built from that string, and one that does not parse is refused rather than
+// guessed at. Neither message repeats a password written into the URL.
+func CheckBaseURL(base string) error {
+	u, err := url.Parse(base)
+	if err != nil {
+		return errors.New("the console URL does not parse; check --base-url, or the base_url " +
+			"stored by 'intuizi auth login'")
+	}
+	if u.Scheme != "http" || isLoopback(u.Hostname()) {
+		return nil
+	}
+	secure := *u
+	secure.Scheme = "https"
+	return fmt.Errorf("%s is plain http, which would send your credentials unencrypted; use %s",
+		strings.TrimRight(u.Redacted(), "/"), strings.TrimRight(secure.Redacted(), "/"))
+}
+
+// isLoopback reports a host that names this machine: localhost, or any address
+// in 127.0.0.0/8 or ::1.
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // envelope is the shape every v2 response shares. Data is RawMessage because
@@ -137,6 +169,10 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 // envelope's data field, so callers can decode data as an object, a bare array
 // or a paginated wrapper - or hand the body straight to --json.
 func (c *Client) doRaw(ctx context.Context, method, path string, query url.Values, body any) ([]byte, json.RawMessage, error) {
+	if err := CheckBaseURL(c.BaseURL); err != nil {
+		return nil, nil, err
+	}
+
 	var payload []byte
 	if body != nil {
 		encoded, err := json.Marshal(body)

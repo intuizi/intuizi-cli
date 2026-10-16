@@ -74,6 +74,10 @@ func (c *Client) postMultipart(ctx context.Context, path string, fields map[stri
 //
 // Boolean form fields must be "1" or "0" - API rejects the string "true"
 func (c *Client) postMultipartRaw(ctx context.Context, path string, fields map[string]string, fileField, filePath string) ([]byte, json.RawMessage, error) {
+	if err := CheckBaseURL(c.BaseURL); err != nil {
+		return nil, nil, err
+	}
+
 	target := c.BaseURL + apiPrefix + path
 
 	// The API reads no Idempotency-Key on a multipart create - distinct files

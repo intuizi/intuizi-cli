@@ -62,9 +62,9 @@ func authLoginCommand() *cobra.Command {
 		Short: "Log in and store an API token",
 		Long: `Log in and store an API token.
 
-Prompts for an email and password unless --email and --password are given.
-When stdin is not a terminal the password is read from stdin, so it works
-unattended:
+On a terminal it prompts for the password, and for the email unless --email
+is given. When stdin is not a terminal the password is read from stdin, so it
+works unattended:
 
     echo "$PASSWORD" | intuizi auth login --email you@example.com
 
@@ -93,16 +93,29 @@ config file either way, so 'auth status' can name it. The token is not
 affected by logging in elsewhere, and 'auth logout' does not revoke it on the
 server - it only forgets it locally.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Said first: the password is already in shell history and the
+			// process list, whatever login goes on to do with it.
+			if cmd.Flags().Changed("password") {
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), passwordFlagWarning)
+			}
 			return login(cmd, email, password)
 		},
 	}
 
 	cmd.Flags().StringVar(&email, "email", "",
 		"Account email; prompted for on a terminal, and required to mint a\ntoken when stdin is not a terminal")
+	// Kept working for scripts that already pass it, and out of help so that
+	// nobody new picks it up.
 	cmd.Flags().StringVar(&password, "password", "",
 		"Account password (discouraged - visible in shell history; pipe it on stdin instead)")
+	_ = cmd.Flags().MarkHidden("password")
 	return cmd
 }
+
+// passwordFlagWarning is what --password costs: on most systems other users
+// can read a process's arguments, and the shell keeps them in its history.
+const passwordFlagWarning = "warning: --password leaves the password in shell history and the " +
+	"process list; pipe it on stdin instead. --password will be removed in a future release."
 
 // saveConfig stores what login minted and reports where the token went. A var
 // so a test can stand in for a credential store, which cmd tests never reach.
@@ -114,6 +127,13 @@ func login(cmd *cobra.Command, email, password string) error {
 	ctx := cmd.Context()
 	stderr := cmd.ErrOrStderr()
 	base := config.BaseURL(baseURLFlag)
+
+	// Before the stored token is checked or a password read: both would go to
+	// base. Left to the api client, a refused check would read as "can't tell"
+	// and the stored token would be reported as reused.
+	if err := checkBase(base); err != nil {
+		return err
+	}
 
 	// Before minting: a corrupt file or an unwritable directory would otherwise
 	// burn one of the account's ten token slots on every attempt and store
@@ -437,6 +457,13 @@ func status(cmd *cobra.Command, verify bool) error {
 	}
 
 	_, _ = fmt.Fprintf(stdout, "Base URL: %s\n", base)
+
+	// Every other command refuses a plain-http console before sending, so a
+	// token is not reported as usable here, and --verify would send it in clear.
+	if err := checkBase(base); err != nil {
+		_, _ = fmt.Fprintln(stdout, "Token:    not checked (the console is plain http)")
+		return err
+	}
 
 	switch source {
 	case config.SourceEnv:
