@@ -194,7 +194,7 @@ means something else changed it.
 
 | Command | What it does |
 | --- | --- |
-| `audiences` | list, show, create, delete, `lookalike create \| cancel`, and `estimate create \| show` to size one without creating it |
+| `audiences` | list, show, create, delete, `lookalike create \| cancel \| quote`, `estimate create \| show` to size one without creating it, and `quote` to price one in credits |
 | `activations` | Deliver a completed audience to an endpoint connection, and `preview` the devices a frequency filter would export |
 | `cohorts` | Build from a cloud file, an upload, or an audience |
 | `poi` | First-party locations, brands, categories and submissions |
@@ -204,6 +204,7 @@ means something else changed it.
 | `uploads` | `reserve` a presigned slot, or `put` to upload in one step |
 | `webhooks list` | Inspect webhook endpoints registered in the Console |
 | `usage` | Data-scan usage and limits for a calendar month (`--month YYYY-MM`, default the current month) |
+| `credits` | The credit balance of the current period, and `statement` for its entries. For an organization billed in credits |
 | `completion <shell>` | Shell completion script |
 
 Deletes prompt for confirmation unless `--yes`.

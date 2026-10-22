@@ -33,7 +33,8 @@ queued, in an Initiating state; add --wait to 'create' or 'show' to block until
 it reads Completed. An audience that is still building is not a failure.
 
 'audiences estimate create' takes the same flags or file and reports how many
-devices the audience would hold, without creating it.
+devices the audience would hold, without creating it. In an organization
+billed in credits, 'audiences quote' takes them too and prices the build.
 
 The ids and codes a payload is built from come from 'intuizi reference'.`,
 }
@@ -247,35 +248,46 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 // followed to its end with --wait. next is the hint a post without --wait
 // ends on.
 func (r *audienceRequest) send(cmd *cobra.Command, lc lifecycle, wait bool, timeout time.Duration, next string) error {
+	if r.file == "" && r.dryRun && wait {
+		return usageErr("--dry-run creates nothing, so there is nothing to --wait for")
+	}
+	body, printed, err := r.payload(cmd)
+	if err != nil || printed {
+		return err
+	}
+	return postBody(cmd, lc, body, wait, timeout, next)
+}
+
+// payload is the body the flags build, or the --file payload as it is. With
+// --dry-run it prints the body instead, and printed says so: there is nothing
+// left to send.
+func (r *audienceRequest) payload(cmd *cobra.Command) (body any, printed bool, err error) {
 	flags := cmd.Flags()
 
 	if r.file != "" {
 		if err := rejectBodyFlags(flags, audienceFields); err != nil {
-			return err
+			return nil, false, err
 		}
 		if r.dryRun {
-			return usageErr("--dry-run builds a body from flags; --file already has one")
+			return nil, false, usageErr("--dry-run builds a body from flags; --file already has one")
 		}
-		payload, err := readPayload(cmd, r.file)
+		raw, err := readPayload(cmd, r.file)
 		if err != nil {
-			return err
+			return nil, false, err
 		}
-		return postBody(cmd, lc, payload, wait, timeout, next)
+		return raw, false, nil
 	}
 
-	if r.dryRun && wait {
-		return usageErr("--dry-run creates nothing, so there is nothing to --wait for")
-	}
-	body, err := r.build(cmd)
+	built, err := r.build(cmd)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	if r.dryRun {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		return enc.Encode(body)
+		return nil, true, enc.Encode(built)
 	}
-	return postBody(cmd, lc, body, wait, timeout, next)
+	return built, false, nil
 }
 
 // build turns the flags into a single-dataset body. The checks that need no
@@ -571,7 +583,7 @@ Manager; a 403 means they are not enabled for the account.`,
 		},
 	}
 
-	lookalike.AddCommand(create, cancel)
+	lookalike.AddCommand(create, cancel, lookalikeQuoteCommand())
 	return lookalike
 }
 
@@ -620,26 +632,8 @@ var lookalikeSignals = map[string]bool{
 	"transactions": true, "profile_attributes": true,
 }
 
-func lookalikeCreateCommand() *cobra.Command {
-	var (
-		file        string
-		dryRun      bool
-		name        string
-		sourceID    int
-		targetSize  int
-		signals     []string
-		countries   []string
-		states      []string
-		excludeSeed bool
-		expandEIDs  bool
-		contrastID  int
-		notify      bool
-	)
-
-	cmd := &cobra.Command{
-		Use:   "create",
-		Short: "Train a lookalike audience, from flags or a payload file",
-		Long: `Train a lookalike audience.
+// lookalikeCreateLong is the help of 'audiences lookalike create'.
+const lookalikeCreateLong = `Train a lookalike audience.
 
 The body is one level deep, so it can be built from flags:
 
@@ -670,15 +664,48 @@ body instead, with --file:
 Training shows as status 108 Modeling, which is not terminal - follow it with
 'intuizi audiences show <id> --wait'. The Lookalike commands require
 additional permissions which need to be approved by your Account Manager; a
-403 means they are not enabled for the account.`,
-		Args: cobra.NoArgs,
+403 means they are not enabled for the account.`
+
+func lookalikeCreateCommand() *cobra.Command {
+	path := audiencesPrefix + "/create-lookalike"
+	next := "training - status 108 Modeling is not terminal; run " +
+		"'intuizi audiences show <id> --wait' to follow it"
+
+	return lookalikeBodyCommand("create", "Train a lookalike audience, from flags or a payload file", lookalikeCreateLong,
+		func(cmd *cobra.Command, body any) error {
+			return createBody(cmd, path, body, audienceColumns, next)
+		})
+}
+
+// lookalikeBodyCommand is a command that takes the Create Lookalike Audience
+// body, built from flags or read from --file, and hands it to send: the create
+// itself, or its quote. Both run the same checks on the same flags, so a quote
+// is always of the lookalike the same command line would train.
+func lookalikeBodyCommand(use, short, long string, send func(cmd *cobra.Command, body any) error) *cobra.Command {
+	var (
+		file        string
+		dryRun      bool
+		name        string
+		sourceID    int
+		targetSize  int
+		signals     []string
+		countries   []string
+		states      []string
+		excludeSeed bool
+		expandEIDs  bool
+		contrastID  int
+		notify      bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   use,
+		Short: short,
+		Long:  long,
+		Args:  cobra.NoArgs,
 	}
 
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		flags := cmd.Flags()
-		path := audiencesPrefix + "/create-lookalike"
-		next := "training - status 108 Modeling is not terminal; run " +
-			"'intuizi audiences show <id> --wait' to follow it"
 
 		if file != "" {
 			if err := rejectBodyFlags(flags, lookalikeFields); err != nil {
@@ -687,7 +714,11 @@ additional permissions which need to be approved by your Account Manager; a
 			if dryRun {
 				return usageErr("--dry-run builds a body from flags; --file already has one")
 			}
-			return createFromFile(cmd, path, file, audienceColumns, next)
+			payload, err := readPayload(cmd, file)
+			if err != nil {
+				return err
+			}
+			return send(cmd, payload)
 		}
 
 		if err := missingFlags(flags, lookalikeRequired, "a lookalike"); err != nil {
@@ -747,7 +778,7 @@ additional permissions which need to be approved by your Account Manager; a
 			enc.SetIndent("", "  ")
 			return enc.Encode(body)
 		}
-		return createBody(cmd, path, body, audienceColumns, next)
+		return send(cmd, body)
 	}
 
 	f := cmd.Flags()
@@ -811,6 +842,7 @@ func init() {
 		audiencesShowCommand(),
 		audiencesDeleteCommand(),
 		audiencesCreateCommand(), audiencesLookalikeCommand(), audiencesEstimateCommand(),
+		audiencesQuoteCommand(),
 	)
 	rootCmd.AddCommand(audiencesCmd)
 }

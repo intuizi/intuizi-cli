@@ -47,6 +47,29 @@ const usageEnvelope = `{"status":"success","code":200,"data":[
   "limit":{"data_scan_limit_formatted":"10 TB","percent_used":0,
    "over_limit":false,"enforced":true}}]}`
 
+// The credits reads, and a quote, as the API answers them (credit system 2.4).
+const creditsEnvelope = `{"status":"success","code":200,"data":{"plan":"access",
+ "period":{"type":"term","from":"2026-10-01","to":"2027-09-30","days":365,"days_elapsed":22,"percent_elapsed":6},
+ "available":4905,"used":95,"percent_used":1.9,"state":"ok","threshold":null,
+ "expiring_next":{"credits":4905,"expires_at":"2027-10-01 00:00:00"},"expired":0,
+ "pace":{"credits_per_day":4.3,"runs_out_on":"2029-11-30","lasts_the_period":true},
+ "by_operation":[{"operation_type":"audience_build","label":"Audience Build","credits":95}],
+ "by_user":[{"name":"Jane Doe","credits":95}]}}`
+
+const statementEnvelope = `{"status":"success","code":200,"data":{"period":{"from":"2026-10-01","to":"2027-09-30"},"items":[
+ {"id":2,"occurred_at":"2026-10-22T04:58:05+00:00","entry_type":"debit","entry":"Audience Build",
+  "audience":{"id":1347,"name":"Coffee Buyers NYC"},"user":"Jane Doe","credits":-95,"note":null},
+ {"id":1,"occurred_at":"2026-10-01T00:00:00+00:00","entry_type":"grant","entry":"Plan credits",
+  "audience":null,"user":null,"credits":5000,"note":null}],
+ "pagination":{"current_page":1,"per_page":25,"total":2,"last_page":1}}}`
+
+const quoteEnvelope = `{"status":"success","code":200,"data":[{"run_type":"audience","credits":1,"minimum":1,
+ "minimum_applies":true,"lines":[{"dataset":"Apps","days":30,"credits":null}],"not_charged":[],
+ "available":4905,"available_after":4904}]}`
+
+const lookalikeQuoteEnvelope = `{"status":"success","code":200,"data":[{"run_type":"lookalike","credits":120,"minimum":25,
+ "minimum_applies":false,"lines":[],"not_charged":[],"available":1000,"available_after":880}]}`
+
 // The POI submission index is not paginated: its data is a flat array, which
 // ReadList takes as a second shape.
 const poiListEnvelope = `{"status":"success","code":200,"data":[
@@ -161,6 +184,16 @@ func envelopeCases() []envelopeCase {
 			args: []string{"--month", "2026-06"}, path: "/api/v2/usage",
 			body: usageEnvelope, labels: []string{"2026-06", "Audience Build"},
 		},
+		{
+			name: "credits", cmd: creditsCommand,
+			path: "/api/v2/credits", body: creditsEnvelope,
+			labels: []string{"available", "runs_out_on", "Audience Build"},
+		},
+		{
+			name: "credits statement", cmd: creditsCommand,
+			args: []string{"statement"}, path: "/api/v2/credits/statement",
+			body: statementEnvelope, head: "id occurred_at entry audience user credits",
+		},
 
 		// --- createFromFile: the file-payload creates. A 422 here is the
 		// most likely failure a user meets, since it is what a bad audience
@@ -195,6 +228,17 @@ func envelopeCases() []envelopeCase {
 			name: "audiences estimate create", cmd: estimateCreateCommand,
 			payload: createPayload, path: "/api/v2/analyses/audiences/estimate",
 			body: createdEnvelope, labels: []string{"name"},
+		},
+		{
+			name: "audiences quote", cmd: audiencesQuoteCommand,
+			payload: createPayload, path: "/api/v2/analyses/audiences/quote",
+			body: quoteEnvelope, labels: []string{"credits", "available_after", "Apps"},
+		},
+		{
+			name: "audiences lookalike quote", cmd: audiencesLookalikeCommand,
+			args: []string{"quote"}, payload: createPayload,
+			path: "/api/v2/analyses/audiences/quote-lookalike",
+			body: lookalikeQuoteEnvelope, labels: []string{"credits", "available_after"},
 		},
 
 		// --- the reads with a view of their own.
