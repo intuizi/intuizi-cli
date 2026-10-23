@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -62,6 +63,84 @@ func New(baseURL, token string) *Client {
 			},
 		},
 	}
+}
+
+// CheckBaseURL refuses plain http to any host but this machine. Every request
+// carries the bearer token, and the token mint the account password, so either
+// would cross the network readable to anyone on the path. Loopback is where a
+// local console runs. base is checked exactly as given, since the request is
+// built from that string, and one that does not parse is refused rather than
+// guessed at. Neither message repeats a password written into the URL.
+func CheckBaseURL(base string) error {
+	u, err := url.Parse(base)
+	if err != nil {
+		return ErrBaseURLUnparsable
+	}
+	if u.Scheme != "http" || isLoopback(u.Hostname()) {
+		return nil
+	}
+	// The URL offered is one to use, so it carries no userinfo at all.
+	secure := *u
+	secure.Scheme, secure.User = "https", nil
+	return fmt.Errorf("%s is plain http, which would send your credentials unencrypted; use %s",
+		strings.TrimRight(RedactURL(base), "/"), strings.TrimRight(secure.String(), "/"))
+}
+
+// RedactURL masks a password written into raw and leaves every other byte as
+// written. url.URL.Redacted re-serialises instead, changing a scheme's case or
+// a path's escaping, so two spellings of one console could print alike.
+func RedactURL(raw string) string {
+	start, end, ok := userinfoSpan(raw)
+	if !ok {
+		return raw
+	}
+	user, _, hasPassword := strings.Cut(raw[start:end], ":")
+	if !hasPassword {
+		return raw
+	}
+	return raw[:start] + user + ":xxxxx" + raw[end:]
+}
+
+// WithoutUserinfo drops raw's userinfo, for a URL offered as something to run.
+func WithoutUserinfo(raw string) string {
+	start, end, ok := userinfoSpan(raw)
+	if !ok {
+		return raw
+	}
+	return raw[:start] + raw[end+1:] // and the @
+}
+
+// userinfoSpan locates raw's userinfo the way url.Parse reads it: after the
+// scheme's "//", up to the last @ before the path, query or fragment.
+func userinfoSpan(raw string) (start, end int, ok bool) {
+	i := strings.Index(raw, "://")
+	if i < 0 {
+		return 0, 0, false
+	}
+	start = i + len("://")
+	authority := raw[start:]
+	if j := strings.IndexAny(authority, "/?#"); j >= 0 {
+		authority = authority[:j]
+	}
+	at := strings.LastIndex(authority, "@")
+	if at < 0 {
+		return 0, 0, false
+	}
+	return start, start + at, true
+}
+
+// ErrBaseURLUnparsable is CheckBaseURL's refusal of a console URL that does
+// not parse. It does not repeat the URL, which may carry a password.
+var ErrBaseURLUnparsable = errors.New("the console URL does not parse")
+
+// isLoopback reports a host that names this machine: localhost, or any address
+// in 127.0.0.0/8 or ::1.
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // envelope is the shape every v2 response shares. Data is RawMessage because
@@ -137,6 +216,10 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 // envelope's data field, so callers can decode data as an object, a bare array
 // or a paginated wrapper - or hand the body straight to --json.
 func (c *Client) doRaw(ctx context.Context, method, path string, query url.Values, body any) ([]byte, json.RawMessage, error) {
+	if err := CheckBaseURL(c.BaseURL); err != nil {
+		return nil, nil, err
+	}
+
 	var payload []byte
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -181,7 +264,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, query url.Value
 				// saw a generated one.
 				c.warnf("Idempotency-Key used: %s; pass --idempotency-key %s to retry safely", key, key)
 			}
-			return nil, nil, fmt.Errorf("calling %s: %w", target, err)
+			return nil, nil, fmt.Errorf("calling %s: %w", RedactURL(target), err)
 		}
 
 		keep := claims && resp.StatusCode == http.StatusTooManyRequests && !fromRateLimiter(resp)
@@ -390,7 +473,7 @@ func readEnvelope(resp *http.Response, target string) ([]byte, json.RawMessage, 
 		return raw, nil, nil
 	}
 	if !parsed {
-		return raw, nil, fmt.Errorf("malformed JSON response from %s", target)
+		return raw, nil, fmt.Errorf("malformed JSON response from %s", RedactURL(target))
 	}
 	return raw, env.Data, nil
 }

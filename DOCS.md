@@ -35,6 +35,11 @@ Unattended, pass the email as a flag and pipe the password:
 echo "$PASSWORD" | intuizi auth login --email you@example.com
 ```
 
+`--password` still works for scripts that already pass it, but it is hidden
+from help and prints a warning whenever login runs with it: a command-line
+argument is kept in shell history and, on most systems, readable in the
+process list by other users. It will be removed in a future release.
+
 A token is bound to the console that minted it, and the config file stores the
 base URL and the account email alongside it. `auth login` reuses a stored token
 that still works for the same console and the same account, since accounts are
@@ -93,6 +98,19 @@ console that minted it, rather than send the credential to another host.
 `Token:    none for this console (the stored one belongs to <url>)`, no
 account or expiry, sends nothing even with `--verify`, and exits 1.
 
+A plain `http://` console is refused unless it is this machine (`localhost`,
+`127.0.0.0/8` or `::1`): the password and the token would travel
+unencrypted. Every command that would send something stops before sending,
+exits 1 and names the `https://` URL to use; `auth status` prints
+`Token:    not checked (the console is plain http)` and exits 1 the same way,
+`--verify` included. A plain-http console stored by an earlier version is
+refused the same way, and the error names the command that replaces it:
+`intuizi --base-url https://<console> auth login`. Logging in to that console
+sent the password and the token unencrypted, so revoke the old token at My
+Account > API Tokens and consider changing the password. If the token is in
+the OS credential store, `intuizi --base-url http://<console> auth logout`
+removes it there.
+
 `auth logout` forgets the account email with the token, and stays local: it
 never calls the server.
 
@@ -102,7 +120,7 @@ never calls the server.
 | --- | --- |
 | `--json` | Print the raw response envelope instead of a table |
 | `--quiet` | Print only ids on stdout, one per line, for shell scripts. Not with `--json` |
-| `--base-url` | Console base URL (default: the stored value, then production) |
+| `--base-url` | Console base URL (default: the stored value, then production). `https://`, or `http://` only to this machine |
 | `--idempotency-key` | Reuse one Idempotency-Key to retry a create whose outcome is unknown |
 | `--debug` | Print every HTTP request and response on stderr, with credentials redacted |
 

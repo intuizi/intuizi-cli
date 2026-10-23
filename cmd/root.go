@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"os/signal"
@@ -77,7 +76,6 @@ var rootCmd = &cobra.Command{
 			if err := config.ValidateBaseURL(baseURLFlag); err != nil {
 				return usageErr(err.Error())
 			}
-			warnPlainHTTP(cmd.ErrOrStderr(), baseURLFlag)
 		}
 		api.IdempotencyKey = idempotencyKeyFlag
 		// Stderr through the command, so a test can capture the transcript.
@@ -88,18 +86,40 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-// warnPlainHTTP says so once when the token is about to travel in clear to a
-// host that is not this machine. Loopback is where a local console runs.
-func warnPlainHTTP(w io.Writer, raw string) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Scheme != "http" {
-		return
+// checkBase refuses a console URL before anything is sent to it; the api
+// client refuses it again on every request. Without --base-url the URL is the
+// stored one, since the default is https and always parses, so the error also
+// says how to fix the stored value. Checked where something is sent, not with
+// the flag, so 'auth logout' can still forget such a console's token.
+func checkBase(base string) error {
+	err := api.CheckBaseURL(base)
+	if err == nil || baseURLFlag != "" {
+		return err
 	}
-	switch u.Hostname() {
-	case "localhost", "127.0.0.1", "::1":
-		return
+	u, perr := url.Parse(base)
+	if errors.Is(err, api.ErrBaseURLUnparsable) || perr != nil {
+		// Login would reuse the token over it, so the file is the fix.
+		where := "the config file"
+		if path, pathErr := config.Path(); pathErr == nil {
+			where = path
+		}
+		return fmt.Errorf("%w: it is the base_url stored in %s, so correct it there", err, where)
 	}
-	_, _ = fmt.Fprintf(w, "warning: %s is plain http - the token will travel unencrypted\n", raw)
+	// No userinfo: the command is meant to be copied, and would carry the
+	// password with it.
+	u.Scheme, u.User = "https", nil
+	return fmt.Errorf("%w. It is the console stored by an earlier login: run "+
+		"'intuizi --base-url %s auth login' to replace it", err, strings.TrimRight(u.String(), "/"))
+}
+
+// displayURL is a console URL as printed: as written, with a password in it
+// masked. One that does not parse is not repeated at all, and not tidied into
+// one that does, which would hide what is wrong with it.
+func displayURL(raw string) string {
+	if _, err := url.Parse(raw); err != nil {
+		return "(a URL that does not parse)"
+	}
+	return api.RedactURL(raw)
 }
 
 // client builds an authenticated client, or explains why it cannot.
@@ -110,6 +130,9 @@ func warnPlainHTTP(w io.Writer, raw string) {
 // exempt, since CI sets the token and the URL together on purpose.
 func client() (*api.Client, error) {
 	base := config.BaseURL(baseURLFlag)
+	if err := checkBase(base); err != nil {
+		return nil, err
+	}
 	if token, source := config.TokenSource(); source == config.SourceEnv {
 		return api.New(base, token), nil
 	}
@@ -140,8 +163,10 @@ func client() (*api.Client, error) {
 // host is named. An empty stored base predates per-console scoping.
 func otherConsole(stored, base string) error {
 	if stored = trimURL(stored); stored != "" && stored != trimURL(base) {
+		// The command carries no userinfo: it is meant to be copied.
 		return fmt.Errorf("the stored token belongs to %s, not %s - run "+
-			"'intuizi auth login --base-url %s' or set %s", stored, base, base, config.EnvToken)
+			"'intuizi auth login --base-url %s' or set %s",
+			displayURL(stored), displayURL(base), api.WithoutUserinfo(displayURL(base)), config.EnvToken)
 	}
 	return nil
 }
@@ -253,7 +278,7 @@ func init() {
 	api.UserAgent = "intuizi-cli/" + version
 
 	rootCmd.PersistentFlags().StringVar(&baseURLFlag, "base-url", "",
-		"Console base URL (default "+config.DefaultBaseURL+")")
+		"Console base URL (default "+config.DefaultBaseURL+"); https://, or http:// only to this machine")
 
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false,
 		"Print the raw JSON response envelope instead of a table")

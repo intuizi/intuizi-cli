@@ -208,11 +208,66 @@ func TestLoginTakesPasswordFromFlag(t *testing.T) {
 	srv, got := fakeConsole(t, "tok", 200)
 	authEnv(t, srv.URL)
 
-	if _, _, err := runAuth(t, authLoginCommand(), "", "--email", "a@b.com", "--password", "flagged"); err != nil {
+	_, errb, err := runAuth(t, authLoginCommand(), "", "--email", "a@b.com", "--password", "flagged")
+	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
 	if !strings.Contains(got.bodies[0], `"password":"flagged"`) {
 		t.Errorf("body = %s", got.bodies[0])
+	}
+	// Still works, but whoever runs it is told what it exposes.
+	if !strings.Contains(errb, "warning: --password") || !strings.Contains(errb, "stdin") {
+		t.Errorf("stderr = %q, want the --password warning pointing at stdin", errb)
+	}
+}
+
+// The password is on the command line before login decides anything, so the
+// warning comes even when a stored token is reused and no password is sent.
+func TestPasswordFlagWarnsWhenTheTokenIsReused(t *testing.T) {
+	srv, _ := fakeConsole(t, "should-not-mint", 200)
+	path := authEnv(t, srv.URL)
+	storeAuthConfig(t, path, config.Config{BaseURL: srv.URL, Token: "old-token", Email: "a@b.com"})
+
+	_, errb, err := runAuth(t, authLoginCommand(), "", "--email", "a@b.com", "--password", "flagged")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if !strings.Contains(errb, "Already logged in") || !strings.Contains(errb, "warning: --password") {
+		t.Errorf("stderr = %q, want the reuse notice and the --password warning", errb)
+	}
+}
+
+// A piped password is the recommended way, so it gets no warning.
+func TestPipedPasswordDoesNotWarn(t *testing.T) {
+	srv, _ := fakeConsole(t, "tok", 200)
+	authEnv(t, srv.URL)
+
+	_, errb, err := runAuth(t, authLoginCommand(), "pw\n", "--email", "a@b.com")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if strings.Contains(errb, "--password") {
+		t.Errorf("stderr mentions --password for a piped password: %q", errb)
+	}
+}
+
+// --password is kept for scripts that already use it, but help no longer
+// offers it, as a flag or in the description.
+func TestPasswordFlagIsHiddenFromHelp(t *testing.T) {
+	authEnv(t, "https://console.invalid")
+	out, _, err := runAuth(t, authLoginCommand(), "", "--help")
+	if err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	if strings.Contains(out, "--password") {
+		t.Errorf("help offers --password:\n%s", out)
+	}
+	if !strings.Contains(out, "--email") {
+		t.Errorf("help output looks wrong, no --email:\n%s", out)
+	}
+	// With --email on a terminal only the password is prompted for.
+	if !strings.Contains(out, "prompts for the password, and for the email unless --email") {
+		t.Errorf("help does not say what is prompted for:\n%s", out)
 	}
 }
 
@@ -1044,4 +1099,101 @@ func TestAuthStatusWarnsNearExpiry(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Login refuses a plain-http console before it reads the password or sends
+// anything, so neither crosses the network in clear and nothing is stored.
+func TestLoginRefusesPlainHTTP(t *testing.T) {
+	path := authEnv(t, "http://console.invalid")
+
+	// Built here rather than through runAuth, to see whether stdin was read.
+	const piped = "secret\n"
+	stdin := strings.NewReader(piped)
+	cmd := authLoginCommand()
+	cmd.SilenceUsage = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetIn(stdin)
+	cmd.SetArgs([]string{"--email", "a@b.com"})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "plain http") {
+		t.Fatalf("err = %v, want the plain-http refusal", err)
+	}
+	if stdin.Len() != len(piped) {
+		t.Errorf("the password was read from stdin before the refusal")
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("a config file was written: %v", statErr)
+	}
+}
+
+// A token stored for a plain-http console is not reported as reused on the
+// strength of a check that was never sent.
+func TestLoginDoesNotReuseAPlainHTTPToken(t *testing.T) {
+	path := authEnv(t, "http://console.invalid")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"base_url":"http://console.invalid","token":"old","email":"a@b.com"}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, errb, err := runAuth(t, authLoginCommand(), "", "--email", "a@b.com")
+	if err == nil || !strings.Contains(err.Error(), "plain http") {
+		t.Fatalf("err = %v, want the plain-http refusal", err)
+	}
+	if strings.Contains(errb, "Already logged in") {
+		t.Errorf("reported the unchecked token as reused: %q", errb)
+	}
+}
+
+// The warning is about the command line, not about how login ends: it comes
+// for an empty value and when login fails, here on a plain-http refusal.
+func TestPasswordFlagWarnsOnEveryOutcome(t *testing.T) {
+	srv, _ := fakeConsole(t, "tok", 200)
+	cases := []struct {
+		name, base string
+		args       []string
+	}{
+		{"empty value", srv.URL, []string{"--email", "a@b.com", "--password", ""}},
+		{"plain-http refusal", "http://console.invalid", []string{"--email", "a@b.com", "--password", "p"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			authEnv(t, c.base)
+			_, errb, _ := runAuth(t, authLoginCommand(), "", c.args...)
+			if !strings.Contains(errb, "warning: --password") {
+				t.Errorf("stderr = %q, want the --password warning", errb)
+			}
+		})
+	}
+}
+
+// login names the console it logged in to, or reused a token for, without
+// the password written into its URL.
+func TestLoginDoesNotPrintAURLPassword(t *testing.T) {
+	srv, _ := fakeConsole(t, "tok", 200)
+	base := strings.Replace(srv.URL, "http://", "http://bob:hunter2@", 1)
+	path := authEnv(t, base)
+
+	check := func(step string, args ...string) {
+		t.Helper()
+		_, errb, err := runAuth(t, authLoginCommand(), "pw\n", args...)
+		if err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		if strings.Contains(errb, "hunter2") {
+			t.Errorf("%s: stderr repeats the URL's password: %q", step, errb)
+		}
+		if !strings.Contains(errb, "bob:xxxxx@") {
+			t.Errorf("%s: stderr = %q, want the console named with its password masked", step, errb)
+		}
+	}
+	check("mint", "--email", "a@b.com")
+	check("reuse", "--email", "a@b.com")
+
+	// A token stored before accounts were recorded is reused with its own line.
+	storeAuthConfig(t, path, config.Config{BaseURL: base, Token: "old-token"})
+	check("reuse with no recorded account")
 }
