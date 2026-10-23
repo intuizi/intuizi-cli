@@ -185,7 +185,7 @@ in [DOCS.md](DOCS.md); `--help` on any command lists all of its flags.
 | Command | What it covers |
 | --- | --- |
 | `auth` | `login`, `status`, `logout` |
-| `audiences` | `list`, `show`, `create`, `delete`, `lookalike create\|cancel`, `estimate create\|show` |
+| `audiences` | `list`, `show`, `create`, `delete`, `quote`, `lookalike create\|cancel\|quote`, `estimate create\|show` |
 | `activations` | `list`, `show`, `create`, `preview`, `delete` |
 | `cohorts` | `list`, `show`, `create`, `preview`, `delete` |
 | `schedules` | `list`, `show`, `create`, `activate`, `deactivate`, `delete` |
@@ -194,6 +194,7 @@ in [DOCS.md](DOCS.md); `--help` on any command lists all of its flags.
 | `uploads` | `reserve`, `put` |
 | `reference` | 61 read-only catalogs across 10 groups |
 | `usage` | monthly data-scan usage |
+| `credits` | the credit balance, and `statement` (organizations billed in credits) |
 | `webhooks` | `list` |
 | `completion` | shell completion for bash, zsh, fish, powershell |
 
@@ -208,10 +209,10 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
   `completion`, `auth logout` and `auth status` without `--verify` call none.
   No server-side logic lives here.
 - **Most of the v2 surface.** Auth, audiences (including refine,
-  crossvisitation and crosspurchase, and size estimates), activations
-  (including the frequency preview), cohorts, schedules, projects, POI,
-  uploads, usage and reference reads, the data stream visualization catalog
-  among them.
+  crossvisitation and crosspurchase, size estimates and credit quotes),
+  activations (including the frequency preview), cohorts, schedules,
+  projects, POI, uploads, usage, credits and reference reads, the data stream
+  visualization catalog among them.
 - **Human first, script friendly.** Readable tables by default, `--json` for
   raw responses, `--quiet` for ids alone, and exit codes scripts can branch on.
 - **Wrong input fails before it is sent.** Names are resolved against the
