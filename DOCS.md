@@ -879,7 +879,8 @@ Needs `--file`: capping an audience cohort by visit frequency (`freq_limit`
 with `freq_min`/`freq_max`), by distance (`distance_limit` with `distance` in
 meters) or, for a Lookalike Model audience, by score range (`score_limit` with
 `min_score`/`max_score`) instead of a device count, and Match Strictness
-(`max_devices_per_ip`, 1 to 5) on an SCID file import.
+(`max_devices_per_ip`, 1 to 5) and the match window (`match_months`, 1 to 3
+months) on an SCID file import.
 
 ```bash
 cat > freq-capped.json <<'EOF'
