@@ -153,7 +153,7 @@ make several.
 visit frequency (freq_limit with freq_min and freq_max), by distance
 (distance_limit with distance) or, for a Lookalike Model audience, by score
 range (score_limit with min_score and max_score) goes through the whole body,
-and so do Match Strictness (max_devices_per_ip, 1 to 5) and the match window
+and so do Match Strictness (max_devices_per_ip, 1 to 5) and the Match Window
 (match_months, 1 to 3 months) on an SCID file import:
 
     intuizi cohorts create --file cohort.json
