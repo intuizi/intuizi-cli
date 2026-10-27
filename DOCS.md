@@ -611,18 +611,30 @@ An estimate is metered on the bytes it scans, which count toward the monthly
 data-scan limit (as the `estimate` operation in `usage`), and an estimate that
 a worker runs counts toward the organization's build budget.
 
-A single-dataset `POI` estimate at country or state level usually comes back
-`completed` at once, answered from daily sketches of the POI data, with its
-figures, `method` `sketch` and `as_of` (the time its data was read): a fast
-answer. While the sketches are tried, the command can take up to about 10
-seconds to print, and the estimate then reads `completed` (a fast answer) or
-`pending`. A fast answer is metered on the bytes it reads and does not count
-toward the build budget. For a `POI` dataset a fast answer equals a full
-estimate run on the same data, and a full estimate run later can differ a
+An estimate of one `POI` dataset at country or state level, of one
+`AffinityTransactions` dataset by brands or categories, or of one `CTV` dataset
+by countries, states, and either vendors or channel names usually comes back
+`completed` at once, answered from daily sketches, with its figures, `method`
+`sketch` and `as_of` (the time its data was read): a fast answer. While the
+sketches are tried, the command can take up to about 10 seconds to print, and
+the estimate then reads `completed` (a fast answer) or `pending`. A fast answer
+is metered on the bytes it reads and does not count toward the build budget.
+For a `POI`, `AffinityTransactions` or `CTV` dataset a fast answer equals a
+full estimate run on the same data, and a full estimate run later can differ a
 little as new data arrives.
 
+From flags, an `AffinityTransactions` estimate by `--category`, and a `CTV`
+estimate by `--country` and `--state`, usually come back at once too. A `CTV`
+estimate needs no vendor or channel name for that. Affinity `brands` and
+purchase `channels`, and CTV vendors (`ctv_vendor_names`) and channel names
+(`ctv_channel_names`), need `--file`.
+
 A `POI` estimate that uses `--filter`, `--city` or `--zipcode`, or whose dates
-reach past the data the sketches hold, is answered by a worker too.
+reach past the data the sketches hold, is answered by a worker too. So is an
+`AffinityTransactions` or `CTV` estimate that uses `--city` or `--zipcode`, or
+whose dates reach past the data the sketches hold. A `--file` body with any
+other filter of these two datasets goes to a worker as well, for example
+incomes or spend bounds, or CTV genres, device types or languages.
 
 Any other estimate comes back `pending` with no figures. How long that takes
 depends on the datasets. It can take minutes, for example `AND`, `OR`, `NOTIN`,
@@ -642,7 +654,11 @@ timed out.
 approximate distinct device count, with a standard error of about 1.6% when
 `method` is `sketch` or `approx_set` and about 2.3% when it is `approx_distinct`,
 then `visits`, `signals` and `unique_eips` where the dataset types produce them,
-and then `as_of`, `method`, `providers` and the rest. `blocked` means the request
+and then `as_of`, `method`, `providers` and the rest. Under `--json`, a fast
+answer for an `AffinityTransactions` dataset has no amounts: `transactions`,
+`amount`, `online_transactions` and the four ratios (`avg_amount_per_scid`,
+`avg_transaction_value`, `avg_transactions_per_scid` and `online_share`) of
+`.data[0].estimate.totals` are `null`, not `0`. `blocked` means the request
 cannot be answered as sent - most often dates outside the dataset's data
 coverage - and shows its code and reason as `blocked`; `failed` explains
 itself in `status_message`. Both are final and end a wait with exit 1.

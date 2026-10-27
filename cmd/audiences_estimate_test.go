@@ -368,27 +368,114 @@ var createdFastEstimate = reply{body: `{"status":"success","code":201,"message":
   "status_message":null,"reused_from":null,"project_id":null,
   "created_at":"2026-10-29 06:00:01","updated_at":"2026-10-29 06:00:01"}]}`}
 
-// A fast answer is completed in the create response itself. Its figures print,
-// and there is nothing left to follow, so the line that tells a caller to follow
-// a queued estimate must not appear.
-func TestEstimateCreateAnsweredAtOnceNamesNothingToFollow(t *testing.T) {
-	srv, got := stubSeq(t, createdFastEstimate)
+// createdFastTransactionsEstimate is the 201 of a fast answer for one
+// AffinityTransactions dataset by categories. It carries uniques (devices) and,
+// in totals, scids (persons), brands, categories and the first and last
+// transaction. The sketches hold no amounts, so transactions, amount,
+// online_transactions and the four ratios are null, not 0.
+var createdFastTransactionsEstimate = reply{body: `{"status":"success","code":201,"message":"Resource created successfully.","data":[
+ {"id":12,"status":"completed","name":"Coffee buyers",
+  "recipe_hash":"sha256:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+  "normalized_payload":{"name":"Coffee buyers","operator":"Single","datasets":[{"type":"AffinityTransactions"}]},
+  "estimate":{"uniques":91234,"visits":null,"signals":null,"unique_eips":null,
+   "number_of_days":null,"method":"sketch","exact":false,"as_of":"2026-10-29T06:00:00Z",
+   "providers":["BID001"],
+   "canonical_hash":"sha256:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+   "totals":{"uniques":91234,"scids":40122,"transactions":null,"amount":null,"brands":3,"categories":1,
+    "online_transactions":null,"avg_amount_per_scid":null,"avg_transaction_value":null,
+    "avg_transactions_per_scid":null,"online_share":null,
+    "first_transaction":"2026-09-01","last_transaction":"2026-09-30"},
+   "blocked":null},
+  "status_message":null,"reused_from":null,"project_id":null,
+  "created_at":"2026-10-29 06:00:01","updated_at":"2026-10-29 06:00:01"}]}`}
 
-	out, errb, err := run(t, estimateCreateCommand(), srv,
-		"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`))
+// createdFastCTVEstimate is the 201 of a fast answer for one CTV dataset by
+// countries and states: uniques (CTV viewers), signals and unique_eips
+// (households). visits and number_of_days are null, as on a full CTV estimate.
+var createdFastCTVEstimate = reply{body: `{"status":"success","code":201,"message":"Resource created successfully.","data":[
+ {"id":12,"status":"completed","name":"CA viewers",
+  "recipe_hash":"sha256:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+  "normalized_payload":{"name":"CA viewers","operator":"Single","datasets":[{"type":"CTV"}]},
+  "estimate":{"uniques":2104455,"visits":null,"signals":88412093,"unique_eips":1302211,
+   "number_of_days":null,"method":"sketch","exact":false,"as_of":"2026-10-29T06:00:00Z",
+   "providers":["BID003"],
+   "canonical_hash":"sha256:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+   "totals":{"uniques":2104455,"signals":88412093,"unique_eips":1302211,"id_space":"ctv_viewers"},
+   "blocked":null},
+  "status_message":null,"reused_from":null,"project_id":null,
+  "created_at":"2026-10-29 06:00:01","updated_at":"2026-10-29 06:00:01"}]}`}
+
+// A fast answer is completed in the create response itself, for a POI, an
+// AffinityTransactions or a CTV dataset alike. Its figures print, and there is
+// nothing left to follow, so the line that tells a caller to follow a queued
+// estimate must not appear.
+func TestEstimateCreateAnsweredAtOnceNamesNothingToFollow(t *testing.T) {
+	for _, tc := range []struct {
+		dsType string
+		answer reply
+		want   []string
+	}{
+		{"POI", createdFastEstimate, []string{"482311", "1203440"}},
+		{"AffinityTransactions", createdFastTransactionsEstimate, []string{"91234"}},
+		{"CTV", createdFastCTVEstimate, []string{"2104455", "88412093", "1302211"}},
+	} {
+		t.Run(tc.dsType, func(t *testing.T) {
+			srv, got := stubSeq(t, tc.answer)
+
+			out, errb, err := run(t, estimateCreateCommand(), srv,
+				"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"`+tc.dsType+`"}]}`))
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if len(got.paths) != 1 || got.paths[0] != estimateCreatePath {
+				t.Fatalf("paths = %v, want the one create and no read", got.paths)
+			}
+			for _, want := range append([]string{"completed", "uniques", "sketch", "2026-10-29T06:00:00Z"}, tc.want...) {
+				if !strings.Contains(out, want) {
+					t.Errorf("stdout missing %q:\n%s", want, out)
+				}
+			}
+			if strings.Contains(errb, "estimate show") || strings.Contains(errb, "estimating") {
+				t.Errorf("an estimate that is completed has nothing to follow, but stderr says:\n%s", errb)
+			}
+		})
+	}
+}
+
+// Under --json a fast answer for an AffinityTransactions dataset keeps its
+// amounts null, as the API sends them: the sketches hold none, and a 0 would
+// read as no purchases. The counts it does carry come through as numbers.
+func TestEstimateCreateJSONKeepsTheAmountsOfAFastTransactionsAnswerNull(t *testing.T) {
+	srv, _ := stubSeq(t, createdFastTransactionsEstimate)
+
+	out, _, err := runJSON(t, estimateCreateCommand(), srv,
+		"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"AffinityTransactions"}]}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if len(got.paths) != 1 || got.paths[0] != estimateCreatePath {
-		t.Fatalf("paths = %v, want the one create and no read", got.paths)
+	var env struct {
+		Data []struct {
+			Estimate struct {
+				Method string         `json:"method"`
+				Totals map[string]any `json:"totals"`
+			} `json:"estimate"`
+		} `json:"data"`
 	}
-	for _, want := range []string{"completed", "uniques", "482311", "sketch", "2026-10-29T06:00:00Z"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("stdout missing %q:\n%s", want, out)
+	if err := json.Unmarshal([]byte(out), &env); err != nil || len(env.Data) != 1 {
+		t.Fatalf("stdout is not the envelope of one estimate (%v):\n%s", err, out)
+	}
+	est := env.Data[0].Estimate
+	if est.Method != "sketch" {
+		t.Errorf("method = %q, want sketch", est.Method)
+	}
+	for _, key := range []string{"transactions", "amount", "online_transactions",
+		"avg_amount_per_scid", "avg_transaction_value", "avg_transactions_per_scid", "online_share"} {
+		if v, ok := est.Totals[key]; !ok || v != nil {
+			t.Errorf("totals.%s = %v (present %v), want null", key, v, ok)
 		}
 	}
-	if strings.Contains(errb, "estimate show") || strings.Contains(errb, "estimating") {
-		t.Errorf("an estimate that is completed has nothing to follow, but stderr says:\n%s", errb)
+	if scids, _ := est.Totals["scids"].(float64); scids != 40122 {
+		t.Errorf("totals.scids = %v, want 40122", est.Totals["scids"])
 	}
 }
 
