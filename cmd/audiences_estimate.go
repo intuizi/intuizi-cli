@@ -139,9 +139,9 @@ func audiencesEstimateCommand() *cobra.Command {
 		Short: "Size an audience before creating it",
 		Long: `Size an audience before creating it.
 
-An estimate takes what an audience create takes and reports how many devices
-the audience would hold, without creating it. Nothing appears in Audience
-Manager, and no export, cohort, schedule or activation follows.
+An estimate takes the same payload as an audience create and reports how many
+devices the audience would hold, without creating it. Nothing appears in
+Audience Manager, and no export, cohort, schedule or activation follows.
 
 An estimate is metered on the bytes it scans, which count toward the monthly
 data-scan limit ('intuizi usage'), and an estimate that a worker runs counts
