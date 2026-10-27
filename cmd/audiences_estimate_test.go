@@ -392,21 +392,31 @@ func TestEstimateCreateAnsweredAtOnceNamesNothingToFollow(t *testing.T) {
 	}
 }
 
+// createdWithoutStatus is a create answer whose record carries no status at
+// all, not even an empty one.
+var createdWithoutStatus = reply{body: `{"status":"success","code":201,"message":"Resource created successfully.","data":[
+ {"id":12,"name":"SF visitors","estimate":null,"status_message":null,"project_id":null}]}`}
+
 // The line that points at 'estimate show --wait' belongs to an estimate that
-// is still running, and to none that has ended.
+// is still running, and to none that has ended. A status the CLI cannot place,
+// or none, keeps the line: only completed, blocked and failed are known to be
+// over.
 func TestEstimateCreateNamesWhatToFollowOnlyWhileItRuns(t *testing.T) {
 	for _, tc := range []struct {
-		status, inner, message string
-		follow                 bool
+		name   string
+		answer reply
+		follow bool
 	}{
-		{"pending", "null", "", true},
-		{"processing", "null", "", true},
-		{"completed", completedNumbers, "", false},
-		{"blocked", blockedNumbers, "", false},
-		{"failed", "null", "Athena query exceeded the time limit", false},
+		{"pending", estimate("pending", "null", ""), true},
+		{"processing", estimate("processing", "null", ""), true},
+		{"unknown status", estimate("weird", "null", ""), true},
+		{"missing status", createdWithoutStatus, true},
+		{"completed", estimate("completed", completedNumbers, ""), false},
+		{"blocked", estimate("blocked", blockedNumbers, ""), false},
+		{"failed", estimate("failed", "null", "Athena query exceeded the time limit"), false},
 	} {
-		t.Run(tc.status, func(t *testing.T) {
-			srv, _ := stubSeq(t, estimate(tc.status, tc.inner, tc.message))
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stubSeq(t, tc.answer)
 
 			_, errb, err := run(t, estimateCreateCommand(), srv,
 				"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`))
@@ -414,7 +424,7 @@ func TestEstimateCreateNamesWhatToFollowOnlyWhileItRuns(t *testing.T) {
 				t.Fatalf("execute: %v", err)
 			}
 			if got := strings.Contains(errb, "'intuizi audiences estimate show <id> --wait'"); got != tc.follow {
-				t.Errorf("a %s estimate: hint printed = %v, want %v\nstderr:\n%s", tc.status, got, tc.follow, errb)
+				t.Errorf("a %s estimate: hint printed = %v, want %v\nstderr:\n%s", tc.name, got, tc.follow, errb)
 			}
 		})
 	}
