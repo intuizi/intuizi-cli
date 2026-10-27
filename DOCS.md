@@ -607,17 +607,31 @@ intuizi audiences estimate create \
 intuizi audiences estimate create --file examples/audience-two-datasets.json --wait
 ```
 
-An estimate runs the same build a create would, so it takes about as long,
-scans the same data, and counts toward the monthly data-scan limit (as the
-`estimate` operation in `usage`) and the organization's build budget. It
-comes back `pending` with no figures. Its status is a word, not an id:
-`pending`, then `processing`, then one of `completed`, `blocked` or `failed`.
-`--wait` follows it there as it follows a build (see
-[The async model](#the-async-model)), and `audiences estimate show <id>`
-reads it, with `--wait` to resume a wait that timed out.
+An estimate is metered on the bytes it scans, which count toward the monthly
+data-scan limit (as the `estimate` operation in `usage`), and an estimate that
+a worker runs counts toward the organization's build budget.
+
+A single-dataset `POI` estimate at country or state level usually comes back
+`completed` at once, answered from daily sketches of the POI data, with its
+figures, `method` `sketch` and `as_of` (the time its data was read): a fast
+answer. While the sketches are tried, the command can take up to about 10
+seconds to print, and the estimate then reads `completed` (a fast answer) or
+`pending`. A fast answer is metered on the bytes it reads and does not count
+toward the build budget. For a `POI` dataset a fast answer equals a full
+estimate run on the same data, and a full estimate run later can differ a
+little as new data arrives.
+
+Any other estimate comes back `pending` with no figures. How long that takes
+depends on the datasets. It can take minutes, for example `AND`, `OR`, `NOTIN`,
+and city, DMA or ZIP requests. Its status is a word, not an id: `pending`, then
+`processing`, then one of `completed`, `blocked` or `failed`. `--wait` follows
+it there as it follows a build (see [The async model](#the-async-model)), and
+`audiences estimate show <id>` reads it, with `--wait` to resume a wait that
+timed out.
 
 `completed` carries the figures, which lead the output: `uniques`, the
-approximate distinct device count, with a standard error of about 2.3%;
+approximate distinct device count, with a standard error of about 1.6% when
+`method` is `sketch` or `approx_set` and about 2.3% when it is `approx_distinct`;
 `visits`, `signals` and `unique_eips` where the dataset types produce them;
 then `as_of`, `method`, `providers` and the rest. `blocked` means the request
 cannot be answered as sent - most often dates outside the dataset's data
@@ -1322,7 +1336,9 @@ rather than free-form JSON.
 
 ## The async model
 
-Creates return immediately and the resource completes in the background.
+Creates return as soon as the work is queued, or, for an estimate answered at
+once (a fast answer), as soon as the answer is ready. What is queued completes
+in the background.
 `audiences create`, `audiences show`, `audiences estimate create`,
 `audiences estimate show`, `activations create` and `activations show` take
 `--wait` with an optional `--timeout` (default 60m).
@@ -1369,7 +1385,8 @@ An estimate's status is a word instead: `pending` and `processing` keep the
 wait going, `completed` is the one success, and `blocked` and `failed` end it
 with exit 1, naming the blocked code and reason or the `status_message`. Any
 other word ends it too. With `--json` read it as `.data[0].status`, and the
-figures as `.data[0].estimate`.
+figures as `.data[0].estimate`. A fast answer is `completed` from its first
+read.
 
 `107` Additional Info means the worker could not run the request as given, so
 it stopped and nothing follows. The error says the build (or, for an
