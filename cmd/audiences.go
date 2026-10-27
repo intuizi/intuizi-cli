@@ -448,7 +448,7 @@ func postBody(cmd *cobra.Command, lc lifecycle, body any, wait bool, timeout tim
 	if wait {
 		return createAndWait(cmd, lc, body, timeout)
 	}
-	return createBodyAs(cmd, lc.create, body, lc.lead, lc.view, next)
+	return createBodyAs(cmd, lc.create, body, lc.lead, lc.view, next, lc.settled)
 }
 
 // brandHint points a --brand on another type at what that type does take.

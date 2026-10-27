@@ -31,6 +31,19 @@ var estimateLifecycle = lifecycle{
 	lead:     estimateLead,
 	read:     readEstimate,
 	view:     estimateView,
+	settled:  estimateSettled,
+}
+
+// estimateSettled reports an estimate whose status no later read changes:
+// completed, blocked or failed. A fast answer is completed in the create
+// response itself, so the create has nothing to tell the caller to follow.
+// Any other status, an unknown one included, keeps the hint.
+func estimateSettled(rec output.Record) bool {
+	switch status, _ := rec["status"].(string); status {
+	case "completed", "blocked", "failed":
+		return true
+	}
+	return false
 }
 
 // readEstimate reads one estimate. Any status other than the five documented

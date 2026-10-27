@@ -353,6 +353,100 @@ func TestEstimateCreateWaitFollowsToCompleted(t *testing.T) {
 	}
 }
 
+// createdFastEstimate is the 201 of a fast answer: a POI estimate at country or
+// state level that the daily sketches answered inside the create call. It is
+// completed at once and already carries its figures, with method sketch and the
+// as_of of the data it read.
+var createdFastEstimate = reply{body: `{"status":"success","code":201,"message":"Resource created successfully.","data":[
+ {"id":12,"status":"completed","name":"SF visitors",
+  "recipe_hash":"sha256:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+  "normalized_payload":{"name":"SF visitors","operator":"Single","datasets":[{"type":"POI"}]},
+  "estimate":{"uniques":482311,"visits":1203440,"signals":null,"unique_eips":null,
+   "number_of_days":null,"method":"sketch","exact":false,"as_of":"2026-10-29T06:00:00Z",
+   "providers":["BID001","BID002"],
+   "canonical_hash":"sha256:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8","blocked":null},
+  "status_message":null,"reused_from":null,"project_id":null,
+  "created_at":"2026-10-29 06:00:01","updated_at":"2026-10-29 06:00:01"}]}`}
+
+// A fast answer is completed in the create response itself. Its figures print,
+// and there is nothing left to follow, so the line that tells a caller to follow
+// a queued estimate must not appear.
+func TestEstimateCreateAnsweredAtOnceNamesNothingToFollow(t *testing.T) {
+	srv, got := stubSeq(t, createdFastEstimate)
+
+	out, errb, err := run(t, estimateCreateCommand(), srv,
+		"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(got.paths) != 1 || got.paths[0] != estimateCreatePath {
+		t.Fatalf("paths = %v, want the one create and no read", got.paths)
+	}
+	for _, want := range []string{"completed", "uniques", "482311", "sketch", "2026-10-29T06:00:00Z"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(errb, "estimate show") || strings.Contains(errb, "estimating") {
+		t.Errorf("an estimate that is completed has nothing to follow, but stderr says:\n%s", errb)
+	}
+}
+
+// The line that points at 'estimate show --wait' belongs to an estimate that
+// is still running, and to none that has ended.
+func TestEstimateCreateNamesWhatToFollowOnlyWhileItRuns(t *testing.T) {
+	for _, tc := range []struct {
+		status, inner, message string
+		follow                 bool
+	}{
+		{"pending", "null", "", true},
+		{"processing", "null", "", true},
+		{"completed", completedNumbers, "", false},
+		{"blocked", blockedNumbers, "", false},
+		{"failed", "null", "Athena query exceeded the time limit", false},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			srv, _ := stubSeq(t, estimate(tc.status, tc.inner, tc.message))
+
+			_, errb, err := run(t, estimateCreateCommand(), srv,
+				"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`))
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if got := strings.Contains(errb, "'intuizi audiences estimate show <id> --wait'"); got != tc.follow {
+				t.Errorf("a %s estimate: hint printed = %v, want %v\nstderr:\n%s", tc.status, got, tc.follow, errb)
+			}
+		})
+	}
+}
+
+// With --wait a fast answer ends the wait on its first read: the create said
+// completed, and the read confirms it. Nothing is polled twice.
+func TestEstimateCreateWaitOnAnAnswerGivenAtOnce(t *testing.T) {
+	fast(t)
+	srv, got := stubSeq(t, createdFastEstimate, estimate("completed", completedNumbers, ""))
+
+	out, errb, err := run(t, estimateCreateCommand(), srv,
+		"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`), "--wait")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if want := []string{estimateCreatePath, estimatePath12}; strings.Join(got.paths, " ") != strings.Join(want, " ") {
+		t.Errorf("paths = %v, want %v", got.paths, want)
+	}
+	for _, line := range []string{"created estimate 12", "estimate 12: completed"} {
+		if !strings.Contains(errb, line) {
+			t.Errorf("stderr missing %q:\n%s", line, errb)
+		}
+	}
+	if strings.Contains(errb, "pending") || strings.Contains(errb, "processing") {
+		t.Errorf("an estimate answered at once was never pending:\n%s", errb)
+	}
+	if !strings.Contains(out, "482311") {
+		t.Errorf("stdout should be the completed estimate:\n%s", out)
+	}
+}
+
 // normalized_payload carries a name of its own, and the {id, name} collapse
 // made the whole payload read as that name. It is summarised like the other
 // nested objects instead.
