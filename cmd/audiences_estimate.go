@@ -147,9 +147,10 @@ An estimate is metered on the bytes it scans, which count toward the monthly
 data-scan limit ('intuizi usage'), and an estimate that a worker runs counts
 toward the organization's build budget. An estimate of one POI dataset at
 country or state level, of one AffinityTransactions dataset by brands or
-categories, or of one CTV dataset by countries, states, and either vendors or
-channel names usually comes back completed at once: a fast answer. It is
-metered on the bytes it reads and does not count toward the build budget.
+categories, or of one CTV dataset at country or state level, optionally with
+vendors or with channel names, usually comes back completed at once: a fast
+answer. It is metered on the bytes it reads and does not count toward the
+build budget.
 
     intuizi audiences estimate create --type poi --brand starbucks ... --wait
     intuizi audiences estimate show 12`,
@@ -191,10 +192,10 @@ audience can be estimated unchanged.
 recipe_hash, so estimate with the ones the audience will be built with.
 
 An estimate of one POI dataset at country or state level, of one
-AffinityTransactions dataset by brands or categories, or of one CTV dataset by
-countries, states, and either vendors or channel names usually comes back
-completed at once, answered from daily sketches, with its figures, method
-sketch and as_of (the time its data was read): a fast answer. While the
+AffinityTransactions dataset by brands or categories, or of one CTV dataset at
+country or state level, optionally with vendors or with channel names, usually
+comes back completed at once, answered from daily sketches, with its figures,
+method sketch and as_of (the time its data was read): a fast answer. While the
 sketches are tried, the command can take up to about 10 seconds to print, and
 the estimate then reads completed (a fast answer) or pending. For a POI,
 AffinityTransactions or CTV dataset a fast answer equals a full estimate run on
@@ -205,9 +206,8 @@ amounts: transactions, amount, online_transactions and the four ratios
 online_share) of .data[0].estimate.totals are null, not 0.
 
 From flags, an AffinityTransactions estimate by --category, and a CTV estimate
-by --country and --state, usually come back at once too. A CTV estimate needs
-no vendor or channel name for that. Affinity brands and purchase channels, and
-CTV vendors and channel names, need --file.
+by --country and --state, usually come back at once too. Affinity brands and
+purchase channels, and CTV vendors and channel names, need --file.
 
 A POI estimate that uses --filter, --city or --zipcode, or whose dates reach
 past the data the sketches hold, is answered by a worker too. So is an

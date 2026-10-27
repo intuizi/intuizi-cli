@@ -613,21 +613,20 @@ a worker runs counts toward the organization's build budget.
 
 An estimate of one `POI` dataset at country or state level, of one
 `AffinityTransactions` dataset by brands or categories, or of one `CTV` dataset
-by countries, states, and either vendors or channel names usually comes back
-`completed` at once, answered from daily sketches, with its figures, `method`
-`sketch` and `as_of` (the time its data was read): a fast answer. While the
-sketches are tried, the command can take up to about 10 seconds to print, and
-the estimate then reads `completed` (a fast answer) or `pending`. A fast answer
-is metered on the bytes it reads and does not count toward the build budget.
-For a `POI`, `AffinityTransactions` or `CTV` dataset a fast answer equals a
-full estimate run on the same data, and a full estimate run later can differ a
-little as new data arrives.
+at country or state level, optionally with vendors or with channel names,
+usually comes back `completed` at once, answered from daily sketches, with its
+figures, `method` `sketch` and `as_of` (the time its data was read): a fast
+answer. While the sketches are tried, the command can take up to about 10
+seconds to print, and the estimate then reads `completed` (a fast answer) or
+`pending`. A fast answer is metered on the bytes it reads and does not count
+toward the build budget. For a `POI`, `AffinityTransactions` or `CTV` dataset
+a fast answer equals a full estimate run on the same data, and a full estimate
+run later can differ a little as new data arrives.
 
 From flags, an `AffinityTransactions` estimate by `--category`, and a `CTV`
-estimate by `--country` and `--state`, usually come back at once too. A `CTV`
-estimate needs no vendor or channel name for that. Affinity `brands` and
-purchase `channels`, and CTV vendors (`ctv_vendor_names`) and channel names
-(`ctv_channel_names`), need `--file`.
+estimate by `--country` and `--state`, usually come back at once too. Affinity
+`brands` and purchase `channels`, and CTV vendors (`ctv_vendor_names`) and
+channel names (`ctv_channel_names`), need `--file`.
 
 A `POI` estimate that uses `--filter`, `--city` or `--zipcode`, or whose dates
 reach past the data the sketches hold, is answered by a worker too. So is an
