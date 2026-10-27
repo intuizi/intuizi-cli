@@ -197,15 +197,24 @@ print, and the estimate then reads completed (a fast answer) or pending. For a
 POI dataset a fast answer equals a full estimate run on the same data, and a
 full estimate run later can differ a little as new data arrives.
 
+A POI estimate that uses --filter, --city or --zipcode, or whose dates reach
+past the data the sketches hold, is answered by a worker too.
+
 Any other estimate comes back pending, with no figures. How long that takes
 depends on the datasets. It can take minutes, for example AND, OR, NOTIN, and
-city, DMA or ZIP requests. Add --wait to block until it reads completed,
-blocked or failed, with --timeout to bound it (default 60m). completed exits 0
-with the figures on stdout. blocked means the request cannot be answered as
-sent - most often dates outside the dataset's data coverage - and failed that
-the run broke; both are final and exit non-zero with the reason. A wait that
-times out or gives up leaves the estimate running and names the
-'intuizi audiences estimate show <id> --wait' that resumes it.
+city, DMA or ZIP requests. An estimate of a recipe your organization is
+estimating now, or estimated less than 10 minutes ago, shares that run instead:
+it is not metered, does not count toward the build budget, and reads that run's
+status. A fast answer is never shared: the same recipe sent again is usually
+answered again, often in about a second.
+
+Add --wait to block until it reads completed, blocked or failed, with --timeout
+to bound it (default 60m). completed exits 0 with the figures on stdout.
+blocked means the request cannot be answered as sent - most often dates outside
+the dataset's data coverage - and failed that the run broke. Both are final and
+exit non-zero with the reason. A wait that times out or gives up leaves the
+estimate running and names the 'intuizi audiences estimate show <id> --wait'
+that resumes it.
 
 recipe_hash is computed from the operator and datasets only, not the name.
 An audience created from the same body carries the same recipe_hash

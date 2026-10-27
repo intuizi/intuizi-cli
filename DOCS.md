@@ -621,19 +621,28 @@ toward the build budget. For a `POI` dataset a fast answer equals a full
 estimate run on the same data, and a full estimate run later can differ a
 little as new data arrives.
 
+A `POI` estimate that uses `--filter`, `--city` or `--zipcode`, or whose dates
+reach past the data the sketches hold, is answered by a worker too.
+
 Any other estimate comes back `pending` with no figures. How long that takes
 depends on the datasets. It can take minutes, for example `AND`, `OR`, `NOTIN`,
-and city, DMA or ZIP requests. Its status is a word, not an id: `pending`, then
-`processing`, then one of `completed`, `blocked` or `failed`. `--wait` follows
-it there as it follows a build (see [The async model](#the-async-model)), and
+and city, DMA or ZIP requests. An estimate of a recipe your organization is
+estimating now, or estimated less than 10 minutes ago, shares that run instead:
+it is not metered, does not count toward the build budget, and reads that run's
+status. A fast answer is never shared: the same recipe sent again is usually
+answered again, often in about a second.
+
+An estimate's status is a word, not an id: `pending`, then `processing`, then
+one of `completed`, `blocked` or `failed`. `--wait` follows it there as it
+follows a build (see [The async model](#the-async-model)), and
 `audiences estimate show <id>` reads it, with `--wait` to resume a wait that
 timed out.
 
 `completed` carries the figures, which lead the output: `uniques`, the
 approximate distinct device count, with a standard error of about 1.6% when
-`method` is `sketch` or `approx_set` and about 2.3% when it is `approx_distinct`;
-`visits`, `signals` and `unique_eips` where the dataset types produce them;
-then `as_of`, `method`, `providers` and the rest. `blocked` means the request
+`method` is `sketch` or `approx_set` and about 2.3% when it is `approx_distinct`,
+then `visits`, `signals` and `unique_eips` where the dataset types produce them,
+and then `as_of`, `method`, `providers` and the rest. `blocked` means the request
 cannot be answered as sent - most often dates outside the dataset's data
 coverage - and shows its code and reason as `blocked`; `failed` explains
 itself in `status_message`. Both are final and end a wait with exit 1.
