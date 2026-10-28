@@ -208,12 +208,14 @@ func createFromFile(cmd *cobra.Command, path, file string, lead []string, next s
 // createBody posts an already-built body, for the creates whose whole payload
 // fits in a flag or two.
 func createBody(cmd *cobra.Command, path string, payload any, lead []string, next string) error {
-	return createBodyAs(cmd, path, payload, lead, flatten, next)
+	return createBodyAs(cmd, path, payload, lead, flatten, next, nil)
 }
 
 // createBodyAs is createBody with the created record shaped by view before it
-// prints, as renderOneAs is to renderOne.
-func createBodyAs(cmd *cobra.Command, path string, payload any, lead []string, view func(output.Record) output.Record, next string) error {
+// prints, as renderOneAs is to renderOne. When settled is not nil and says the
+// created record is already at the end of its lifecycle, next is left out:
+// there is nothing to follow.
+func createBodyAs(cmd *cobra.Command, path string, payload any, lead []string, view func(output.Record) output.Record, next string, settled func(output.Record) bool) error {
 	c, err := client()
 	if err != nil {
 		return err
@@ -238,7 +240,7 @@ func createBodyAs(cmd *cobra.Command, path string, payload any, lead []string, v
 	if err := output.Detail(cmd.OutOrStdout(), view(created), lead); err != nil {
 		return err
 	}
-	if next != "" {
+	if next != "" && (settled == nil || !settled(created)) {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), next)
 	}
 	return nil

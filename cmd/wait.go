@@ -77,6 +77,12 @@ type lifecycle struct {
 
 	read func(rec output.Record, id int) waitState
 	view func(rec output.Record) output.Record
+
+	// settled reports a record that is already at the end of its lifecycle in
+	// the create response itself, as an estimate answered at once is. A create
+	// that prints such a record has nothing to tell the caller to follow. Nil
+	// for a kind that always starts out running.
+	settled func(rec output.Record) bool
 }
 
 // waitState is what one read of a record says about the wait.

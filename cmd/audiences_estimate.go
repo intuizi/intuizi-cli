@@ -31,6 +31,19 @@ var estimateLifecycle = lifecycle{
 	lead:     estimateLead,
 	read:     readEstimate,
 	view:     estimateView,
+	settled:  estimateSettled,
+}
+
+// estimateSettled reports an estimate whose status no later read changes:
+// completed, blocked or failed. A fast answer is completed in the create
+// response itself, so the create has nothing to tell the caller to follow.
+// Any other status, an unknown one included, keeps the hint.
+func estimateSettled(rec output.Record) bool {
+	switch status, _ := rec["status"].(string); status {
+	case "completed", "blocked", "failed":
+		return true
+	}
+	return false
 }
 
 // readEstimate reads one estimate. Any status other than the five documented
@@ -126,14 +139,16 @@ func audiencesEstimateCommand() *cobra.Command {
 		Short: "Size an audience before creating it",
 		Long: `Size an audience before creating it.
 
-An estimate runs the build an audience create would run, from the same
-payload, and reports how many devices the audience would hold - without
-creating it. Nothing appears in Audience Manager, and no export, cohort,
-schedule or activation follows.
+An estimate takes the same payload as an audience create and reports how many
+devices the audience would hold, without creating it. Nothing appears in
+Audience Manager, and no export, cohort, schedule or activation follows.
 
-It runs as long as a real build and scans the same data, so it counts toward
-the monthly data-scan limit ('intuizi usage') and the organization's build
-budget, as a create does.
+An estimate is metered on the bytes it scans, which count toward the monthly
+data-scan limit ('intuizi usage'), and an estimate that a worker runs counts
+toward the organization's build budget. A single-dataset POI estimate at
+country or state level usually comes back completed at once: a fast answer.
+It is metered on the bytes it reads and does not count toward the build
+budget.
 
     intuizi audiences estimate create --type poi --brand starbucks ... --wait
     intuizi audiences estimate show 12`,
@@ -174,14 +189,32 @@ audience can be estimated unchanged.
 --filter is part of the recipe: the filters change both the figures and
 recipe_hash, so estimate with the ones the audience will be built with.
 
-An estimate runs as long as a real build and comes back pending, with no
-figures. Add --wait to block until it reads completed, blocked or failed,
-with --timeout to bound it (default 60m). completed exits 0 with the figures
-on stdout. blocked means the request cannot be answered as sent - most often
-dates outside the dataset's data coverage - and failed that the run broke;
-both are final and exit non-zero with the reason. A wait that times out or
-gives up leaves the estimate running and names the
-'intuizi audiences estimate show <id> --wait' that resumes it.
+A single-dataset POI estimate at country or state level usually comes back
+completed at once, answered from daily sketches of the POI data, with its
+figures, method sketch and as_of (the time its data was read): a fast answer.
+While the sketches are tried, the command can take up to about 10 seconds to
+print, and the estimate then reads completed (a fast answer) or pending. For a
+POI dataset a fast answer equals a full estimate run on the same data, and a
+full estimate run later can differ a little as new data arrives.
+
+A POI estimate that uses --filter, --city or --zipcode, or whose dates reach
+past the data the sketches hold, is answered by a worker too.
+
+Any other estimate comes back pending, with no figures. How long that takes
+depends on the datasets. It can take minutes, for example AND, OR, NOTIN, and
+city, DMA or ZIP requests. An estimate of a recipe your organization is
+estimating now, or estimated less than 10 minutes ago, shares that run instead:
+it is not metered, does not count toward the build budget, and reads that run's
+status. A fast answer is never shared: the same recipe sent again is usually
+answered again, often in about a second.
+
+Add --wait to block until it reads completed, blocked or failed, with --timeout
+to bound it (default 60m). completed exits 0 with the figures on stdout.
+blocked means the request cannot be answered as sent - most often dates outside
+the dataset's data coverage - and failed that the run broke. Both are final and
+exit non-zero with the reason. A wait that times out or gives up leaves the
+estimate running and names the 'intuizi audiences estimate show <id> --wait'
+that resumes it.
 
 recipe_hash is computed from the operator and datasets only, not the name.
 An audience created from the same body carries the same recipe_hash
