@@ -109,14 +109,11 @@ on stderr. These four flags are refused on any other type.
 audience. For each device it finds the home internet network, or with
 --switch-network mobile the mobile carrier, in each of the two months, and
 counts the devices that kept their network, changed it and switched. It runs
-on an audience of one Deidentified, CTV or Connectivity dataset, and CTV takes
---switch-network home only. A month stands for its last 7 days, or for a
-Connectivity audience its last full Monday-to-Sunday week. --switch-min-days
-(2 to 5, default 3) is the fewest days of that window a device must be seen
-on a network for it to be its home network. With --type deidentified the API
-requires the dates to be the --switch-to window, so leave out --start-date and
---end-date: the CLI sets them and says so on stderr. A CTV or Connectivity
-dataset keeps its own dates.
+on an audience of one Connectivity dataset only, with --type connectivity.
+Each month is read as its last full Monday-to-Sunday week, and both weeks must
+be built Connectivity weeks. --switch-min-days (2 to 5, default 3) is the
+fewest days of that week a device must be seen on a network for it to be its
+home network. The dataset keeps its own dates.
 
     intuizi audiences create --type connectivity --network-kind home \
       --network Starlink --country USA \
@@ -323,13 +320,13 @@ func (r *audienceRequest) registerSwitching(cmd *cobra.Command) {
 		"Network Switching: the first month to compare, YYYY-MM (needs --switch-to)")
 	f.StringVar(&r.switchTo, "switch-to", "",
 		"Network Switching: the second month to compare, YYYY-MM (needs\n"+
-			"--switch-from); sets a Deidentified dataset's dates to its last 7 days")
+			"--switch-from); each month is read as its last full Monday-to-Sunday week")
 	f.StringVar(&r.switchNetwork, "switch-network", "home",
 		"Network Switching: compare each device's home internet network (home)\n"+
-			"or its mobile carrier (mobile); CTV takes home only")
+			"or its mobile carrier (mobile)")
 	completeValues(cmd, "switch-network", networkKinds)
 	f.IntVar(&r.switchMinDays, "switch-min-days", defaultMinHomeDays,
-		"Network Switching: the fewest days of each 7-day window a device must\n"+
+		"Network Switching: the fewest days of each month's week a device must\n"+
 			"be seen on a network for it to be its home network, 2 to 5")
 }
 
@@ -396,25 +393,23 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 		}
 	}
 	dsType := r.dsType
-	// A Deidentified audience that runs Network Switching takes its dates
-	// from --switch-to, so it needs neither date flag.
-	autoDates := switchingAutoDates(dsType, flags.Changed)
-	required := audienceRequired
-	if autoDates {
-		required = []string{"type", "name"}
+	// Switching is Connectivity only: say so before any missing flag.
+	if flags.Changed("type") && dsType != "Connectivity" {
+		for _, f := range switchingFlags {
+			if flags.Changed(f) {
+				return audienceBody{}, usageErr(errSwitchingType)
+			}
+		}
 	}
-	if err := missingFlags(flags, required, "a single-dataset audience"); err != nil {
+	if err := missingFlags(flags, audienceRequired, "a single-dataset audience"); err != nil {
 		return audienceBody{}, err
 	}
 	if err := nonEmpty("name", r.name); err != nil {
 		return audienceBody{}, err
 	}
-	switching, err := r.switchingOptions(dsType, flags.Changed)
+	switching, err := r.switchingOptions(flags.Changed)
 	if err != nil {
 		return audienceBody{}, err
-	}
-	if autoDates {
-		r.startDate, r.endDate = monthWindow(switching.ToMonth)
 	}
 	if err := parseWindow(r.startDate, r.endDate); err != nil {
 		return audienceBody{}, err
@@ -554,10 +549,6 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 
 	// Notes go to stderr, so a piped --dry-run stays the payload, and only
 	// once every check has passed.
-	if autoDates {
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Network switching on a Deidentified dataset: the dates are "+
-			"the last 7 days of --switch-to %s, %s..%s\n", switching.ToMonth, r.startDate, r.endDate)
-	}
 	// The dates stay as typed in the body; the API does the widening.
 	if note := weeklyNote(dsType, r.startDate, r.endDate); note != "" {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), note)

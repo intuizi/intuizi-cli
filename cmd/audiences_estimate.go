@@ -171,9 +171,8 @@ Takes exactly what 'intuizi audiences create' takes - the same flags, names
 resolved the same way, or the same --file body - and sends it to Estimate
 Audience Size instead of Create Audience. The Network Switching flags
 (--switch-from, --switch-to, --switch-network and --switch-min-days) are the
-one exception: an estimate never runs the analysis. To size a Deidentified
-audience built for it, pass the dates 'audiences create' sets for it, the last
-7 days of the --switch-to month:
+one exception: an estimate never runs the analysis. Leave them out to size
+the audience:
 
     intuizi audiences estimate create \
       --type POI --brand starbucks \
