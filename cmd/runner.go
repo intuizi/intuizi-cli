@@ -146,6 +146,14 @@ func renderOne(cmd *cobra.Command, path string, lead []string) error {
 // for a read whose useful fields sit in a nested object. --json and --quiet
 // are unaffected: they print the envelope and the id as the server sent them.
 func renderOneAs(cmd *cobra.Command, path string, lead []string, view func(output.Record) output.Record) error {
+	return renderOneThen(cmd, path, lead, view, nil)
+}
+
+// renderOneThen is renderOneAs with after, when not nil, printing more of the
+// record below the key/value lines: a nested result worth reading as a table
+// of its own. --json and --quiet are unaffected, as in renderOneAs.
+func renderOneThen(cmd *cobra.Command, path string, lead []string, view func(output.Record) output.Record,
+	after func(*cobra.Command, output.Record) error) error {
 	c, err := client()
 	if err != nil {
 		return err
@@ -167,7 +175,13 @@ func renderOneAs(cmd *cobra.Command, path string, lead []string, view func(outpu
 	if quietOutput {
 		return output.IDs(cmd.OutOrStdout(), []output.Record{item})
 	}
-	return output.Detail(cmd.OutOrStdout(), view(item), lead)
+	if err := output.Detail(cmd.OutOrStdout(), view(item), lead); err != nil {
+		return err
+	}
+	if after == nil {
+		return nil
+	}
+	return after(cmd, item)
 }
 
 // postID posts {"id": n} and reports success on stderr, keeping stdout empty

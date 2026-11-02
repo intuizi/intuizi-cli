@@ -78,6 +78,11 @@ type lifecycle struct {
 	read func(rec output.Record, id int) waitState
 	view func(rec output.Record) output.Record
 
+	// after, when not nil, prints more of the record below its key/value
+	// lines, as 'audiences show' prints the Network Switching results. Not
+	// under --json or --quiet.
+	after func(cmd *cobra.Command, rec output.Record) error
+
 	// settled reports a record that is already at the end of its lifecycle in
 	// the create response itself, as an estimate answered at once is. A create
 	// that prints such a record has nothing to tell the caller to follow. Nil
@@ -236,7 +241,13 @@ func printWaited(cmd *cobra.Command, c *api.Client, path string, final output.Re
 		}
 		return output.JSON(cmd.OutOrStdout(), raw)
 	}
-	return output.Detail(cmd.OutOrStdout(), lc.view(final), lc.lead)
+	if err := output.Detail(cmd.OutOrStdout(), lc.view(final), lc.lead); err != nil {
+		return err
+	}
+	if lc.after == nil {
+		return nil
+	}
+	return lc.after(cmd, final)
 }
 
 // rawAfterWait re-reads the record a wait ended on, for --json, in up to

@@ -16,8 +16,13 @@ const audiencesPrefix = "/analyses/audiences"
 // thirteen fields per audience; --json prints all of them.
 var audienceColumns = []string{"id", "name", "status", "results_count", "created_at"}
 
-// audienceLifecycle is how --wait follows an audience build.
-var audienceLifecycle = resourceLifecycle("audience", audiencesPrefix, audienceColumns)
+// audienceLifecycle is how --wait follows an audience build. The record a wait
+// ends on is followed by the Network Switching summary, as 'show' prints it.
+var audienceLifecycle = func() lifecycle {
+	lc := resourceLifecycle("audience", audiencesPrefix, audienceColumns)
+	lc.after = printNetworkSwitching
+	return lc
+}()
 
 var audiencesCmd = &cobra.Command{
 	Use:   "audiences",
@@ -613,6 +618,13 @@ func audiencesShowCommand() *cobra.Command {
 		Short: "Show one audience",
 		Long: `Show one audience.
 
+An audience built with Network Switching ('audiences create --switch-from')
+is followed by a summary of its results: the two windows compared, how many
+devices had a home network in each and in both, how many changed and
+switched, and the top flows between two networks, the most devices first.
+Every count is a count of devices. --json prints the results whole, with the
+per-network rows, under .data[0].analysis_results.network_switching.
+
 With --wait, keep polling until the build reaches Completed or fails, printing
 each status change to stderr and the last record read to stdout, and exiting
 non-zero if it fails, --timeout runs out or three reads in a row fail. A
@@ -643,7 +655,8 @@ reads 108, so a wait on it ends only at --timeout.`,
 			return err
 		}
 		if !wait {
-			return renderOne(cmd, audiencesPrefix+"/"+strconv.Itoa(id), audienceColumns)
+			return renderOneThen(cmd, audiencesPrefix+"/"+strconv.Itoa(id), audienceColumns, flatten,
+				printNetworkSwitching)
 		}
 		c, err := client()
 		if err != nil {
