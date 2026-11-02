@@ -393,13 +393,21 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 		}
 	}
 	dsType := r.dsType
+	// Switching is Connectivity only: say so before any missing flag.
+	if flags.Changed("type") && dsType != "Connectivity" {
+		for _, f := range switchingFlags {
+			if flags.Changed(f) {
+				return audienceBody{}, usageErr(errSwitchingType)
+			}
+		}
+	}
 	if err := missingFlags(flags, audienceRequired, "a single-dataset audience"); err != nil {
 		return audienceBody{}, err
 	}
 	if err := nonEmpty("name", r.name); err != nil {
 		return audienceBody{}, err
 	}
-	switching, err := r.switchingOptions(dsType, flags.Changed)
+	switching, err := r.switchingOptions(flags.Changed)
 	if err != nil {
 		return audienceBody{}, err
 	}

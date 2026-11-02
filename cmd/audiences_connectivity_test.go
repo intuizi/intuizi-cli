@@ -344,6 +344,19 @@ func TestAudiencesSwitchingRefusesOtherTypes(t *testing.T) {
 	}
 }
 
+// The shared refusal comes before any missing-flag error: a Deidentified
+// create with switching flags and no dates learns at once that switching is
+// Connectivity only.
+func TestAudiencesSwitchingRefusalComesFirst(t *testing.T) {
+	srv, got := stub(t, providersPOI)
+	_, _, err := run(t, audiencesCreateCommand(), srv,
+		"--type", "deidentified", "--switch-from", "2026-09", "--switch-to", "2026-10")
+	wantUsageErr(t, err, errSwitchingType)
+	if len(got.paths) != 0 {
+		t.Errorf("%d requests sent, want none", len(got.paths))
+	}
+}
+
 // Each Network Switching mistake is a usage error before anything is read,
 // with no token too.
 func TestAudiencesSwitchingUsageErrors(t *testing.T) {

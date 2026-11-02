@@ -130,7 +130,7 @@ func (r *audienceRequest) connectivityOptions(dsType string, changed func(string
 
 // switchingOptions checks the Network Switching flags and returns the block
 // they write, or nil when none was given. Nothing here needs a token.
-func (r *audienceRequest) switchingOptions(dsType string, changed func(string) bool) (*networkSwitching, error) {
+func (r *audienceRequest) switchingOptions(changed func(string) bool) (*networkSwitching, error) {
 	asked := false
 	for _, f := range switchingFlags {
 		asked = asked || changed(f)
@@ -141,9 +141,6 @@ func (r *audienceRequest) switchingOptions(dsType string, changed func(string) b
 	if !changed("switch-from") || !changed("switch-to") {
 		return nil, usageErr("--switch-from and --switch-to go together: network switching compares " +
 			"the months they name")
-	}
-	if dsType != "Connectivity" {
-		return nil, usageErr(errSwitchingType)
 	}
 	from, err := parseMonth("switch-from", r.switchFrom)
 	if err != nil {
