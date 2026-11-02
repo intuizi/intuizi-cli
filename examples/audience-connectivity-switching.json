@@ -1,0 +1,22 @@
+{
+  "name": "Starlink switching - September to October 2026",
+  "datasets": [
+    {
+      "type": "Connectivity",
+      "start_date": "2026-10-19",
+      "end_date": "2026-10-25",
+      "signal_providers": ["BID001"],
+      "location": { "countries": ["USA"] },
+      "connectivity_network_kind": "home",
+      "connectivity_networks": ["Starlink"],
+      "connectivity_technologies": ["Satellite"],
+      "connectivity_min_days": 3
+    }
+  ],
+  "networkswitching": {
+    "network_type": "home",
+    "from_month": "2026-09",
+    "to_month": "2026-10",
+    "min_home_days": 3
+  }
+}

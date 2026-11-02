@@ -22,6 +22,7 @@ sending anything. The dates are examples too, and some go stale: see the
 | `audience-poi.json` | `audiences create` | The minimum: one POI dataset. Every audience file here also works with `audiences estimate create`, which sizes the audience without creating it. |
 | `audience-two-datasets.json` | `audiences create` | Two datasets, so `operator` is required. |
 | `audience-refine-crosspurchase.json` | `audiences create` | `refine` sits **inside** the dataset; `crosspurchase` sits at the **top level**. Both are permission-gated. |
+| `audience-connectivity-switching.json` | `audiences create` | One `Connectivity` dataset, whose `connectivity_network_kind` is required, with the **top-level** `networkswitching` block, which is permission-gated and cannot be sent with `crosspurchase`. Flags build the same body: `--type connectivity --network-kind home --network Starlink --technology Satellite --min-days 3 --country USA --switch-from 2026-09 --switch-to 2026-10`, with the name, dates and `--provider`. `audiences estimate create` checks the block too, so drop it to size the audience without the permission. |
 | `activation.json` | `activations create --file` | From flags, an export needs `--audience-id`, `--endpoint-connection-id`, `--pricing-model-id` and at least one `--datastream`; without a datastream it completes and delivers nothing. Use this file for per-stream inputs or compression. Add `--wait` to follow it to Completed; `--timeout` defaults to 60m. |
 | `cohort.json` | `cohorts create` | Swap `file_uri` for `upload_reference` to use `intuizi uploads put`. Or build it from flags - see the README. |
 | `cohort-from-audience.json` | `cohorts create` | The audience must be Completed, and makes at most one live cohort. Swap `device_limit` for `freq_limit` + `freq_min`/`freq_max`, or `distance_limit` + `distance` (meters). It carries no `name`: the cohort takes the audience's, and the API ignores one sent here. |
@@ -37,6 +38,7 @@ intuizi reference poi categories                  # POI "categories"
 intuizi reference apps categories                 # Apps "categories"
 intuizi reference web iab-categories              # WebDomain "iab_category_codes": the id column, not the code
 intuizi reference transactions categories         # crosspurchase targets
+intuizi reference connectivity networks --kind home  # Connectivity "connectivity_networks"
 intuizi reference common endpoint-connections     # endpoint_connection_id
 intuizi reference common pricing-models --partner-id <id>
 intuizi reference common datastreams --partner-id <id>  # an activation's datastreams[].id
@@ -54,6 +56,12 @@ intuizi reference common schedule-endings         # recurrence.ending.type
 - A `crosspurchase` window covers at most two calendar months and cannot run
   past the last settled purchase week.
 - `crossvisitation` can be sent on create but never round-trips on the read.
+  Neither does `networkswitching`: its results are read in
+  `analysis_results.network_switching` of `audiences show <id> --json`.
+- A `Connectivity` dataset's dates widen to whole Monday-to-Sunday weeks, and
+  in a `networkswitching` block on it a month stands for its last full week,
+  which must be built for the dataset's signal providers. The dates in
+  `audience-connectivity-switching.json` go stale like the others.
 - A `WebDomain` dataset's `start_date` must fall within the last 45 days
   (today minus 46 days, in UTC, is the earliest accepted), or the API
   rejects it with a 422. `audience-two-datasets.json` carries a fixed date

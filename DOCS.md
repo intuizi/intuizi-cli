@@ -301,17 +301,24 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--brand-all` | a search, taking every match; POI only | `reference poi brands` |
 | `--category` | name or id, repeatable | one catalog per type, below |
 | `--provider` | id, repeatable | `reference common signal-providers --data-type <type>` |
-| `--country` | ISO-3 code, repeatable; the API requires it for every type except Cohorts, AffinityTransactions and ProfileAttributes, and the CLI checks it before sending only on Origin | `reference common countries` |
+| `--country` | ISO-3 code, repeatable; the API requires it for every type except Cohorts, AffinityTransactions and ProfileAttributes, and the CLI checks it before sending only on Origin and Connectivity | `reference common countries` |
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--city` | city name, repeatable | `reference common cities --states CA` |
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
 | `--filter` | POI quality filter, repeatable: `anomalous_devices`, `anomalous_pois` or `strict_gps`; POI only, none by default | - |
 | `--frequency` | boolean: run the type's frequency analysis; POI, Apps and WebDomain only | - |
+| `--network-kind` | `home` or `mobile`; Connectivity only, and required there | - |
+| `--network` | network name, repeatable; Connectivity only, checked against the catalog of the kind | `reference connectivity networks --kind <kind>` |
+| `--technology` | `Fiber`, `Cable`, `DSL`, `Cable or DSL`, `Satellite` or `Fixed wireless`, repeatable; Connectivity home networks only | - |
+| `--min-days` | 1 to 7; Connectivity only, the API's default is 3 | - |
+| `--switch-from` `--switch-to` | `YYYY-MM`, both or neither: run the Network Switching analysis; `audiences create` only | - |
+| `--switch-network` | `home` (default) or `mobile`; CTV takes `home` only | - |
+| `--switch-min-days` | 2 to 5, default 3 | - |
 | `--dry-run` `--wait` `--timeout` | - | - |
 
 `--type` is case-insensitive in and canonical out: `poi` sends `POI`. The
-flags build POI, Apps, WebDomain, CTV, AffinityTransactions, Deidentified and
-Origin. Cohorts, Demographics and ProfileAttributes are refused before
+flags build POI, Apps, WebDomain, CTV, AffinityTransactions, Deidentified,
+Origin and Connectivity. Cohorts, Demographics and ProfileAttributes are refused before
 anything is sent, exit 2, and go through `--file`: each requires a field no
 flag writes (a `cohort_id`, at least one demographic filter, or
 `profile_attributes` rows or `profile_attribute_groups`), and Demographics
@@ -396,6 +403,113 @@ intuizi audiences create --type origin --country USA --state CA \
 
 ```
 Origin data is weekly: the API widens 2026-09-02..2026-09-09 to the whole weeks 2026-08-31..2026-09-13
+```
+
+`--type connectivity` targets devices by the network they used: the home
+internet network, or the mobile carrier, a device was on for most days of a
+week. `--network-kind` is required: `home` for home internet networks or
+`mobile` for mobile carriers, sent as `connectivity_network_kind`. The other
+three flags narrow it and are optional:
+
+- `--network` names networks from `reference connectivity networks --kind
+  <kind>`, sent as `connectivity_networks`. The CLI reads that catalog, every
+  page of it, and refuses a name it does not list before anything is sent,
+  ignoring case and sending the catalog's spelling. The catalog lists curated
+  brands only: leave `--network` out to read any network of the kind,
+  including networks it does not list.
+- `--technology` narrows home networks to `Fiber`, `Cable`, `DSL`,
+  `Cable or DSL`, `Satellite` or `Fixed wireless`, sent as
+  `connectivity_technologies`. It is case-insensitive and refused with
+  `--network-kind mobile`.
+- `--min-days` is the fewest days of a week a device must have used the
+  network, 1 to 7, sent as `connectivity_min_days` only when given. The API's
+  default is 3.
+
+`--country` is required, as for Origin: `reference common countries
+--dataset-type Connectivity` lists the countries with Connectivity data, and
+`reference common signal-providers --data-type Connectivity` the providers
+that omitting `--provider` sends. `--state`, `--city` and `--zipcode` set a
+home area: they narrow the audience to the devices whose home in the same week
+is in it. DMAs need `--file`. The four Connectivity flags are refused on any
+other type, and `--brand`, `--brand-all`, `--category`, `--filter` and
+`--frequency` are refused on Connectivity, before anything is sent, exit 2.
+
+Connectivity data is weekly too. The API widens the window to whole
+Monday-to-Sunday weeks and then keeps the weeks that are built, and stderr
+names the widened window as it does for Origin:
+
+```bash
+intuizi audiences create --type connectivity --network-kind home \
+  --network Starlink --technology Satellite --country USA \
+  --start-date 2026-10-14 --end-date 2026-10-21 \
+  --name "Starlink homes - October 2026" --dry-run
+```
+
+```
+Connectivity data is weekly: the API widens 2026-10-14..2026-10-21 to the whole weeks 2026-10-12..2026-10-25, and keeps the weeks that are built
+```
+
+`--switch-from` and `--switch-to` run the Network Switching analysis on the
+built audience, in the top-level `networkswitching` block. For each device it
+finds the home internet network, or with `--switch-network mobile` the mobile
+carrier, in each of the two months, and counts the devices that kept their
+network, changed it and switched. A month stands for its last 7 days, or on a
+Connectivity audience for its last full Monday-to-Sunday week.
+`--switch-min-days` (2 to 5, default 3) is the fewest days of that window a
+device must be seen on a network for it to be its home network. The block
+always carries all four keys, the defaults included.
+
+The analysis runs on an audience of one Deidentified, CTV or Connectivity
+dataset; any other `--type` is refused before anything is sent, exit 2. CTV
+takes `--switch-network home` only. The two months go together, as `YYYY-MM`,
+the first before the second; the API checks the rest, such as how far back
+they may reach. A CTV or Connectivity dataset keeps its own dates. A
+Deidentified one must have the `--switch-to` window as its dates, so with no
+`--start-date` and `--end-date` the CLI sets them to the last 7 days of that
+month and says so on stderr:
+
+```bash
+intuizi audiences create --type deidentified --country USA \
+  --switch-from 2026-08 --switch-to 2026-09 \
+  --name "Home network switching - August to September 2026" --dry-run
+```
+
+```
+Network switching on a Deidentified dataset: the dates are the last 7 days of --switch-to 2026-09, 2026-09-24..2026-09-30
+```
+
+Only `audiences create` takes the switching flags: an estimate and a quote
+never run the analysis. To estimate a Deidentified audience built for it, pass
+the dates `create` sets. The analysis requires additional permissions which
+need to be approved by your Account Manager: a 403 means they are not enabled
+for the account.
+
+Once the audience is Completed, `audiences show <id>` follows the audience with
+a summary of the results: the two windows compared with their dates, then
+`devices_from`, `devices_to`, `devices_both`, `changed` and `switched`, and the
+top 10 flows between two networks, the most devices first. Every count is a
+count of devices. Until the analysis finishes the summary reads "no results".
+`--json` prints the results whole, the per-network rows and every flow
+included, under `.data[0].analysis_results.network_switching`:
+
+```
+Network Switching
+version        2
+source         connectivity
+network_type   home
+min_home_days  3
+from           2026-09 (2026-09-21 to 2026-09-27)
+to             2026-10 (2026-10-19 to 2026-10-25)
+devices_from   1150000
+devices_to     1200000
+devices_both   1000000
+changed        17000
+switched       4000
+
+Top flows
+from               to                 devices  switched  reverse  reverse_switched
+EXAMPLE DSL        EXAMPLE SATELLITE  12000    3000      5000     1000
+EXAMPLE SATELLITE  EXAMPLE DSL        5000     1000      12000    3000
 ```
 
 `--brand-all` takes a search and selects every match, where `--brand` insists
@@ -593,7 +707,10 @@ creating it. Nothing appears in Audience Manager, and no export, cohort,
 schedule or activation follows. Swapping `estimate create` for `create` in the
 same command line builds the audience that was estimated. `--frequency` is
 accepted for that reason, and checked as on create, but an estimate never runs
-an analysis, so it changes neither the figures nor `recipe_hash`. `--filter` is
+an analysis, so it changes neither the figures nor `recipe_hash`. The Network
+Switching flags are the exception: they are `audiences create` only, and a
+Deidentified audience built for the analysis is estimated with the dates
+`create` sets for it, the last 7 days of the `--switch-to` month. `--filter` is
 part of the recipe: the filters change both, so estimate with the ones the
 audience will be built with.
 
@@ -1173,6 +1290,7 @@ not the text label (`--search F`, not `female`, for genders, and `M`, not
 - **demographics** - genders, ages, marital-statuses, incomes
 - **profile-attributes** - categories, keys, values, recency-limits
 - **deidentified** - fields
+- **connectivity** - networks
 - **cohorts** - list
 
 Several catalogs cascade: a child read takes values from the level above to
@@ -1200,6 +1318,12 @@ catalog unfiltered:
   `--subcategory-codes`). An `iab-categories` row's `value` is the IAB code,
   which `--quiet` prints and `domains --category-codes` takes; a WebDomain
   audience's `iab_category_codes` takes the number in its `id` column instead.
+
+`connectivity networks` lists the network names a Connectivity dataset's
+`--network` takes, with each home network's technologies. `--kind home` or
+`--kind mobile` narrows it to one kind, and any other value is refused before
+anything is sent. The list holds curated brands only, and it is empty until
+the first weekly catalog is published.
 
 `datastreams` and `datastream-visualizations` are different catalogs.
 `datastreams --partner-id <id>` lists a partner's delivery outputs, which an
@@ -1479,7 +1603,8 @@ locations.
 
 Completion covers commands, flag names, and the values of `--type`,
 `--signal`, `--file-format`, `--identifier-type`, `schedules create
---frequency` and `--purpose`. Other flags that take a fixed set, such as `poi submissions list
+--frequency`, `--purpose`, `--network-kind`, `--technology`,
+`--switch-network` and `reference connectivity networks --kind`. Other flags that take a fixed set, such as `poi submissions list
 --sort-by` and `--order`, `poi locations list --geometry` and `poi submissions
 create --key`, complete no values; their help lists them.
 
