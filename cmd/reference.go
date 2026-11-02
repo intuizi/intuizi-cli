@@ -34,6 +34,10 @@ type param struct {
 	// once: the API reads every value as the kind of the first and silently
 	// drops the rest, so a mix is refused before it is sent.
 	oneKind bool
+
+	// values, on a str param, is the fixed set it takes, lower case: the
+	// shell completes them, and any other value is refused before it is sent.
+	values []string
 }
 
 // endpoint is one reference read. path is set only where the URL segment differs
@@ -172,6 +176,18 @@ var referenceGroups = []referenceGroup{
 		},
 	},
 	{
+		name:  "connectivity",
+		short: "Home internet networks and mobile carriers",
+		endpoints: []endpoint{
+			// Curated brands only: a Connectivity dataset with no networks
+			// reads every network of its kind, listed here or not.
+			{item: "networks", short: "Networks a Connectivity dataset can name", paged: true, params: []param{
+				{name: "kind", kind: str, values: networkKinds,
+					help: "home (home internet networks) or mobile (mobile carriers); both when left out"},
+			}},
+		},
+	},
+	{
 		name:  "web",
 		short: "IAB categories, web domains, browsers and devices",
 		endpoints: []endpoint{
@@ -273,6 +289,7 @@ its id column instead.
     intuizi reference common dataset-types
     intuizi reference common states --countries USA
     intuizi reference apps categories --search fitness
+    intuizi reference connectivity networks --kind home
     intuizi reference web domains --category-codes IAB2 --json
 
 Each read accepts --search, a case-insensitive contains match, except
