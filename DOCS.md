@@ -442,7 +442,7 @@ names the widened window as it does for Origin:
 intuizi audiences create --type connectivity --network-kind home \
   --network Starlink --technology Satellite --country USA \
   --start-date 2026-10-14 --end-date 2026-10-21 \
-  --name "Starlink homes - October 2026" --dry-run
+  --name "Starlink devices - October 2026" --dry-run
 ```
 
 ```
@@ -460,9 +460,9 @@ device must be seen on a network for it to be its home network. The block
 always carries all four keys, the defaults included.
 
 The analysis runs on an audience of one Deidentified, CTV or Connectivity
-dataset; any other `--type` is refused before anything is sent, exit 2. CTV
+dataset. Any other `--type` is refused before anything is sent, exit 2. CTV
 takes `--switch-network home` only. The two months go together, as `YYYY-MM`,
-the first before the second; the API checks the rest, such as how far back
+the first before the second. The API checks the rest, such as how far back
 they may reach. A CTV or Connectivity dataset keeps its own dates. A
 Deidentified one must have the `--switch-to` window as its dates, so with no
 `--start-date` and `--end-date` the CLI sets them to the last 7 days of that

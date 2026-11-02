@@ -126,9 +126,9 @@ dataset keeps its own dates.
 
 'intuizi audiences show <id>' prints the results once the audience is
 Completed. The analysis requires additional permissions which need to be
-approved by your Account Manager; a 403 means they are not enabled for the
-account. Only 'audiences create' takes these flags: an estimate and a quote
-never run the analysis.
+approved by your Account Manager: a 403 means they are not enabled for the
+account. Only 'audiences create' takes these flags, because an estimate and a
+quote never run the analysis.
 
 Omitting --provider includes every signal provider for the dataset type, which
 is almost always what you want. The CLI reads that catalog first, and a
