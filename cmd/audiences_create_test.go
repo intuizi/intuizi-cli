@@ -316,6 +316,7 @@ func TestAudiencesCreateBrandHintPerType(t *testing.T) {
 	hints := map[string]string{
 		"AffinityTransactions": "; affinity brands need --file",
 		"Origin":               "; Origin filters on geography only (--country, --state, --city, --zipcode)",
+		"Connectivity":         "; Connectivity filters by network (--network-kind, --network, --technology, --min-days) and geography",
 		"Apps":                 "; use --category",
 		"WebDomain":            "; use --category",
 		"CTV":                  "",
@@ -377,7 +378,7 @@ func TestAudiencesCreateRefusesTheTypesFlagsCannotBuild(t *testing.T) {
 // Completion offers only the types the flag path builds.
 func TestFlagTypesLeavesOutTheFileOnlyTypes(t *testing.T) {
 	got := strings.Join(flagTypes(), ",")
-	if want := "affinitytransactions,apps,ctv,deidentified,origin,poi,webdomain"; got != want {
+	if want := "affinitytransactions,apps,connectivity,ctv,deidentified,origin,poi,webdomain"; got != want {
 		t.Errorf("flagTypes() = %s, want %s", got, want)
 	}
 }
