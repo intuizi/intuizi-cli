@@ -317,95 +317,30 @@ func TestAudiencesSwitchingBuildsTheBlock(t *testing.T) {
 	}
 }
 
-// A CTV audience compares home networks only, and keeps its own dates.
-func TestAudiencesSwitchingOnCTV(t *testing.T) {
-	ctv := []string{"--type", "ctv", "--name", "x", "--country", "USA",
-		"--start-date", "2026-10-01", "--end-date", "2026-10-31", "--switch-from", "2026-08", "--switch-to", "2026-09"}
-
-	t.Run("home", func(t *testing.T) {
-		srv, _ := stub(t, providersPOI)
-		body := dryRunBody(t, audiencesCreateCommand(), srv, ctv...)
-		if got := jsonOf(body["networkswitching"]); !strings.Contains(got, `"network_type":"home"`) {
-			t.Errorf("networkswitching = %s", got)
-		}
-		if ds := firstDataset(t, body); ds["start_date"] != "2026-10-01" || ds["end_date"] != "2026-10-31" {
-			t.Errorf("dates changed: %v", ds)
-		}
-	})
-	t.Run("mobile is refused", func(t *testing.T) {
-		err := runLoggedOut(t, audiencesCreateCommand(), with(ctv, "--switch-network", "mobile")...)
-		wantUsageErr(t, err, "--switch-network mobile does not apply to CTV", "home")
-	})
-}
-
-// The API requires a Deidentified dataset's dates to be the --switch-to
-// window, the last 7 days of that month, so the CLI sets them when none were
-// given and says so on stderr. Given dates are sent as given.
-func TestAudiencesSwitchingSetsTheDeidentifiedWindow(t *testing.T) {
-	deid := []string{"--type", "deidentified", "--name", "x", "--country", "USA",
-		"--switch-from", "2026-08", "--switch-to", "2026-09"}
-
-	t.Run("no dates", func(t *testing.T) {
-		srv, _ := stub(t, providersPOI)
-		out, errb, err := run(t, audiencesCreateCommand(), srv, with(deid, "--dry-run")...)
-		if err != nil {
-			t.Fatalf("execute: %v", err)
-		}
-		var body map[string]any
-		if err := json.Unmarshal([]byte(out), &body); err != nil {
-			t.Fatalf("stdout is not the body alone: %v\n%s", err, out)
-		}
-		if ds := firstDataset(t, body); ds["start_date"] != "2026-09-24" || ds["end_date"] != "2026-09-30" {
-			t.Errorf("dates = %v..%v, want 2026-09-24..2026-09-30", ds["start_date"], ds["end_date"])
-		}
-		want := "Network switching on a Deidentified dataset: the dates are the last 7 days of " +
-			"--switch-to 2026-09, 2026-09-24..2026-09-30\n"
-		if errb != want {
-			t.Errorf("stderr = %q\nwant     %q", errb, want)
-		}
-	})
-
-	t.Run("given dates", func(t *testing.T) {
-		srv, _ := stub(t, providersPOI)
-		_, errb, err := run(t, audiencesCreateCommand(), srv,
-			with(deid, "--start-date", "2026-09-20", "--end-date", "2026-09-30", "--dry-run")...)
-		if err != nil {
-			t.Fatalf("execute: %v", err)
-		}
-		if errb != "" {
-			t.Errorf("given dates need no note, got %q", errb)
-		}
-		srv2, _ := stub(t, providersPOI)
-		body := dryRunBody(t, audiencesCreateCommand(), srv2,
-			with(deid, "--start-date", "2026-09-20", "--end-date", "2026-09-30")...)
-		if ds := firstDataset(t, body); ds["start_date"] != "2026-09-20" || ds["end_date"] != "2026-09-30" {
-			t.Errorf("given dates were changed: %v", ds)
-		}
-	})
-
-	t.Run("one date is not enough", func(t *testing.T) {
-		err := runLoggedOut(t, audiencesCreateCommand(), with(deid, "--start-date", "2026-09-24")...)
-		wantUsageErr(t, err, "--end-date")
-	})
-
-	t.Run("without switching the dates are still required", func(t *testing.T) {
-		err := runLoggedOut(t, audiencesCreateCommand(), deid[:6]...)
-		wantUsageErr(t, err, "--start-date", "--end-date")
-	})
-}
-
-// A month stands for its last 7 days, whatever its length.
-func TestMonthWindow(t *testing.T) {
-	for month, want := range map[string][2]string{
-		"2026-08": {"2026-08-25", "2026-08-31"},
-		"2026-09": {"2026-09-24", "2026-09-30"},
-		"2026-02": {"2026-02-22", "2026-02-28"},
-		"2028-02": {"2028-02-23", "2028-02-29"},
-		"2026-12": {"2026-12-25", "2026-12-31"},
+// The analysis runs on a Connectivity audience only. Any other type gets the
+// shared refusal before a request, with no token too, whatever else is wrong.
+func TestAudiencesSwitchingRefusesOtherTypes(t *testing.T) {
+	sw := []string{"--switch-from", "2026-09", "--switch-to", "2026-10"}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"deidentified", []string{"--type", "deidentified", "--name", "x", "--country", "USA",
+			"--start-date", "2026-09-24", "--end-date", "2026-09-30"}},
+		{"ctv", []string{"--type", "ctv", "--name", "x", "--country", "USA",
+			"--start-date", "2026-10-01", "--end-date", "2026-10-31"}},
+		{"poi", []string{"--type", "poi", "--name", "x", "--country", "USA",
+			"--start-date", "2026-10-19", "--end-date", "2026-10-25"}},
 	} {
-		if start, end := monthWindow(month); start != want[0] || end != want[1] {
-			t.Errorf("monthWindow(%s) = %s..%s, want %s..%s", month, start, end, want[0], want[1])
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, providersPOI)
+			_, _, err := run(t, audiencesCreateCommand(), srv, with(with(tc.args, sw...), "--dry-run")...)
+			wantUsageErr(t, err, errSwitchingType)
+			if n := len(got.paths); n != 0 {
+				t.Errorf("%d requests sent, want none", n)
+			}
+			wantUsageErr(t, runLoggedOut(t, audiencesCreateCommand(), with(tc.args, sw...)...), errSwitchingType)
+		})
 	}
 }
 
@@ -448,7 +383,7 @@ func TestAudiencesSwitchingUsageErrors(t *testing.T) {
 		})
 	}
 	// The API's own words, verbatim.
-	if errSwitchingType != "Network switching runs on an audience with one Deidentified, CTV or Connectivity dataset." {
+	if errSwitchingType != "Network switching runs on an audience with one Connectivity dataset." {
 		t.Errorf("errSwitchingType = %q", errSwitchingType)
 	}
 }

@@ -23,9 +23,8 @@ func audiencesQuoteCommand() *cobra.Command {
 Takes exactly what 'intuizi audiences create' takes - the same flags, names
 resolved the same way, or the same --file body - and sends it to Quote
 Audience instead of Create Audience. The Network Switching flags are the one
-exception: they are create only, and a Deidentified audience built for the
-analysis is quoted with the dates 'audiences create' sets for it. The answer
-is the price in credits, how it splits over the datasets, and your
+exception: they are create only, so leave them out to price the audience. The
+answer is the price in credits, how it splits over the datasets, and your
 organization's credits now and after the build:
 
     intuizi audiences quote \

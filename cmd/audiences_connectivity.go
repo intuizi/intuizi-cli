@@ -27,11 +27,8 @@ var networkKinds = []string{"home", "mobile"}
 // spelling. They describe home networks only.
 var connectivityTechnologies = []string{"Fiber", "Cable", "DSL", "Cable or DSL", "Satellite", "Fixed wireless"}
 
-// switchingTypes are the dataset types the Network Switching analysis runs on.
-var switchingTypes = []string{"Deidentified", "CTV", "Connectivity"}
-
 // errSwitchingType is the API's own rule, refused before anything is sent.
-const errSwitchingType = "Network switching runs on an audience with one Deidentified, CTV or Connectivity dataset."
+const errSwitchingType = "Network switching runs on an audience with one Connectivity dataset."
 
 // Bounds the API sets, checked before anything is sent.
 const (
@@ -41,8 +38,6 @@ const (
 	minHomeDaysHigh     = 5
 	defaultMinHomeDays  = 3
 	monthLayout         = "2006-01"
-	// switchingWindowDays is how many days stand for a month: its last 7.
-	switchingWindowDays = 7
 )
 
 // connectivityFlags are the flags that write a Connectivity dataset's own
@@ -147,7 +142,7 @@ func (r *audienceRequest) switchingOptions(dsType string, changed func(string) b
 		return nil, usageErr("--switch-from and --switch-to go together: network switching compares " +
 			"the months they name")
 	}
-	if !slices.Contains(switchingTypes, dsType) {
+	if dsType != "Connectivity" {
 		return nil, usageErr(errSwitchingType)
 	}
 	from, err := parseMonth("switch-from", r.switchFrom)
@@ -164,10 +159,6 @@ func (r *audienceRequest) switchingOptions(dsType string, changed func(string) b
 	network, err := canonicalKind("switch-network", r.switchNetwork)
 	if err != nil {
 		return nil, err
-	}
-	if dsType == "CTV" && network != "home" {
-		return nil, usageErr("--switch-network " + network + " does not apply to CTV: a CTV audience " +
-			"compares the home network only")
 	}
 	if r.switchMinDays < minHomeDaysLow || r.switchMinDays > minHomeDaysHigh {
 		return nil, usageErr(fmt.Sprintf("--switch-min-days must be between %d and %d, not %d",
@@ -188,32 +179,6 @@ func parseMonth(flag, v string) (time.Time, error) {
 		return time.Time{}, usageErr("--" + flag + " must be YYYY-MM, not " + v)
 	}
 	return m, nil
-}
-
-// monthWindow is the window that stands for a month in the Network Switching
-// analysis of a Deidentified audience: its last 7 days. month is YYYY-MM,
-// already checked by parseMonth.
-func monthWindow(month string) (string, string) {
-	m, _ := time.Parse(monthLayout, month)
-	// Day 0 of the next month is the last day of this one.
-	last := time.Date(m.Year(), m.Month()+1, 0, 0, 0, 0, 0, time.UTC)
-	first := last.AddDate(0, 0, -(switchingWindowDays - 1))
-	return first.Format(dateLayout), last.Format(dateLayout)
-}
-
-// switchingAutoDates reports a Deidentified audience whose dates come from
-// --switch-to: the API requires them to be that month's window, so neither
-// date flag is needed. Given dates are sent as given.
-func switchingAutoDates(dsType string, changed func(string) bool) bool {
-	if dsType != "Deidentified" || changed("start-date") || changed("end-date") {
-		return false
-	}
-	for _, f := range switchingFlags {
-		if changed(f) {
-			return true
-		}
-	}
-	return false
 }
 
 // weeklyNote names the window a weekly dataset actually scans, when the API

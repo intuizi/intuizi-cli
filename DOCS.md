@@ -312,7 +312,7 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--technology` | `Fiber`, `Cable`, `DSL`, `Cable or DSL`, `Satellite` or `Fixed wireless`, repeatable; Connectivity home networks only | - |
 | `--min-days` | 1 to 7; Connectivity only, the API's default is 3 | - |
 | `--switch-from` `--switch-to` | `YYYY-MM`, both or neither: run the Network Switching analysis; `audiences create` only | - |
-| `--switch-network` | `home` (default) or `mobile`; CTV takes `home` only | - |
+| `--switch-network` | `home` (default) or `mobile` | - |
 | `--switch-min-days` | 2 to 5, default 3 | - |
 | `--dry-run` `--wait` `--timeout` | - | - |
 
@@ -453,36 +453,31 @@ Connectivity data is weekly: the API widens 2026-10-14..2026-10-21 to the whole 
 built audience, in the top-level `networkswitching` block. For each device it
 finds the home internet network, or with `--switch-network mobile` the mobile
 carrier, in each of the two months, and counts the devices that kept their
-network, changed it and switched. A month stands for its last 7 days, or on a
-Connectivity audience for its last full Monday-to-Sunday week.
-`--switch-min-days` (2 to 5, default 3) is the fewest days of that window a
+network, changed it and switched. Each month is read as its last full
+Monday-to-Sunday week, and both weeks must be built Connectivity weeks.
+`--switch-min-days` (2 to 5, default 3) is the fewest days of that week a
 device must be seen on a network for it to be its home network. The block
 always carries all four keys, the defaults included.
 
-The analysis runs on an audience of one Deidentified, CTV or Connectivity
-dataset. Any other `--type` is refused before anything is sent, exit 2. CTV
-takes `--switch-network home` only. The two months go together, as `YYYY-MM`,
-the first before the second. The API checks the rest, such as how far back
-they may reach. A CTV or Connectivity dataset keeps its own dates. A
-Deidentified one must have the `--switch-to` window as its dates, so with no
-`--start-date` and `--end-date` the CLI sets them to the last 7 days of that
-month and says so on stderr:
+The analysis runs on an audience of one Connectivity dataset only. Any other
+`--type` is refused before anything is sent, exit 2, with `Network switching
+runs on an audience with one Connectivity dataset.` The two months go together,
+as `YYYY-MM`, the first before the second. The API checks the rest, such as
+how far back they may reach. The Connectivity dataset keeps its own dates:
 
 ```bash
-intuizi audiences create --type deidentified --country USA \
-  --switch-from 2026-08 --switch-to 2026-09 \
-  --name "Home network switching - August to September 2026" --dry-run
-```
-
-```
-Network switching on a Deidentified dataset: the dates are the last 7 days of --switch-to 2026-09, 2026-09-24..2026-09-30
+intuizi audiences create --type connectivity --network-kind home \
+  --network Starlink --country USA \
+  --start-date 2026-10-19 --end-date 2026-10-25 \
+  --switch-from 2026-09 --switch-to 2026-10 \
+  --name "Starlink switching - September to October 2026" --dry-run
 ```
 
 Only `audiences create` takes the switching flags: an estimate and a quote
-never run the analysis. To estimate a Deidentified audience built for it, pass
-the dates `create` sets. The analysis requires additional permissions which
-need to be approved by your Account Manager: a 403 means they are not enabled
-for the account.
+never run the analysis, so leave the flags out to estimate or price the
+audience. The analysis requires additional permissions which need to be
+approved by your Account Manager: a 403 means they are not enabled for the
+account.
 
 Once the audience is Completed, `audiences show <id>` follows the audience with
 a summary of the results: the two windows compared with their dates, then
@@ -708,9 +703,8 @@ schedule or activation follows. Swapping `estimate create` for `create` in the
 same command line builds the audience that was estimated. `--frequency` is
 accepted for that reason, and checked as on create, but an estimate never runs
 an analysis, so it changes neither the figures nor `recipe_hash`. The Network
-Switching flags are the exception: they are `audiences create` only, and a
-Deidentified audience built for the analysis is estimated with the dates
-`create` sets for it, the last 7 days of the `--switch-to` month. `--filter` is
+Switching flags are the exception: they are `audiences create` only, so leave
+them out to estimate the audience. `--filter` is
 part of the recipe: the filters change both, so estimate with the ones the
 audience will be built with.
 
