@@ -20,6 +20,7 @@ const (
 	brandsPath        = referencePrefix + "poi/brands"
 	providersPath     = referencePrefix + "common/signal-providers"
 	iabCategoriesPath = referencePrefix + "web/iab-categories"
+	networksPath      = referencePrefix + "connectivity/networks"
 )
 
 // categoryCatalog is where --category resolves and where the ids then go.
@@ -242,6 +243,7 @@ var datasetTypes = map[string]string{
 	"deidentified":         "Deidentified",
 	"profileattributes":    "ProfileAttributes",
 	"origin":               "Origin",
+	"connectivity":         "Connectivity",
 }
 
 // fileOnlyTypes are the types no flag set can build, with what stops them.
@@ -346,24 +348,45 @@ type audienceLocation struct {
 // audienceDataset is typed, not a map, so a misspelled key is a compile error
 // - the one mistake --file cannot catch. analysisdata is POI's brand selector;
 // AffinityTransactions calls the same thing "brands".
+//
+// The connectivity_ keys are a Connectivity dataset's own, and every one is
+// left out on any other type. connectivity_min_days is sent only when
+// --min-days was given (1 to 7, so 0 is never a value): without it the body
+// is the one a file that leaves the key out would send.
 type audienceDataset struct {
-	Type             string            `json:"type"`
-	StartDate        string            `json:"start_date"`
-	EndDate          string            `json:"end_date"`
-	Analysisdata     []any             `json:"analysisdata,omitempty"`
-	Categories       []any             `json:"categories,omitempty"`
-	IABCategoryCodes []any             `json:"iab_category_codes,omitempty"`
-	SignalProviders  []any             `json:"signal_providers,omitempty"`
-	Location         *audienceLocation `json:"location,omitempty"`
-	Filters          []string          `json:"filters,omitempty"`
+	Type                     string            `json:"type"`
+	StartDate                string            `json:"start_date"`
+	EndDate                  string            `json:"end_date"`
+	Analysisdata             []any             `json:"analysisdata,omitempty"`
+	Categories               []any             `json:"categories,omitempty"`
+	IABCategoryCodes         []any             `json:"iab_category_codes,omitempty"`
+	SignalProviders          []any             `json:"signal_providers,omitempty"`
+	Location                 *audienceLocation `json:"location,omitempty"`
+	Filters                  []string          `json:"filters,omitempty"`
+	ConnectivityNetworkKind  string            `json:"connectivity_network_kind,omitempty"`
+	ConnectivityNetworks     []string          `json:"connectivity_networks,omitempty"`
+	ConnectivityTechnologies []string          `json:"connectivity_technologies,omitempty"`
+	ConnectivityMinDays      int               `json:"connectivity_min_days,omitempty"`
 }
 
 // audienceBody is the single-dataset payload; two datasets go through --file.
 // No operator: the API stores "Single" itself, and it is not a valid input.
 type audienceBody struct {
-	Name     string            `json:"name"`
-	Datasets []audienceDataset `json:"datasets"`
-	Analyses map[string]bool   `json:"analyses,omitempty"`
+	Name             string            `json:"name"`
+	Datasets         []audienceDataset `json:"datasets"`
+	Analyses         map[string]bool   `json:"analyses,omitempty"`
+	NetworkSwitching *networkSwitching `json:"networkswitching,omitempty"`
+}
+
+// networkSwitching is the top-level block that runs the Network Switching
+// analysis on the built audience. All four keys are sent, the two defaults
+// included, so the body says what was asked for, as the API's own example
+// does.
+type networkSwitching struct {
+	NetworkType string `json:"network_type"`
+	FromMonth   string `json:"from_month"`
+	ToMonth     string `json:"to_month"`
+	MinHomeDays int    `json:"min_home_days"`
 }
 
 // frequencyAnalyses is the analyses key --frequency sets, per dataset type:
@@ -388,9 +411,10 @@ var poiFilters = []string{"anomalous_devices", "anomalous_pois", "strict_gps"}
 // MM/DD/YYYY on read; normalized_payload echoes this one.
 const dateLayout = "2006-01-02"
 
-// originWeeks is the window an Origin audience actually scans. Its data is
-// weekly, so the API widens any dates to the whole Monday-to-Sunday weeks they
-// touch. Both dates are already checked by parseWindow.
+// originWeeks is the window an Origin or a Connectivity audience actually
+// scans. Their data is weekly, so the API widens any dates to the whole
+// Monday-to-Sunday weeks they touch. Both dates are already checked by
+// parseWindow.
 func originWeeks(start, end string) (string, string) {
 	s, _ := time.Parse(dateLayout, start)
 	e, _ := time.Parse(dateLayout, end)

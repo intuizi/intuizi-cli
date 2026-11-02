@@ -22,7 +22,12 @@ func TestFlagCompletionMatchesValidation(t *testing.T) {
 		{"type", []string{"audiences", "create"}, flagTypes()},
 		{"filter", []string{"audiences", "create"}, poiFilters},
 		{"filter", []string{"audiences", "estimate", "create"}, poiFilters},
+		{"network-kind", []string{"audiences", "create"}, networkKinds},
+		{"network-kind", []string{"audiences", "estimate", "create"}, networkKinds},
+		{"technology", []string{"audiences", "create"}, connectivityTechnologies},
+		{"switch-network", []string{"audiences", "create"}, networkKinds},
 		{"signal", []string{"audiences", "lookalike", "create"}, sortedKeys(lookalikeSignals)},
+		{"kind", []string{"reference", "connectivity", "networks"}, networkKinds},
 	} {
 		t.Run(strings.Join(append(tc.args, tc.flag), " "), func(t *testing.T) {
 			args := append(append([]string{"__complete"}, tc.args...), "--"+tc.flag, "")

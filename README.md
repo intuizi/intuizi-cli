@@ -192,7 +192,7 @@ in [DOCS.md](DOCS.md); `--help` on any command lists all of its flags.
 | `projects` | `list`, `show`, `create`, `delete` |
 | `poi` | `segments`, `categories`, `brands`, `locations`, `submissions` |
 | `uploads` | `reserve`, `put` |
-| `reference` | 61 read-only catalogs across 10 groups |
+| `reference` | 62 read-only catalogs across 11 groups |
 | `usage` | monthly data-scan usage |
 | `credits` | the credit balance, and `statement` (organizations billed in credits) |
 | `webhooks` | `list` |
@@ -209,10 +209,10 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
   `completion`, `auth logout` and `auth status` without `--verify` call none.
   No server-side logic lives here.
 - **Most of the v2 surface.** Auth, audiences (including refine,
-  crossvisitation and crosspurchase, size estimates and credit quotes),
-  activations (including the frequency preview), cohorts, schedules,
-  projects, POI, uploads, usage, credits and reference reads, the data stream
-  visualization catalog among them.
+  crossvisitation, crosspurchase and network switching, size estimates and
+  credit quotes), activations (including the frequency preview), cohorts,
+  schedules, projects, POI, uploads, usage, credits and reference reads, the
+  data stream visualization catalog among them.
 - **Human first, script friendly.** Readable tables by default, `--json` for
   raw responses, `--quiet` for ids alone, and exit codes scripts can branch on.
 - **Wrong input fails before it is sent.** Names are resolved against the
