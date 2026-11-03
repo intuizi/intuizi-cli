@@ -272,6 +272,8 @@ func TestCanonicalType(t *testing.T) {
 		"profileattributes":    "ProfileAttributes",
 		"origin":               "Origin",
 		"ORIGIN":               "Origin",
+		"connectivity":         "Connectivity",
+		"Connectivity":         "Connectivity",
 	} {
 		got, err := canonicalType(in)
 		if err != nil {

@@ -301,17 +301,24 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--brand-all` | a search, taking every match; POI only | `reference poi brands` |
 | `--category` | name or id, repeatable | one catalog per type, below |
 | `--provider` | id, repeatable | `reference common signal-providers --data-type <type>` |
-| `--country` | ISO-3 code, repeatable; the API requires it for every type except Cohorts, AffinityTransactions and ProfileAttributes, and the CLI checks it before sending only on Origin | `reference common countries` |
+| `--country` | ISO-3 code, repeatable; the API requires it for every type except Cohorts, AffinityTransactions and ProfileAttributes, and the CLI checks it before sending only on Origin and Connectivity | `reference common countries` |
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--city` | city name, repeatable | `reference common cities --states CA` |
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
 | `--filter` | POI quality filter, repeatable: `anomalous_devices`, `anomalous_pois` or `strict_gps`; POI only, none by default | - |
 | `--frequency` | boolean: run the type's frequency analysis; POI, Apps and WebDomain only | - |
+| `--network-kind` | `home` or `mobile`; Connectivity only, and required there | - |
+| `--network` | network name, repeatable; Connectivity only, checked against the catalog of the kind | `reference connectivity networks --kind <kind>` |
+| `--technology` | `Fiber`, `Cable`, `DSL`, `Cable or DSL`, `Satellite` or `Fixed wireless`, repeatable; Connectivity home networks only | - |
+| `--min-days` | 1 to 7; Connectivity only, the API's default is 3 | - |
+| `--switch-from` `--switch-to` | `YYYY-MM`, both or neither: run the Network Switching analysis; `audiences create` only | - |
+| `--switch-network` | `home` (default) or `mobile` | - |
+| `--switch-min-days` | 2 to 5, default 3 | - |
 | `--dry-run` `--wait` `--timeout` | - | - |
 
 `--type` is case-insensitive in and canonical out: `poi` sends `POI`. The
-flags build POI, Apps, WebDomain, CTV, AffinityTransactions, Deidentified and
-Origin. Cohorts, Demographics and ProfileAttributes are refused before
+flags build POI, Apps, WebDomain, CTV, AffinityTransactions, Deidentified,
+Origin and Connectivity. Cohorts, Demographics and ProfileAttributes are refused before
 anything is sent, exit 2, and go through `--file`: each requires a field no
 flag writes (a `cohort_id`, at least one demographic filter, or
 `profile_attributes` rows or `profile_attribute_groups`), and Demographics
@@ -396,6 +403,108 @@ intuizi audiences create --type origin --country USA --state CA \
 
 ```
 Origin data is weekly: the API widens 2026-09-02..2026-09-09 to the whole weeks 2026-08-31..2026-09-13
+```
+
+`--type connectivity` targets devices by the network they used: the home
+internet network, or the mobile carrier, a device was on for most days of a
+week. `--network-kind` is required: `home` for home internet networks or
+`mobile` for mobile carriers, sent as `connectivity_network_kind`. The other
+three flags narrow it and are optional:
+
+- `--network` names networks from `reference connectivity networks --kind
+  <kind>`, sent as `connectivity_networks`. The CLI reads that catalog, every
+  page of it, and refuses a name it does not list before anything is sent,
+  ignoring case and sending the catalog's spelling. The catalog lists curated
+  brands only: leave `--network` out to read any network of the kind,
+  including networks it does not list.
+- `--technology` narrows home networks to `Fiber`, `Cable`, `DSL`,
+  `Cable or DSL`, `Satellite` or `Fixed wireless`, sent as
+  `connectivity_technologies`. It is case-insensitive and refused with
+  `--network-kind mobile`.
+- `--min-days` is the fewest days of a week a device must have used the
+  network, 1 to 7, sent as `connectivity_min_days` only when given. The API's
+  default is 3.
+
+`--country` is required, as for Origin: `reference common countries
+--dataset-type Connectivity` lists the countries with Connectivity data, and
+`reference common signal-providers --data-type Connectivity` the providers
+that omitting `--provider` sends. `--state`, `--city` and `--zipcode` set a
+home area: they narrow the audience to the devices whose home in the same week
+is in it. DMAs need `--file`. The four Connectivity flags are refused on any
+other type, and `--brand`, `--brand-all`, `--category`, `--filter` and
+`--frequency` are refused on Connectivity, before anything is sent, exit 2.
+
+Connectivity data is weekly too. The API widens the window to whole
+Monday-to-Sunday weeks and then keeps the weeks that are built, and stderr
+names the widened window as it does for Origin:
+
+```bash
+intuizi audiences create --type connectivity --network-kind home \
+  --network Starlink --technology Satellite --country USA \
+  --start-date 2026-10-14 --end-date 2026-10-21 \
+  --name "Starlink devices - October 2026" --dry-run
+```
+
+```
+Connectivity data is weekly: the API widens 2026-10-14..2026-10-21 to the whole weeks 2026-10-12..2026-10-25, and keeps the weeks that are built
+```
+
+`--switch-from` and `--switch-to` run the Network Switching analysis on the
+built audience, in the top-level `networkswitching` block. For each device it
+finds the home internet network, or with `--switch-network mobile` the mobile
+carrier, in each of the two months, and counts the devices that kept their
+network, changed it and switched. Each month is read as its last full
+Monday-to-Sunday week, and both weeks must be built Connectivity weeks.
+`--switch-min-days` (2 to 5, default 3) is the fewest days of that week a
+device must be seen on a network for it to be its home network. The block
+always carries all four keys, the defaults included.
+
+The analysis runs on an audience of one Connectivity dataset only. Any other
+`--type` is refused before anything is sent, exit 2, with `Network switching
+runs on an audience with one Connectivity dataset.` The two months go together,
+as `YYYY-MM`, the first before the second. The API checks the rest, such as
+how far back they may reach. The Connectivity dataset keeps its own dates:
+
+```bash
+intuizi audiences create --type connectivity --network-kind home \
+  --network Starlink --country USA \
+  --start-date 2026-10-19 --end-date 2026-10-25 \
+  --switch-from 2026-09 --switch-to 2026-10 \
+  --name "Starlink switching - September to October 2026" --dry-run
+```
+
+Only `audiences create` takes the switching flags: an estimate and a quote
+never run the analysis, so leave the flags out to estimate or price the
+audience. The analysis requires additional permissions which need to be
+approved by your Account Manager: a 403 means they are not enabled for the
+account.
+
+Once the audience is Completed, `audiences show <id>` follows the audience with
+a summary of the results: the two windows compared with their dates, then
+`devices_from`, `devices_to`, `devices_both`, `changed` and `switched`, and the
+top 10 flows between two networks, the most devices first. Every count is a
+count of devices. Until the analysis finishes the summary reads "no results".
+`--json` prints the results whole, the per-network rows and every flow
+included, under `.data[0].analysis_results.network_switching`:
+
+```
+Network Switching
+version        2
+source         connectivity
+network_type   home
+min_home_days  3
+from           2026-09 (2026-09-21 to 2026-09-27)
+to             2026-10 (2026-10-19 to 2026-10-25)
+devices_from   1150000
+devices_to     1200000
+devices_both   1000000
+changed        17000
+switched       4000
+
+Top flows
+from               to                 devices  switched  reverse  reverse_switched
+EXAMPLE DSL        EXAMPLE SATELLITE  12000    3000      5000     1000
+EXAMPLE SATELLITE  EXAMPLE DSL        5000     1000      12000    3000
 ```
 
 `--brand-all` takes a search and selects every match, where `--brand` insists
@@ -593,7 +702,9 @@ creating it. Nothing appears in Audience Manager, and no export, cohort,
 schedule or activation follows. Swapping `estimate create` for `create` in the
 same command line builds the audience that was estimated. `--frequency` is
 accepted for that reason, and checked as on create, but an estimate never runs
-an analysis, so it changes neither the figures nor `recipe_hash`. `--filter` is
+an analysis, so it changes neither the figures nor `recipe_hash`. The Network
+Switching flags are the exception: they are `audiences create` only, so leave
+them out to estimate the audience. `--filter` is
 part of the recipe: the filters change both, so estimate with the ones the
 audience will be built with.
 
@@ -607,19 +718,58 @@ intuizi audiences estimate create \
 intuizi audiences estimate create --file examples/audience-two-datasets.json --wait
 ```
 
-An estimate runs the same build a create would, so it takes about as long,
-scans the same data, and counts toward the monthly data-scan limit (as the
-`estimate` operation in `usage`) and the organization's build budget. It
-comes back `pending` with no figures. Its status is a word, not an id:
-`pending`, then `processing`, then one of `completed`, `blocked` or `failed`.
-`--wait` follows it there as it follows a build (see
-[The async model](#the-async-model)), and `audiences estimate show <id>`
-reads it, with `--wait` to resume a wait that timed out.
+An estimate is metered on the bytes it scans, which count toward the monthly
+data-scan limit (as the `estimate` operation in `usage`), and an estimate that
+a worker runs counts toward the organization's build budget.
+
+An estimate of one `POI` dataset at country or state level, of one
+`AffinityTransactions` dataset by brands or categories, or of one `CTV` dataset
+at country or state level, optionally with vendors or with channel names,
+usually comes back `completed` at once: a fast answer. It comes from daily
+sketches and carries its figures, `method` `sketch` and `as_of` (the time its
+data was read). While the sketches are tried, the command can take up to about
+10 seconds to print, and the estimate then reads `completed` (a fast answer) or
+`pending`. A fast answer is metered on the bytes it reads and does not count
+toward the build budget. For a `POI`, `AffinityTransactions` or `CTV` dataset
+a fast answer equals a full estimate run on the same data, and a full estimate
+run later can differ a little as new data arrives.
+
+From flags, an `AffinityTransactions` estimate by `--category` and a `CTV`
+estimate by `--country` usually come back at once too, with or without
+`--state`. Affinity `brands` and purchase `channels`, and CTV vendors
+(`ctv_vendor_names`) and channel names (`ctv_channel_names`), need `--file`.
+
+A `POI` estimate that uses `--filter`, `--city` or `--zipcode`, or whose dates
+reach past the data the sketches hold, is answered by a worker too. So is an
+`AffinityTransactions` or `CTV` estimate that uses `--city` or `--zipcode`, or
+whose dates reach past the data the sketches hold. A `--file` body with a
+filter the sketches do not hold goes to a worker as well, for example incomes
+or spend bounds, or CTV genres, device types or languages. So does a
+`max_devices_per_ip` other than `3`.
+
+Any other estimate comes back `pending` with no figures. How long that takes
+depends on the datasets. It can take minutes, for example `AND`, `OR`, `NOTIN`,
+and city, DMA or ZIP requests. An estimate of a recipe your organization is
+estimating now, or estimated less than 10 minutes ago, shares that run instead:
+it is not metered, does not count toward the build budget, and reads that run's
+status. A fast answer is never shared: the same recipe sent again is usually
+answered again, often in about a second.
+
+An estimate's status is a word, not an id: `pending`, then `processing`, then
+one of `completed`, `blocked` or `failed`. `--wait` follows it there as it
+follows a build (see [The async model](#the-async-model)), and
+`audiences estimate show <id>` reads it, with `--wait` to resume a wait that
+timed out.
 
 `completed` carries the figures, which lead the output: `uniques`, the
-approximate distinct device count, with a standard error of about 2.3%;
-`visits`, `signals` and `unique_eips` where the dataset types produce them;
-then `as_of`, `method`, `providers` and the rest. `blocked` means the request
+approximate distinct device count, with a standard error of about 1.6% when
+`method` is `sketch` or `approx_set` and about 2.3% when it is `approx_distinct`,
+then `visits`, `signals` and `unique_eips` where the dataset types produce them,
+and then `as_of`, `method`, `providers` and the rest. Under `--json`, a fast
+answer for an `AffinityTransactions` dataset has no amounts: `transactions`,
+`amount`, `online_transactions` and the four ratios (`avg_amount_per_scid`,
+`avg_transaction_value`, `avg_transactions_per_scid` and `online_share`) of
+`.data[0].estimate.totals` are `null`, not `0`. `blocked` means the request
 cannot be answered as sent - most often dates outside the dataset's data
 coverage - and shows its code and reason as `blocked`; `failed` explains
 itself in `status_message`. Both are final and end a wait with exit 1.
@@ -1135,6 +1285,7 @@ not the text label (`--search F`, not `female`, for genders, and `M`, not
 - **demographics** - genders, ages, marital-statuses, incomes
 - **profile-attributes** - categories, keys, values, recency-limits
 - **deidentified** - fields
+- **connectivity** - networks
 - **cohorts** - list
 
 Several catalogs cascade: a child read takes values from the level above to
@@ -1162,6 +1313,12 @@ catalog unfiltered:
   `--subcategory-codes`). An `iab-categories` row's `value` is the IAB code,
   which `--quiet` prints and `domains --category-codes` takes; a WebDomain
   audience's `iab_category_codes` takes the number in its `id` column instead.
+
+`connectivity networks` lists the network names a Connectivity dataset's
+`--network` takes, with each home network's technologies. `--kind home` or
+`--kind mobile` narrows it to one kind, and any other value is refused before
+anything is sent. The list holds curated brands only, and it is empty until
+the first weekly catalog is published.
 
 `datastreams` and `datastream-visualizations` are different catalogs.
 `datastreams --partner-id <id>` lists a partner's delivery outputs, which an
@@ -1323,7 +1480,9 @@ rather than free-form JSON.
 
 ## The async model
 
-Creates return immediately and the resource completes in the background.
+Creates return as soon as the work is queued, or, for an estimate answered at
+once (a fast answer), as soon as the answer is ready. What is queued completes
+in the background.
 `audiences create`, `audiences show`, `audiences estimate create`,
 `audiences estimate show`, `activations create` and `activations show` take
 `--wait` with an optional `--timeout` (default 60m).
@@ -1370,7 +1529,8 @@ An estimate's status is a word instead: `pending` and `processing` keep the
 wait going, `completed` is the one success, and `blocked` and `failed` end it
 with exit 1, naming the blocked code and reason or the `status_message`. Any
 other word ends it too. With `--json` read it as `.data[0].status`, and the
-figures as `.data[0].estimate`.
+figures as `.data[0].estimate`. A fast answer is `completed` from its first
+read.
 
 `107` Additional Info means the worker could not run the request as given, so
 it stopped and nothing follows. The error says the build (or, for an
@@ -1438,7 +1598,8 @@ locations.
 
 Completion covers commands, flag names, and the values of `--type`,
 `--signal`, `--file-format`, `--identifier-type`, `schedules create
---frequency` and `--purpose`. Other flags that take a fixed set, such as `poi submissions list
+--frequency`, `--purpose`, `--network-kind`, `--technology`,
+`--switch-network` and `reference connectivity networks --kind`. Other flags that take a fixed set, such as `poi submissions list
 --sort-by` and `--order`, `poi locations list --geometry` and `poi submissions
 create --key`, complete no values; their help lists them.
 

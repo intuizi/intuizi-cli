@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -83,6 +84,9 @@ func (e endpoint) command(group string) *cobra.Command {
 			v := new(string)
 			strVal[p.name] = v
 			flags.StringVar(v, name, "", p.help)
+			if p.values != nil {
+				completeValues(cmd, name, p.values)
+			}
 		case num:
 			v := new(int)
 			numVal[p.name] = v
@@ -132,7 +136,14 @@ func (e endpoint) command(group string) *cobra.Command {
 			}
 			switch p.kind {
 			case str:
-				query.Set(p.name, *strVal[p.name])
+				v := *strVal[p.name]
+				if p.values != nil {
+					if v = strings.ToLower(strings.TrimSpace(v)); !slices.Contains(p.values, v) {
+						return usageErr("unknown --" + flagName(p.name) + " " + *strVal[p.name] +
+							"; one of " + strings.Join(p.values, ", "))
+					}
+				}
+				query.Set(p.name, v)
 			case num:
 				query.Set(p.name, strconv.Itoa(*numVal[p.name]))
 			case strs:

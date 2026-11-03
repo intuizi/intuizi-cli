@@ -44,6 +44,7 @@ var wantPaths = []string{
 	"/analyses/reference/apps/tags",
 	"/analyses/reference/apps/taxonomies",
 	"/analyses/reference/cohorts/get-cohorts",
+	"/analyses/reference/connectivity/networks",
 	"/analyses/reference/common/cities",
 	"/analyses/reference/common/countries",
 	"/analyses/reference/common/dataset-types",
@@ -119,8 +120,8 @@ func TestReferenceCoversEveryDocumentedPath(t *testing.T) {
 	for extra := range built {
 		t.Errorf("command builds %s, which is not in wantPaths", extra)
 	}
-	if len(wantPaths) != 61 {
-		t.Errorf("wantPaths has %d entries, want 61", len(wantPaths))
+	if len(wantPaths) != 62 {
+		t.Errorf("wantPaths has %d entries, want 62", len(wantPaths))
 	}
 }
 
@@ -677,5 +678,74 @@ func TestIabSubcategoriesRefusesMixedIdsAndCodes(t *testing.T) {
 	}
 	if len(*queries) != 0 {
 		t.Errorf("a mixed list must cost no round trip, got %v", *queries)
+	}
+}
+
+// connectivityNetworksBody is the networks catalog in the shape the API
+// documents: value, text, kind and the technologies of a home network.
+const connectivityNetworksBody = `{"status":"success","code":200,"message":"ok","data":{"items":[` +
+	`{"value":"Starlink","text":"Starlink","kind":"home","technologies":["Satellite"]},` +
+	`{"value":"Starry","text":"Starry","kind":"home","technologies":["Fixed wireless"]}],` +
+	`"pagination":{"current_page":1,"per_page":500,"total":2,"last_page":1}}}`
+
+// The Connectivity networks read: its own path, --kind lower-cased into the
+// API's kind, --search and the paging flags in the API's spelling.
+func TestConnectivityNetworksPathAndQuery(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{"--kind", "home"}, "kind=home"},
+		{[]string{"--kind", " Mobile "}, "kind=mobile"},
+		{[]string{"--kind", "home", "--search", "star", "--page", "2", "--per-page", "100"},
+			"kind=home&page=2&per_page=100&search=star"},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			var path string
+			var queries []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path = r.URL.Path
+				queries = append(queries, r.URL.RawQuery)
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, connectivityNetworksBody)
+			}))
+			t.Cleanup(srv.Close)
+
+			out := runCmd(t, "connectivity", findEndpoint(t, "connectivity", "networks"), srv.URL, tc.args...)
+
+			if want := "/api/v2/analyses/reference/connectivity/networks"; path != want {
+				t.Errorf("path = %q, want %q", path, want)
+			}
+			if len(queries) != 1 || queries[0] != tc.want {
+				t.Errorf("queries = %q, want [%q]", queries, tc.want)
+			}
+			// The technologies read as one cell, not "[1 items]".
+			if !strings.Contains(out, "Starlink") || !strings.Contains(out, "Fixed wireless") {
+				t.Errorf("table should list the networks and their technologies:\n%s", out)
+			}
+		})
+	}
+}
+
+// --kind takes home or mobile only. Any other value is refused before the
+// round trip: the API would answer a 422, or an empty list for a typo.
+func TestConnectivityNetworksRefusesAnUnknownKind(t *testing.T) {
+	srv, queries := serve(t, connectivityNetworksBody)
+	t.Setenv("INTUIZI_API_TOKEN", "test-token")
+	previous := baseURLFlag
+	baseURLFlag = srv.URL
+	t.Cleanup(func() { baseURLFlag = previous })
+
+	cmd := findEndpoint(t, "connectivity", "networks").command("connectivity")
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--kind", "fiber"})
+	cmd.SetContext(context.Background())
+	err := cmd.Execute()
+
+	wantUsageErr(t, err, "--kind", "fiber", "home", "mobile")
+	if len(*queries) != 0 {
+		t.Errorf("an unknown kind must cost no round trip, got %v", *queries)
 	}
 }

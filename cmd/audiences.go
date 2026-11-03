@@ -16,8 +16,13 @@ const audiencesPrefix = "/analyses/audiences"
 // thirteen fields per audience; --json prints all of them.
 var audienceColumns = []string{"id", "name", "status", "results_count", "created_at"}
 
-// audienceLifecycle is how --wait follows an audience build.
-var audienceLifecycle = resourceLifecycle("audience", audiencesPrefix, audienceColumns)
+// audienceLifecycle is how --wait follows an audience build. The record a wait
+// ends on is followed by the Network Switching summary, as 'show' prints it.
+var audienceLifecycle = func() lifecycle {
+	lc := resourceLifecycle("audience", audiencesPrefix, audienceColumns)
+	lc.after = printNetworkSwitching
+	return lc
+}()
 
 var audiencesCmd = &cobra.Command{
 	Use:   "audiences",
@@ -25,8 +30,8 @@ var audiencesCmd = &cobra.Command{
 	Long: `Manage audiences.
 
 An audience defines a group of devices drawn from one or two datasets - places
-visited, apps used, CTV viewing, web activity. Delivering one somewhere is a
-separate step: see 'intuizi activations'.
+visited, apps used, CTV viewing, web activity, the networks devices use.
+Delivering one somewhere is a separate step: see 'intuizi activations'.
 
 Building is asynchronous. 'audiences create' returns as soon as the audience is
 queued, in an Initiating state; add --wait to 'create' or 'show' to block until
@@ -76,7 +81,7 @@ for more than one value.
 
 Most types also need --country: the API rejects a dataset without one on
 every type except Cohorts, AffinityTransactions and ProfileAttributes. The CLI
-checks for it before sending only on Origin.
+checks for it before sending only on Origin and Connectivity.
 
 --type origin targets devices by their home location rather than the places
 they visited, so its only filters are geographic. --country is required, and
@@ -85,6 +90,42 @@ the countries with Origin data come from 'intuizi reference common countries
 --brand and --category do not apply. Origin data is weekly: the API widens the
 window to the whole Monday-to-Sunday weeks it touches, and the CLI reports the
 widened dates on stderr when they differ from the ones given.
+
+--type connectivity targets devices by the network they used: the home
+internet network, or the mobile carrier, a device was on for most days of a
+week. --network-kind is required: home or mobile. --network narrows it to
+named networks, each checked against 'intuizi reference connectivity networks
+--kind <kind>' before anything is sent, and --technology narrows home networks
+to Fiber, Cable, DSL, Cable or DSL, Satellite or Fixed wireless. Leave both
+out to read any network of the kind, including networks the catalog does not
+list. --min-days is the fewest days of a week a device must have used the
+network, 1 to 7 (the API's default is 3). --country is required, and --state,
+--city and --zipcode narrow it to the devices whose home in the same week is in
+that area. Connectivity data is weekly too: the API widens the window to whole
+weeks and keeps the weeks that are built, and the CLI reports the widened dates
+on stderr. These four flags are refused on any other type.
+
+--switch-from and --switch-to run the Network Switching analysis on the built
+audience. For each device it finds the home internet network, or with
+--switch-network mobile the mobile carrier, in each of the two months, and
+counts the devices that kept their network, changed it and switched. It runs
+on an audience of one Connectivity dataset only, with --type connectivity.
+Each month is read as its last full Monday-to-Sunday week, and both weeks must
+be built Connectivity weeks. --switch-min-days (2 to 5, default 3) is the
+fewest days of that week a device must be seen on a network for it to be its
+home network. The dataset keeps its own dates.
+
+    intuizi audiences create --type connectivity --network-kind home \
+      --network Starlink --country USA \
+      --start-date 2026-10-19 --end-date 2026-10-25 \
+      --switch-from 2026-09 --switch-to 2026-10 \
+      --name "Starlink switching - September to October 2026"
+
+'intuizi audiences show <id>' prints the results once the audience is
+Completed. The analysis requires additional permissions which need to be
+approved by your Account Manager: a 403 means they are not enabled for the
+account. Only 'audiences create' takes these flags, because an estimate and a
+quote never run the analysis.
 
 Omitting --provider includes every signal provider for the dataset type, which
 is almost always what you want. The CLI reads that catalog first, and a
@@ -165,6 +206,7 @@ with --idempotency-key <key> to retry it without risking a duplicate.`,
 	}
 	waitOpts := waitFlags(cmd)
 	req.register(cmd)
+	req.registerSwitching(cmd)
 
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		wait, timeout, err := waitOpts()
@@ -199,6 +241,18 @@ type audienceRequest struct {
 	zipcodes   []string
 	filters    []string
 	frequency  bool
+
+	// Connectivity: valid with --type Connectivity only.
+	networkKind  string
+	networks     []string
+	technologies []string
+	minDays      int
+
+	// Network Switching: registered on 'audiences create' only.
+	switchFrom    string
+	switchTo      string
+	switchNetwork string
+	switchMinDays int
 }
 
 // register adds the body flags to cmd.
@@ -210,8 +264,8 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 		"Print the body the flags produce; creates nothing (names still resolve)")
 	f.StringVar(&r.dsType, "type", "",
 		"Dataset type, case-insensitive: poi, apps, webdomain, ctv,\n"+
-			"affinitytransactions, deidentified or origin (cohorts, demographics\n"+
-			"and profileattributes need --file)")
+			"affinitytransactions, deidentified, origin or connectivity (cohorts,\n"+
+			"demographics and profileattributes need --file)")
 	f.StringVar(&r.name, "name", "", "Name for the audience")
 	completeValues(cmd, "type", flagTypes())
 	f.StringVar(&r.startDate, "start-date", "", "First day of the window, YYYY-MM-DD")
@@ -240,8 +294,40 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 	f.BoolVar(&r.frequency, "frequency", false,
 		"Run the type's frequency analysis (POI, Apps or WebDomain), which\n"+
 			"'activations preview' and --freq-min need; it cannot be added later")
+	f.StringVar(&r.networkKind, "network-kind", "",
+		"Connectivity only, and required there: home (home internet networks)\n"+
+			"or mobile (mobile carriers)")
+	completeValues(cmd, "network-kind", networkKinds)
+	f.StringArrayVar(&r.networks, "network", nil,
+		"Connectivity only: a network name from 'reference connectivity networks'\n"+
+			"for the kind (repeatable; default any network of the kind)")
+	f.StringArrayVar(&r.technologies, "technology", nil,
+		"Connectivity home networks only: Fiber, Cable, DSL, Cable or DSL,\n"+
+			"Satellite or Fixed wireless (repeatable; default any technology)")
+	completeValues(cmd, "technology", connectivityTechnologies)
+	f.IntVar(&r.minDays, "min-days", 0,
+		"Connectivity only: the fewest days of a week a device must use the\n"+
+			"network, 1 to 7 (the API's default is 3)")
 	// No MarkFlagsOneRequired("file", "type"): cobra checks flag groups after
 	// PersistentPreRunE, so its error exits 1. missingFlags covers --type.
+}
+
+// registerSwitching adds the Network Switching flags, which only 'audiences
+// create' takes: an estimate and a quote never run the analysis.
+func (r *audienceRequest) registerSwitching(cmd *cobra.Command) {
+	f := cmd.Flags()
+	f.StringVar(&r.switchFrom, "switch-from", "",
+		"Network Switching: the first month to compare, YYYY-MM (needs --switch-to)")
+	f.StringVar(&r.switchTo, "switch-to", "",
+		"Network Switching: the second month to compare, YYYY-MM (needs\n"+
+			"--switch-from); each month is read as its last full Monday-to-Sunday week")
+	f.StringVar(&r.switchNetwork, "switch-network", "home",
+		"Network Switching: compare each device's home internet network (home)\n"+
+			"or its mobile carrier (mobile)")
+	completeValues(cmd, "switch-network", networkKinds)
+	f.IntVar(&r.switchMinDays, "switch-min-days", defaultMinHomeDays,
+		"Network Switching: the fewest days of each month's week a device must\n"+
+			"be seen on a network for it to be its home network, 2 to 5")
 }
 
 // send builds the body and posts it to lc.create: printed as created, or
@@ -306,16 +392,28 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 			return audienceBody{}, err
 		}
 	}
+	dsType := r.dsType
+	// Switching is Connectivity only: say so before any missing flag.
+	if flags.Changed("type") && dsType != "Connectivity" {
+		for _, f := range switchingFlags {
+			if flags.Changed(f) {
+				return audienceBody{}, usageErr(errSwitchingType)
+			}
+		}
+	}
 	if err := missingFlags(flags, audienceRequired, "a single-dataset audience"); err != nil {
 		return audienceBody{}, err
 	}
 	if err := nonEmpty("name", r.name); err != nil {
 		return audienceBody{}, err
 	}
+	switching, err := r.switchingOptions(flags.Changed)
+	if err != nil {
+		return audienceBody{}, err
+	}
 	if err := parseWindow(r.startDate, r.endDate); err != nil {
 		return audienceBody{}, err
 	}
-	dsType := r.dsType
 	if len(r.brands)+len(r.brandAll) > 0 && dsType != "POI" {
 		flag := "--brand"
 		if len(r.brands) == 0 {
@@ -359,6 +457,10 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 	if err != nil {
 		return audienceBody{}, err
 	}
+	conn, err := r.connectivityOptions(dsType, flags.Changed)
+	if err != nil {
+		return audienceBody{}, err
+	}
 	// The API requires a country on Origin, and its geography is the
 	// whole filter; a body without one is a 422.
 	if dsType == "Origin" && len(r.countries) == 0 {
@@ -372,7 +474,21 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 	}
 	ctx := cmd.Context()
 
-	ds := audienceDataset{Type: dsType, StartDate: r.startDate, EndDate: r.endDate, Filters: filters}
+	ds := audienceDataset{Type: dsType, StartDate: r.startDate, EndDate: r.endDate, Filters: filters,
+		ConnectivityNetworkKind: conn.kind, ConnectivityTechnologies: conn.technologies,
+		ConnectivityMinDays: conn.minDays}
+
+	// Read only when a name was given: without --network every network of
+	// the kind is read, and nothing needs checking.
+	if len(conn.networks) > 0 {
+		catalog, err := connectivityNetworks(ctx, c, conn.kind)
+		if err != nil {
+			return audienceBody{}, err
+		}
+		if ds.ConnectivityNetworks, err = checkNetworks(conn.networks, catalog, conn.kind); err != nil {
+			return audienceBody{}, err
+		}
+	}
 
 	for _, b := range r.brands {
 		id, err := resolveOrID(ctx, c, brandsPath, "--brand", b, "brands")
@@ -431,15 +547,15 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 		}
 	}
 
-	if dsType == "Origin" {
-		// The dates stay as typed in the body; the API does the widening.
-		if from, to := originWeeks(r.startDate, r.endDate); from != r.startDate || to != r.endDate {
-			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Origin data is weekly: the API widens %s..%s "+
-				"to the whole weeks %s..%s\n", r.startDate, r.endDate, from, to)
-		}
+	// Notes go to stderr, so a piped --dry-run stays the payload, and only
+	// once every check has passed.
+	// The dates stay as typed in the body; the API does the widening.
+	if note := weeklyNote(dsType, r.startDate, r.endDate); note != "" {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), note)
 	}
 
-	return audienceBody{Name: r.name, Datasets: []audienceDataset{ds}, Analyses: analyses}, nil
+	return audienceBody{Name: r.name, Datasets: []audienceDataset{ds}, Analyses: analyses,
+		NetworkSwitching: switching}, nil
 }
 
 // postBody posts body to lc.create and prints the record that comes back, or
@@ -448,7 +564,7 @@ func postBody(cmd *cobra.Command, lc lifecycle, body any, wait bool, timeout tim
 	if wait {
 		return createAndWait(cmd, lc, body, timeout)
 	}
-	return createBodyAs(cmd, lc.create, body, lc.lead, lc.view, next)
+	return createBodyAs(cmd, lc.create, body, lc.lead, lc.view, next, lc.settled)
 }
 
 // brandHint points a --brand on another type at what that type does take.
@@ -460,6 +576,8 @@ func brandHint(dsType string) string {
 		return "; affinity brands need --file"
 	case "Origin":
 		return "; Origin filters on geography only (--country, --state, --city, --zipcode)"
+	case "Connectivity":
+		return "; Connectivity filters by network (--network-kind, --network, --technology, --min-days) and geography"
 	}
 	if _, ok := categoryCatalogs[dsType]; ok {
 		return "; use --category"
@@ -472,6 +590,8 @@ var audienceFields = []string{
 	"type", "name", "start-date", "end-date",
 	"brand", "brand-all", "category",
 	"provider", "country", "state", "city", "zipcode", "filter", "frequency",
+	"network-kind", "network", "technology", "min-days",
+	"switch-from", "switch-to", "switch-network", "switch-min-days",
 }
 
 // audienceRequired is the minimum for a single dataset.
@@ -488,6 +608,13 @@ func audiencesShowCommand() *cobra.Command {
 		Use:   "show <id>",
 		Short: "Show one audience",
 		Long: `Show one audience.
+
+An audience built with Network Switching ('audiences create --switch-from')
+is followed by a summary of its results: the two windows compared, how many
+devices had a home network in each and in both, how many changed and
+switched, and the top flows between two networks, the most devices first.
+Every count is a count of devices. --json prints the results whole, with the
+per-network rows, under .data[0].analysis_results.network_switching.
 
 With --wait, keep polling until the build reaches Completed or fails, printing
 each status change to stderr and the last record read to stdout, and exiting
@@ -519,7 +646,8 @@ reads 108, so a wait on it ends only at --timeout.`,
 			return err
 		}
 		if !wait {
-			return renderOne(cmd, audiencesPrefix+"/"+strconv.Itoa(id), audienceColumns)
+			return renderOneThen(cmd, audiencesPrefix+"/"+strconv.Itoa(id), audienceColumns, flatten,
+				printNetworkSwitching)
 		}
 		c, err := client()
 		if err != nil {
