@@ -457,7 +457,9 @@ func TestValidateBaseURL(t *testing.T) {
 	bad := []struct{ raw, want, fix string }{
 		{"example.invalid", "has no scheme", "use https://example.invalid"},
 		{"example.invalid:8080", "has no scheme", "use https://example.invalid:8080"},
-		{"ftp://example.invalid", "ftp", "http or https"},
+		// Plain http is refused for anything but this machine, so the hint
+		// does not offer it as an equal choice.
+		{"ftp://example.invalid", "ftp", "use https (or http for this machine)"},
 		{"https://", "has no host", ""},
 		{"", "is empty", ""},
 		{"https://example.com/?x=1", "query", ""},

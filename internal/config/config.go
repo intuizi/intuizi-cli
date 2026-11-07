@@ -239,7 +239,7 @@ func ValidateBaseURL(raw string) error {
 		return fmt.Errorf("--base-url %s is not a valid URL: %w", raw, err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("--base-url %s uses scheme %s; use http or https", raw, u.Scheme)
+		return fmt.Errorf("--base-url %s uses scheme %s; use https (or http for this machine)", raw, u.Scheme)
 	}
 	if u.Host == "" {
 		return fmt.Errorf("--base-url %s has no host", raw)

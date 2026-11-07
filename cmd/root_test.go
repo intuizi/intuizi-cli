@@ -335,31 +335,87 @@ func TestBaseURLFlagIsValidatedUpFront(t *testing.T) {
 	}
 }
 
-// Plain http to a host other than this machine sends the token in clear, so
-// it is said once on stderr. Loopback is where a local console runs, and the
-// test stubs live there too, so it stays quiet. The bad id keeps every case
-// from dialling.
-func TestPlainHTTPBaseURLWarns(t *testing.T) {
+// Plain http to a host other than this machine would send the token in clear,
+// so the command stops before sending it. Which hosts count as this machine is
+// pinned in api.TestCheckBaseURL; every stub-backed test here runs on loopback,
+// so a refusal there would fail the suite. .invalid never resolves, so the
+// case reaches no real host even when the refusal is missing.
+func TestPlainHTTPBaseURLRefused(t *testing.T) {
 	isolate(t)
+	res := rootRun(t, "--base-url", "http://console.invalid", "audiences", "list")
+	if res.code != 1 {
+		t.Fatalf("exit = %d, want 1 (err: %v)", res.code, res.err)
+	}
+	if res.err == nil || !strings.Contains(res.err.Error(), "plain http") {
+		t.Errorf("err = %v, want the plain-http refusal", res.err)
+	}
+}
+
+// A plain-http console stored by an earlier login is refused the same way,
+// and the error says how to replace it.
+func TestStoredPlainHTTPConsoleRefused(t *testing.T) {
+	writeConfig(t, `{"base_url":"http://console.invalid","token":"tok"}`)
+	res := rootRun(t, "audiences", "list")
+	if res.err == nil || !strings.Contains(res.err.Error(), "plain http") ||
+		!strings.Contains(res.err.Error(), "run 'intuizi --base-url https://console.invalid auth login'") {
+		t.Fatalf("err = %v, want the plain-http refusal and how to replace the stored console", res.err)
+	}
+}
+
+// logout sends nothing, so it still forgets a plain-http console's token,
+// whether the console is the stored one or named with --base-url.
+func TestLogoutForgetsAPlainHTTPConsole(t *testing.T) {
+	for name, args := range map[string][]string{
+		"stored":     {"auth", "logout"},
+		"--base-url": {"--base-url", "http://console.invalid", "auth", "logout"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeConfig(t, `{"base_url":"http://console.invalid","token":"tok"}`)
+			res := rootRun(t, args...)
+			if res.err != nil {
+				t.Fatalf("logout: %v", res.err)
+			}
+			if !strings.Contains(res.stderr, "Removed the stored token") {
+				t.Errorf("stderr = %q, want the token removed", res.stderr)
+			}
+		})
+	}
+}
+
+// auth status does not report a token as usable for a console every other
+// command refuses, whichever token is in play, and --verify sends nothing.
+func TestStatusRefusesAPlainHTTPConsole(t *testing.T) {
 	cases := []struct {
-		url  string
-		warn bool
+		name     string
+		args     []string
+		envToken bool
 	}{
-		{"http://10.0.0.5:8000", true},
-		{"http://console.example.com", true},
-		{"http://localhost:8000", false},
-		{"http://127.0.0.1:1", false},
-		{"http://[::1]:8000", false},
-		{"https://console.example.com", false},
+		{"stored token", []string{"auth", "status"}, false},
+		{"stored token, --verify", []string{"auth", "status", "--verify"}, false},
+		{"INTUIZI_API_TOKEN, --verify", []string{"auth", "status", "--verify"}, true},
 	}
 	for _, c := range cases {
-		t.Run(c.url, func(t *testing.T) {
-			res := rootRun(t, "--base-url", c.url, "audiences", "show", "abc")
-			if res.code != 2 {
-				t.Fatalf("exit = %d, want 2 from the bad id (err: %v)", res.code, res.err)
+		t.Run(c.name, func(t *testing.T) {
+			writeConfig(t, `{"base_url":"http://console.invalid","token":"tok",`+
+				`"email":"a@b.com","expires_at":"2099-01-01T00:00:00Z"}`)
+			if c.envToken {
+				t.Setenv("INTUIZI_API_TOKEN", "tok")
 			}
-			if got := strings.Contains(res.stderr, "unencrypted"); got != c.warn {
-				t.Errorf("warned = %v, want %v; stderr: %q", got, c.warn, res.stderr)
+			res := rootRun(t, c.args...)
+			if res.code != 1 {
+				t.Fatalf("exit = %d, want 1 (err: %v)", res.code, res.err)
+			}
+			if res.err == nil || !strings.Contains(res.err.Error(), "plain http") ||
+				!strings.Contains(res.err.Error(), "run 'intuizi --base-url https://console.invalid auth login'") {
+				t.Errorf("err = %v, want the plain-http refusal and how to replace the stored console", res.err)
+			}
+			if !strings.Contains(res.stdout, "Token:    not checked (the console is plain http)") {
+				t.Errorf("stdout should say the token is not checked:\n%s", res.stdout)
+			}
+			for _, unwanted := range []string{"Account:", "Expires:", "Verified"} {
+				if strings.Contains(res.stdout, unwanted) {
+					t.Errorf("stdout reports %q for a refused console:\n%s", unwanted, res.stdout)
+				}
 			}
 		})
 	}
@@ -419,5 +475,103 @@ func TestWithoutDebugNothingIsPrinted(t *testing.T) {
 	}
 	if strings.Contains(res.stderr, "> GET ") {
 		t.Errorf("transcript printed without --debug:\n%s", res.stderr)
+	}
+}
+
+// --base-url help states the scheme rule DOCS.md does, so it is not learned
+// from a refusal.
+func TestBaseURLHelpStatesTheSchemeRule(t *testing.T) {
+	isolate(t)
+	res := rootRun(t, "--help")
+	if res.err != nil {
+		t.Fatalf("help: %v", res.err)
+	}
+	if !strings.Contains(res.stdout, "https://, or http:// only to this machine") {
+		t.Errorf("--base-url help does not state the scheme rule:\n%s", res.stdout)
+	}
+}
+
+// A password written into a stored console URL is never printed: not in the
+// refusal, the hint, or the status lines, which reach CI logs.
+func TestStoredURLPasswordIsNeverPrinted(t *testing.T) {
+	for _, args := range [][]string{{"audiences", "list"}, {"auth", "status"}, {"auth", "status", "--verify"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			writeConfig(t, `{"base_url":"http://bob:hunter2@console.invalid","token":"tok"}`)
+			res := rootRun(t, args...)
+			if res.err == nil {
+				t.Fatal("a plain-http console was not refused")
+			}
+			for where, text := range map[string]string{"stdout": res.stdout, "stderr": res.stderr, "error": res.err.Error()} {
+				if strings.Contains(text, "hunter2") {
+					t.Errorf("%s repeats the URL's password: %q", where, text)
+				}
+			}
+			if !strings.Contains(res.err.Error(), "run 'intuizi --base-url https://console.invalid auth login'") {
+				t.Errorf("err = %v, want the replacing command without userinfo", res.err)
+			}
+		})
+	}
+}
+
+// A stored URL that does not parse is not called plain http, is not printed
+// (it may carry a password, and a tidied copy would hide what is wrong with
+// it), and the error names the file that holds it, the one place it can be
+// corrected.
+func TestStatusNamesAnUnparsableStoredURL(t *testing.T) {
+	// Named, not keyed by the URL: the subtest name becomes part of the temp
+	// dir, which the error prints.
+	for name, stored := range map[string]string{
+		"leading space":        " https://console.invalid",
+		"password, no ] in it": "http://bob:hunter2@[::1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeConfig(t, `{"base_url":"`+stored+`","token":"tok"}`)
+			res := rootRun(t, "auth", "status")
+			if res.code != 1 {
+				t.Fatalf("exit = %d, want 1 (err: %v)", res.code, res.err)
+			}
+			if !strings.Contains(res.stdout, "Base URL: (a URL that does not parse)") {
+				t.Errorf("stdout should not print the URL that does not parse:\n%s", res.stdout)
+			}
+			if !strings.Contains(res.stdout, "Token:    not checked (the console URL does not parse)") {
+				t.Errorf("stdout should give the parse failure as the reason:\n%s", res.stdout)
+			}
+			if res.err == nil || !strings.Contains(res.err.Error(), "does not parse") ||
+				!strings.Contains(res.err.Error(), "config.json") {
+				t.Errorf("err = %v, want the parse failure and the config file to correct", res.err)
+			}
+			if strings.Contains(res.stdout+res.stderr+res.err.Error(), "hunter2") {
+				t.Errorf("the URL's password was printed:\n%s%s%v", res.stdout, res.stderr, res.err)
+			}
+		})
+	}
+}
+
+// The other-console refusal names both consoles as written, with any password
+// masked, so two spellings of one console never print alike, and the command
+// it offers carries no userinfo.
+func TestOtherConsoleMasksURLPasswords(t *testing.T) {
+	for _, args := range [][]string{{"audiences", "list"}, {"auth", "status"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			writeConfig(t, `{"base_url":"HTTPS://bob:hunter2@Console.Invalid/p","token":"tok"}`)
+			res := rootRun(t, append([]string{"--base-url", "https://eve:s3cret@other.invalid"}, args...)...)
+			if res.err == nil {
+				t.Fatal("another console's token was not refused")
+			}
+			printed := res.stdout + res.stderr + res.err.Error()
+			for _, secret := range []string{"hunter2", "s3cret"} {
+				if strings.Contains(printed, secret) {
+					t.Errorf("a URL's password %q was printed:\n%s", secret, printed)
+				}
+			}
+			for _, want := range []string{"HTTPS://bob:xxxxx@Console.Invalid/p", "https://eve:xxxxx@other.invalid"} {
+				if !strings.Contains(printed, want) {
+					t.Errorf("want %q, the console as written with its password masked:\n%s", want, printed)
+				}
+			}
+			if !strings.Contains(res.err.Error(), "--base-url https://other.invalid'") {
+				t.Errorf("err = %v, want the command offered without userinfo", res.err)
+			}
+		})
 	}
 }

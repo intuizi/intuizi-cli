@@ -225,7 +225,7 @@ In CI, set `INTUIZI_API_TOKEN` instead of running `auth login`.
 | Code | Meaning |
 | --- | --- |
 | `0` | Success |
-| `1` | A failure once the command line parsed: an API error, a `--wait` that failed, timed out or gave up, or a local failure such as an unreadable `--file`, a missing token or a declined confirmation |
+| `1` | A failure once the command line parsed: an API error, a `--wait` that failed, timed out or gave up, or a local failure such as an unreadable `--file`, a missing token, a refused plain-http console or a declined confirmation |
 | `2` | Usage error - an unknown command or flag, a bad value or id, missing or conflicting flags, a delete without `--yes` where stdin is not a terminal, or a name that matches no catalog entry or several. Nothing is created, though a name lookup or the `--provider` check may already have read a catalog |
 | `130` | Interrupted with Ctrl-C (SIGINT) |
 | `143` | Terminated (SIGTERM) |
