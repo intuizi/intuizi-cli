@@ -354,19 +354,22 @@ type audienceLocation struct {
 // --min-days was given (1 to 7, so 0 is never a value): without it the body
 // is the one a file that leaves the key out would send.
 type audienceDataset struct {
-	Type                     string            `json:"type"`
-	StartDate                string            `json:"start_date"`
-	EndDate                  string            `json:"end_date"`
-	Analysisdata             []any             `json:"analysisdata,omitempty"`
-	Categories               []any             `json:"categories,omitempty"`
-	IABCategoryCodes         []any             `json:"iab_category_codes,omitempty"`
-	SignalProviders          []any             `json:"signal_providers,omitempty"`
-	Location                 *audienceLocation `json:"location,omitempty"`
-	Filters                  []string          `json:"filters,omitempty"`
-	ConnectivityNetworkKind  string            `json:"connectivity_network_kind,omitempty"`
-	ConnectivityNetworks     []string          `json:"connectivity_networks,omitempty"`
-	ConnectivityTechnologies []string          `json:"connectivity_technologies,omitempty"`
-	ConnectivityMinDays      int               `json:"connectivity_min_days,omitempty"`
+	Type             string            `json:"type"`
+	StartDate        string            `json:"start_date"`
+	EndDate          string            `json:"end_date"`
+	Analysisdata     []any             `json:"analysisdata,omitempty"`
+	Categories       []any             `json:"categories,omitempty"`
+	IABCategoryCodes []any             `json:"iab_category_codes,omitempty"`
+	SignalProviders  []any             `json:"signal_providers,omitempty"`
+	Location         *audienceLocation `json:"location,omitempty"`
+	// Filters is a pointer so three states stay apart: nil leaves the key out
+	// (the API applies its default set), a pointer to an empty slice sends
+	// "filters": [] (every filter off), and a list sends exactly that list.
+	Filters                  *[]string `json:"filters,omitempty"`
+	ConnectivityNetworkKind  string    `json:"connectivity_network_kind,omitempty"`
+	ConnectivityNetworks     []string  `json:"connectivity_networks,omitempty"`
+	ConnectivityTechnologies []string  `json:"connectivity_technologies,omitempty"`
+	ConnectivityMinDays      int       `json:"connectivity_min_days,omitempty"`
 }
 
 // audienceBody is the single-dataset payload; two datasets go through --file.

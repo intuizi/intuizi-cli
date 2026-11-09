@@ -191,8 +191,9 @@ permissions - but an estimate never runs an analysis, so it changes neither
 the figures nor recipe_hash. It is there so the command line that builds the
 audience can be estimated unchanged.
 
---filter is part of the recipe: the filters change both the figures and
-recipe_hash, so estimate with the ones the audience will be built with.
+--filter and --no-filters are part of the recipe: the filters change both the
+figures and recipe_hash, so estimate with the ones the audience will be built
+with.
 
 An estimate of one POI dataset at country or state level, of one
 AffinityTransactions dataset by brands or categories, or of one CTV dataset at

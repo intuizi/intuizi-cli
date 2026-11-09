@@ -305,7 +305,8 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--city` | city name, repeatable | `reference common cities --states CA` |
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
-| `--filter` | POI quality filter, repeatable: `anomalous_devices`, `anomalous_pois` or `strict_gps`; POI only, none by default | - |
+| `--filter` | POI quality filter, repeatable: `anomalous_devices`, `anomalous_pois` or `strict_gps`; sends exactly the ones listed; POI only; without it POI gets the default `anomalous_devices` and `strict_gps` | - |
+| `--no-filters` | Turn every POI quality filter off (sends `"filters": []`); POI only; cannot be combined with `--filter` | off |
 | `--frequency` | boolean: run the type's frequency analysis; POI, Apps and WebDomain only | - |
 | `--network-kind` | `home` or `mobile`; Connectivity only, and required there | - |
 | `--network` | network name, repeatable; Connectivity only, checked against the catalog of the kind | `reference connectivity networks --kind <kind>` |
@@ -359,8 +360,11 @@ day-part variant (`frequency_day_part`) needs `--file`, and cannot be
 previewed. This is not `schedules create --frequency`, which sets how often a
 schedule runs.
 
-`--filter` sends the POI quality filters, the POI filter list in Audience
-Manager, in the dataset's `filters` field. None apply unless given.
+A POI dataset with no `--filter` gets the default filters, `anomalous_devices`
+and `strict_gps` (GPS Strict Filtering), the same default as Audience Manager.
+`--filter` sends exactly the filters listed, in the dataset's `filters` field.
+`--no-filters` turns them all off (it sends `"filters": []`), and cannot be
+combined with `--filter`.
 `anomalous_devices` drops devices on Intuizi's list of known bad devices,
 `anomalous_pois` drops every visit to locations flagged as anomalous, and
 `strict_gps` (GPS Strict Filtering) drops every visit at a spot where more than
@@ -368,11 +372,10 @@ Manager, in the dataset's `filters` field. None apply unless given.
 month: city-center defaults and rounded coordinates reported for many devices
 at once. Use `strict_gps` for address-level lists such as offices and small
 businesses. Leave it off for stores, malls and venues, where real crowds
-gather on one spot and it removes them too. Audience Manager turns on
-`anomalous_devices` and `anomalous_pois` by default, so pass both to match an
-audience built there. Values are case-insensitive and a repeat is sent once.
-An unknown value, or `--filter` on any type but POI, is refused before
-anything is sent, exit 2.
+gather on one spot and it removes them too. For airports and stadiums, use
+`--no-filters` or `--filter anomalous_devices`. Values are case-insensitive and
+a repeat is sent once. An unknown value, `--filter` with `--no-filters`, or
+either flag on any type but POI, is refused before anything is sent, exit 2.
 
 ```bash
 intuizi audiences create --type poi --brand "Example Offices" --country USA \
@@ -431,7 +434,7 @@ three flags narrow it and are optional:
 that omitting `--provider` sends. `--state`, `--city` and `--zipcode` set a
 home area: they narrow the audience to the devices whose home in the same week
 is in it. DMAs need `--file`. The four Connectivity flags are refused on any
-other type, and `--brand`, `--brand-all`, `--category`, `--filter` and
+other type, and `--brand`, `--brand-all`, `--category`, `--filter`, `--no-filters` and
 `--frequency` are refused on Connectivity, before anything is sent, exit 2.
 
 Connectivity data is weekly too. The API widens the window to whole
@@ -704,7 +707,7 @@ same command line builds the audience that was estimated. `--frequency` is
 accepted for that reason, and checked as on create, but an estimate never runs
 an analysis, so it changes neither the figures nor `recipe_hash`. The Network
 Switching flags are the exception: they are `audiences create` only, so leave
-them out to estimate the audience. `--filter` is
+them out to estimate the audience. `--filter` and `--no-filters` are
 part of the recipe: the filters change both, so estimate with the ones the
 audience will be built with.
 
