@@ -213,7 +213,12 @@ From flags, an AffinityTransactions estimate by --category and a CTV estimate
 by --country usually come back at once too, with or without --state. Affinity
 brands and purchase channels, and CTV vendors and channel names, need --file.
 
-A POI estimate that uses --filter, --city or --zipcode, or whose dates reach
+A POI estimate is fast only with the default filters: no --filter and no
+--no-filters (anomalous_devices and strict_gps apply), or exactly --filter
+anomalous_devices --filter strict_gps. --no-filters, or any other --filter set
+(one with anomalous_pois, or only one of the two), is answered by a worker: it
+is slower and counts against the build budget. A POI estimate that uses
+--city or --zipcode, or whose dates reach
 past the data the sketches hold, is answered by a worker too. So is an
 AffinityTransactions or CTV estimate that uses --city or --zipcode, or whose
 dates reach past the data the sketches hold. A --file body with a filter the
