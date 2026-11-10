@@ -161,21 +161,22 @@ after the build, and it requires additional permissions which need to be
 approved by your Account Manager; a 403 means they are not enabled for the
 account.
 
---filter applies the POI quality filters, none by default. anomalous_devices
+--filter applies the POI quality filters. Without it a POI dataset gets the
+default: anomalous_devices and strict_gps. --filter sends exactly the filters
+listed, and --no-filters turns them all off. anomalous_devices
 drops devices on Intuizi's list of known bad devices, anomalous_pois drops
 every visit to locations flagged as anomalous, and strict_gps (GPS Strict
 Filtering) drops every visit at a spot where more than 500 devices from one
 signal provider were seen at that location in the same month: city-center
-defaults and rounded coordinates reported for many devices at once. Use
-strict_gps for address-level lists such as offices and small businesses, and
-leave it off for stores, malls and venues, where real crowds gather on one
-spot and it removes them too. Audience Manager turns on anomalous_devices and
-anomalous_pois by default, so pass both to match an audience built there.
---filter applies to POI only, and repeats for more than one:
+defaults and rounded coordinates reported for many devices at once. GPS
+Strict Filtering is on by default. Turn it off (--no-filters, or --filter
+anomalous_devices) for airports and stadiums, where real crowds can stand on
+one spot. Audience Manager has the same default,
+anomalous_devices and strict_gps. --filter and --no-filters apply to POI only,
+and cannot be combined. --filter repeats for more than one:
 
     intuizi audiences create --type poi --brand "Example Offices" \
       --country USA --start-date 2026-06-01 --end-date 2026-08-31 \
-      --filter anomalous_devices --filter anomalous_pois --filter strict_gps \
       --name "Example Offices - summer" --dry-run
 
 To see how many devices the audience would hold before building it, run the
@@ -240,6 +241,7 @@ type audienceRequest struct {
 	cities     []string
 	zipcodes   []string
 	filters    []string
+	noFilters  bool
 	frequency  bool
 
 	// Connectivity: valid with --type Connectivity only.
@@ -289,8 +291,12 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 		"Zip code (repeat the flag for more than one)")
 	f.StringArrayVar(&r.filters, "filter", nil,
 		"POI quality filter: anomalous_devices, anomalous_pois or strict_gps\n"+
-			"(repeat the flag for more than one; none by default)")
+			"(repeat the flag for more than one; sends exactly the ones listed.\n"+
+			"Without --filter, POI uses the default: anomalous_devices and strict_gps)")
 	completeValues(cmd, "filter", poiFilters)
+	f.BoolVar(&r.noFilters, "no-filters", false,
+		"Turn every POI quality filter off (sends an empty filter list);\n"+
+			"cannot be combined with --filter")
 	f.BoolVar(&r.frequency, "frequency", false,
 		"Run the type's frequency analysis (POI, Apps or WebDomain), which\n"+
 			"'activations preview' and --freq-min need; it cannot be added later")
@@ -424,6 +430,12 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 	if len(r.filters) > 0 && dsType != "POI" {
 		return audienceBody{}, usageErr("--filter applies to --type POI, not " + dsType)
 	}
+	if r.noFilters && dsType != "POI" {
+		return audienceBody{}, usageErr("--no-filters applies to --type POI, not " + dsType)
+	}
+	if r.noFilters && flags.Changed("filter") {
+		return audienceBody{}, usageErr("--no-filters and --filter cannot be used together")
+	}
 	// Before client(): a type with no category catalog is a usage error
 	// whether or not there is a token, and so is one with no frequency
 	// analysis.
@@ -453,9 +465,18 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 			return audienceBody{}, err
 		}
 	}
-	filters, err := canonicalFilters(r.filters)
+	canon, err := canonicalFilters(r.filters)
 	if err != nil {
 		return audienceBody{}, err
+	}
+	// nil: no flag, so the key is left out and the API applies its default
+	// set. --no-filters: an empty list, which turns every filter off.
+	var filters *[]string
+	switch {
+	case r.noFilters:
+		filters = &[]string{}
+	case len(canon) > 0:
+		filters = &canon
 	}
 	conn, err := r.connectivityOptions(dsType, flags.Changed)
 	if err != nil {
@@ -589,7 +610,7 @@ func brandHint(dsType string) string {
 var audienceFields = []string{
 	"type", "name", "start-date", "end-date",
 	"brand", "brand-all", "category",
-	"provider", "country", "state", "city", "zipcode", "filter", "frequency",
+	"provider", "country", "state", "city", "zipcode", "filter", "no-filters", "frequency",
 	"network-kind", "network", "technology", "min-days",
 	"switch-from", "switch-to", "switch-network", "switch-min-days",
 }

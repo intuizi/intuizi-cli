@@ -539,3 +539,73 @@ func TestAudiencesCreateFilterIsABodyFlag(t *testing.T) {
 		t.Errorf("should cost no round trip, got %v", got.paths)
 	}
 }
+
+// --no-filters is the opt-out of the default POI filters: it sends an empty
+// list, which the API reads as "every filter off". estimate create shares the
+// flag, so its body matches the create's.
+func TestNoFiltersSendsEmptyList(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+	}{
+		{"create", audiencesCreateCommand},
+		{"estimate", estimateCreateCommand},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stub(t, providersPOI)
+
+			body := dryRunBody(t, tc.cmd(), srv, append(append([]string(nil), poiFlags...), "--no-filters")...)
+
+			v, ok := firstDataset(t, body)["filters"]
+			if !ok {
+				t.Fatalf("filters key missing, want []: %v", body)
+			}
+			raw, _ := json.Marshal(v)
+			if string(raw) != "[]" {
+				t.Errorf("filters = %s, want []", raw)
+			}
+		})
+	}
+}
+
+// Without --no-filters or --filter the key is left out, which the API reads as
+// the default set (anomalous_devices and strict_gps).
+func TestNoFilterFlagsOmitTheFiltersKey(t *testing.T) {
+	srv, _ := stub(t, providersPOI)
+
+	body := dryRunBody(t, audiencesCreateCommand(), srv, poiFlags...)
+
+	if _, ok := firstDataset(t, body)["filters"]; ok {
+		t.Errorf("filters sent with no filter flag: %v", body)
+	}
+}
+
+// --filter lists the filters to apply, --no-filters turns them all off: both
+// together say two things, so the pair is refused before anything is sent.
+func TestNoFiltersConflictsWithFilter(t *testing.T) {
+	err := runLoggedOut(t, audiencesCreateCommand(),
+		append(append([]string(nil), poiFlags...), "--no-filters", "--filter", "strict_gps")...)
+
+	wantUsageErr(t, err, "--no-filters and --filter cannot be used together")
+}
+
+// --no-filters is a POI flag, like --filter.
+func TestNoFiltersRefusedOnOtherTypes(t *testing.T) {
+	err := runLoggedOut(t, audiencesCreateCommand(), "--type", "ctv", "--name", "x",
+		"--start-date", "2026-09-02", "--end-date", "2026-09-09", "--country", "USA", "--no-filters")
+
+	wantUsageErr(t, err, "--no-filters", "POI", "CTV")
+}
+
+// A --file body carries its own filters, so the flag is refused with it.
+func TestNoFiltersIsABodyFlag(t *testing.T) {
+	srv, got := stub(t, created)
+
+	_, _, err := run(t, audiencesCreateCommand(), srv,
+		"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"POI"}]}`), "--no-filters")
+
+	wantUsageErr(t, err, "--file", "--no-filters")
+	if len(got.paths) != 0 {
+		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}

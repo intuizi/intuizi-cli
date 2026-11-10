@@ -209,6 +209,8 @@ func TestAudiencesConnectivityUsageErrors(t *testing.T) {
 			[]string{"--category applies to", "not Connectivity"}},
 		{"--filter on Connectivity", with(connectivityFlagsHome, "--filter", "strict_gps"),
 			[]string{"--filter applies to --type POI, not Connectivity"}},
+		{"--no-filters on Connectivity", with(connectivityFlagsHome, "--no-filters"),
+			[]string{"--no-filters applies to --type POI, not Connectivity"}},
 		{"--frequency on Connectivity", with(connectivityFlagsHome, "--frequency"),
 			[]string{"--frequency applies to", "not Connectivity"}},
 	} {
