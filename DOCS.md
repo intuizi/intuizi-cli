@@ -370,17 +370,15 @@ combined with `--filter`.
 `strict_gps` (GPS Strict Filtering) drops every visit at a spot where more than
 500 devices from one signal provider were seen at that location in the same
 month: city-center defaults and rounded coordinates reported for many devices
-at once. Use `strict_gps` for address-level lists such as offices and small
-businesses. Leave it off for stores, malls and venues, where real crowds
-gather on one spot and it removes them too. For airports and stadiums, use
-`--no-filters` or `--filter anomalous_devices`. Values are case-insensitive and
+at once. GPS Strict Filtering is on by default. Turn it off
+(`--no-filters`, or `--filter anomalous_devices`) for airports and stadiums,
+where real crowds can stand on one spot. Values are case-insensitive and
 a repeat is sent once. An unknown value, `--filter` with `--no-filters`, or
 either flag on any type but POI, is refused before anything is sent, exit 2.
 
 ```bash
 intuizi audiences create --type poi --brand "Example Offices" --country USA \
   --start-date 2026-06-01 --end-date 2026-08-31 \
-  --filter anomalous_devices --filter anomalous_pois --filter strict_gps \
   --name "Example Offices - summer" --dry-run
 ```
 

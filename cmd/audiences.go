@@ -168,17 +168,15 @@ drops devices on Intuizi's list of known bad devices, anomalous_pois drops
 every visit to locations flagged as anomalous, and strict_gps (GPS Strict
 Filtering) drops every visit at a spot where more than 500 devices from one
 signal provider were seen at that location in the same month: city-center
-defaults and rounded coordinates reported for many devices at once. Use
-strict_gps for address-level lists such as offices and small businesses, and
-leave it off for stores, malls and venues, where real crowds gather on one
-spot and it removes them too. For airports and stadiums, use --no-filters or
---filter anomalous_devices. Audience Manager has the same default,
+defaults and rounded coordinates reported for many devices at once. GPS
+Strict Filtering is on by default. Turn it off (--no-filters, or --filter
+anomalous_devices) for airports and stadiums, where real crowds can stand on
+one spot. Audience Manager has the same default,
 anomalous_devices and strict_gps. --filter and --no-filters apply to POI only,
 and cannot be combined. --filter repeats for more than one:
 
     intuizi audiences create --type poi --brand "Example Offices" \
       --country USA --start-date 2026-06-01 --end-date 2026-08-31 \
-      --filter anomalous_devices --filter anomalous_pois --filter strict_gps \
       --name "Example Offices - summer" --dry-run
 
 To see how many devices the audience would hold before building it, run the
