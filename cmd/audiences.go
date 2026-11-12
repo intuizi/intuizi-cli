@@ -127,20 +127,20 @@ approved by your Account Manager: a 403 means they are not enabled for the
 account. Only 'audiences create' takes these flags, because an estimate and a
 quote never run the analysis.
 
---type skus targets the devices of the households that bought a product
-brand, or bought from a merchant, online. The data is online purchases at
+--type skus targets the devices seen on the home networks of online purchases
+of a product brand, or from a merchant. The data is online purchases at
 product level from a panel of affiliate-tracked orders, strongest at large
-United States retailers, and the devices are those of the household the
-purchase click came from: an order with no tracked click adds no device. The
+United States retailers, and the devices are those seen on the home network
+the purchase click came from: an order with no tracked click adds no device. The
 dataset is available on request. It needs --merchant or --brand, or both. The
 values of one flag are alternatives, and the two narrow each other: a brand
 with a merchant is that brand bought from that merchant. Each value is a
 catalog key or a name, looked up in 'intuizi reference skus merchants' or
 'intuizi reference skus brands --search <name>' and sent as the key the
 catalog returns, each once. --brand-all takes every brand a search matches.
---match-strictness sets how strictly a device must be tied to the household
-of the purchase click, from 1 (Very Strict, the fewest devices) to 5 (More
-Reach, every device linked to the household); the API's default is 3. The
+--match-strictness sets how closely a device must match the home network of
+the purchase click, from 1 (Very Strict, the fewest devices) to 5 (More Reach,
+every device seen on that network); the API's default is 3. The
 dates are the purchase dates. --country and --state are optional: without a
 country the purchases of every country are read. SKUs takes no signal
 providers, so no provider catalog is read, and --provider, --city and
@@ -357,7 +357,7 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 			"(repeat the flag for more than one)")
 	f.IntVar(&r.strictness, "match-strictness", 0,
 		"SKUs only: Match Strictness, 1 (very strict) to 5 (more reach), how\n"+
-			"strictly a device must be tied to the household of the purchase\n"+
+			"closely a device must match the home network of the purchase click\n"+
 			"(the API's default is 3)")
 	completeValues(cmd, "match-strictness", matchStrictnessLevels)
 	// No MarkFlagsOneRequired("file", "type"): cobra checks flag groups after

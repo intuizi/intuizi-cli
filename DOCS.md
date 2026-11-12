@@ -514,11 +514,12 @@ EXAMPLE DSL        EXAMPLE SATELLITE  12000    3000      5000     1000
 EXAMPLE SATELLITE  EXAMPLE DSL        5000     1000      12000    3000
 ```
 
-`--type skus` targets the devices of the households that bought a product
-brand, or bought from a merchant, online. The data is online purchases at
-product level from a panel of affiliate-tracked orders, and it is strongest
-at large United States retailers. The devices are those of the household the
-purchase click came from, so an order with no tracked click adds no device.
+`--type skus` targets the devices seen on the home networks of online
+purchases of a product brand, or from a merchant. The data is online
+purchases at product level from a panel of affiliate-tracked orders, and it
+is strongest at large United States retailers. The devices are those seen on
+the home network the purchase click came from, so an order with no tracked
+click adds no device.
 Treat the counts as a panel, not as a merchant's sales. The dataset is
 available on request: `reference common dataset-types` lists `SKUs` when
 your account has it, and an account without it reads both SKUs catalogs
@@ -534,11 +535,12 @@ merchant is that brand bought from that merchant.
   <name>`, sent as `brands`. `--brand-all` takes every brand a search
   matches, and refuses a search that runs past one page of 500.
 - `--match-strictness` is the Match Strictness, sent as
-  `max_devices_per_ip` only when given: how strictly a device must be tied
-  to the household of the purchase click. `1` (Very Strict) keeps the fewest
-  devices and the closest tie, `5` (More Reach) every device linked to the
-  household. The API's default is `3` (Recommended). Choose a low level for
-  precision and a high level for reach.
+  `max_devices_per_ip` only when given: how closely a device must match the
+  home network the purchase click came from. `1` (Very Strict) keeps the
+  fewest devices, `5` (More Reach) every device seen on that network, so the
+  most devices, including shared networks. The API's default is `3`
+  (Recommended). Choose a low level for precision and a high level for
+  reach.
 
 Each `--merchant` and `--brand` value is a catalog key or a name. The API
 matches a key exactly, case included, and refuses a name, so the CLI looks
