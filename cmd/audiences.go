@@ -717,15 +717,15 @@ func brandHint(dsType string) string {
 	return ""
 }
 
-// audienceFields are the body-building flags, for --file to reject.
-var audienceFields = []string{
+// audienceFields are the body-building flags, for --file to reject. The SKUs
+// flags come from skusFlags, so a new SKUs flag is refused next to --file too.
+var audienceFields = append([]string{
 	"type", "name", "start-date", "end-date",
 	"brand", "brand-all", "category",
 	"provider", "country", "state", "city", "zipcode", "filter", "no-filters", "frequency",
 	"network-kind", "network", "technology", "min-days",
-	"merchant", "match-strictness",
 	"switch-from", "switch-to", "switch-network", "switch-min-days",
-}
+}, skusFlags...)
 
 // audienceRequired is the minimum for a single dataset.
 var audienceRequired = []string{"type", "name", "start-date", "end-date"}

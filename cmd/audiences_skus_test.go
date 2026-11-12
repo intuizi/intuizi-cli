@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -322,21 +323,40 @@ func TestAudiencesSkusUsageErrors(t *testing.T) {
 	}
 }
 
-// A --file body carries its own SKUs keys, so the SKUs flags are refused with
-// it rather than silently dropped.
+// A --file body carries its own SKUs keys, so every SKUs flag, the device
+// flags among them, is refused with it on create, estimate and quote rather
+// than silently dropped while the file body is posted.
 func TestAudiencesSkusFlagsAreBodyFlags(t *testing.T) {
-	for _, flag := range [][]string{{"--merchant", "target"}, {"--match-strictness", "3"}} {
-		t.Run(flag[0], func(t *testing.T) {
-			srv, got := stub(t, created)
-
-			_, _, err := run(t, audiencesCreateCommand(), srv,
-				append([]string{"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"SKUs"}]}`)}, flag...)...)
-
-			wantUsageErr(t, err, "--file", flag[0])
-			if len(got.paths) != 0 {
-				t.Errorf("should cost no round trip, got %v", got.paths)
+	for _, d := range skusDeviceFlags {
+		if !slices.Contains(skusFlags, d.flag) {
+			t.Errorf("--%s is not in skusFlags, so it is neither refused on other types nor next to --file", d.flag)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+	}{
+		{"create", audiencesCreateCommand},
+		{"estimate", estimateCreateCommand},
+		{"quote", audiencesQuoteCommand},
+	} {
+		for _, flag := range skusFlags {
+			value := "ios"
+			if flag == "match-strictness" {
+				value = "3"
 			}
-		})
+			t.Run(tc.name+" --"+flag, func(t *testing.T) {
+				srv, got := stub(t, created)
+
+				_, _, err := run(t, tc.cmd(), srv, "--file",
+					payloadFile(t, `{"name":"x","datasets":[{"type":"SKUs"}]}`), "--"+flag, value)
+
+				wantUsageErr(t, err, "--file", "--"+flag)
+				if len(got.paths) != 0 {
+					t.Errorf("should cost no round trip, got %v", got.paths)
+				}
+			})
+		}
 	}
 }
 

@@ -39,8 +39,16 @@ var matchStrictnessLevels = []string{"1", "2", "3", "4", "5"}
 const maxSearchPage = 500
 
 // skusFlags are the flags that write a SKUs dataset's own keys, refused on any
-// other type. --brand and --brand-all are shared with POI.
-var skusFlags = []string{"merchant", "match-strictness", "device-type", "device-os", "device-make", "device-model"}
+// other type and next to --file (audienceFields takes them from here). The
+// device flags come from skusDeviceFlags, so a new one cannot be left out.
+// --brand, --brand-all and --category are shared with other types.
+var skusFlags = func() []string {
+	flags := []string{"merchant", "match-strictness"}
+	for _, d := range skusDeviceFlags {
+		flags = append(flags, d.flag)
+	}
+	return flags
+}()
 
 // skusDevice is one "Purchased on" flag: the flag, the device-values field it reads and its help noun.
 type skusDevice struct {
