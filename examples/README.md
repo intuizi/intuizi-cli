@@ -23,6 +23,7 @@ sending anything. The dates are examples too, and some go stale: see the
 | `audience-two-datasets.json` | `audiences create` | Two datasets, so `operator` is required. |
 | `audience-refine-crosspurchase.json` | `audiences create` | `refine` sits **inside** the dataset; `crosspurchase` sits at the **top level**. Both are permission-gated. |
 | `audience-connectivity-switching.json` | `audiences create` | One `Connectivity` dataset, whose `connectivity_network_kind` is required, with the **top-level** `networkswitching` block, which is permission-gated and cannot be sent with `crosspurchase`. Flags build the same body: `--type connectivity --network-kind home --network Starlink --technology Satellite --min-days 3 --country USA --switch-from 2026-09 --switch-to 2026-10`, with the name, dates and `--provider`. `audiences estimate create` checks the block too, so drop it to size the audience without the permission. |
+| `audience-skus.json` | `audiences create` | One `SKUs` dataset (available on request): merchant and product brand **keys**, the `value` column of the two SKUs catalogs, never the names; at least one of `merchants` and `brands`. No `signal_providers`, and `location` reads `countries` and `states` only. `max_devices_per_ip` is the Match Strictness, 1 to 5, default 3. Flags build the same body: `--type skus --merchant "Example Outdoor Store" --brand dove --brand "Dove Men+Care" --country USA --state TX --state CA --match-strictness 3`, with the name and dates. A SKUs estimate is always answered by a worker. |
 | `activation.json` | `activations create --file` | From flags, an export needs `--audience-id`, `--endpoint-connection-id`, `--pricing-model-id` and at least one `--datastream`; without a datastream it completes and delivers nothing. Use this file for per-stream inputs or compression. Add `--wait` to follow it to Completed; `--timeout` defaults to 60m. |
 | `cohort.json` | `cohorts create` | Swap `file_uri` for `upload_reference` to use `intuizi uploads put`. Or build it from flags - see the README. |
 | `cohort-from-audience.json` | `cohorts create` | The audience must be Completed, and makes at most one live cohort. Swap `device_limit` for `freq_limit` + `freq_min`/`freq_max`, or `distance_limit` + `distance` (meters). It carries no `name`: the cohort takes the audience's, and the API ignores one sent here. |
@@ -39,6 +40,8 @@ intuizi reference apps categories                 # Apps "categories"
 intuizi reference web iab-categories              # WebDomain "iab_category_codes": the id column, not the code
 intuizi reference transactions categories         # crosspurchase targets
 intuizi reference connectivity networks --kind home  # Connectivity "connectivity_networks"
+intuizi reference skus merchants --search outdoor  # SKUs "merchants": the value column
+intuizi reference skus brands --search dove        # SKUs "brands": the value column
 intuizi reference common endpoint-connections     # endpoint_connection_id
 intuizi reference common pricing-models --partner-id <id>
 intuizi reference common datastreams --partner-id <id>  # an activation's datastreams[].id
@@ -53,6 +56,9 @@ intuizi reference common schedule-endings         # recurrence.ending.type
 - Dates go in as `Y-m-d`. Reads echo them back as `MM/DD/YYYY` - different
   field, different format.
 - `refine` works only on a single-dataset audience, POI or Apps.
+- A `SKUs` dataset cannot sit next to a `Cohorts`, `Demographics`, `Origin`,
+  `Connectivity` or `Deidentified` dataset, and its audience takes no
+  `analyses`, `crossvisitation`, `crosspurchase` or `refine`.
 - A `crosspurchase` window covers at most two calendar months and cannot run
   past the last settled purchase week.
 - `crossvisitation` can be sent on create but never round-trips on the read.

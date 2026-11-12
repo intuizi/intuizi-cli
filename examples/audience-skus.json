@@ -1,0 +1,14 @@
+{
+  "name": "Dove buyers - October 2026",
+  "datasets": [
+    {
+      "type": "SKUs",
+      "start_date": "2026-10-01",
+      "end_date": "2026-10-31",
+      "merchants": ["example outdoor store"],
+      "brands": ["dove", "dove men+care"],
+      "location": { "countries": ["USA"], "states": ["TX", "CA"] },
+      "max_devices_per_ip": 3
+    }
+  ]
+}
