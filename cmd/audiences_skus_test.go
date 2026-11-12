@@ -206,7 +206,8 @@ func TestAudiencesSkusUnresolvedValues(t *testing.T) {
 		want  []string
 	}{
 		{"no brand", skusBrandsPage(0, 1), []string{"--brand", "nope"},
-			[]string{"--brand nope", "no SKUs brands match it", "'intuizi reference skus brands --search <name>'"}},
+			[]string{"--brand nope", "no SKUs brands match it", "'intuizi reference skus brands --search <name>'",
+				"the SKUs dataset is not enabled for this account", "'intuizi reference common dataset-types'"}},
 		{"no merchant", `{"status":"success","code":200,"message":"ok","data":[]}`, []string{"--merchant", "nope"},
 			[]string{"--merchant nope", "no SKUs merchants match it", "'intuizi reference skus merchants'"}},
 		{"several merchants", skusMerchants, []string{"--merchant", "example outdoor"},
@@ -231,7 +232,7 @@ func TestAudiencesSkusBrandAllRefusesManyPages(t *testing.T) {
 
 	_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--brand-all", "a")...)
 
-	wantUsageErr(t, err, `"a" matches 1200 SKUs brands across 3 pages`, "narrow the search")
+	wantUsageErr(t, err, `"a" matches 1200 SKUs brands across 3 pages`, "narrow the search", "pass the keys with --brand")
 }
 
 // Without --dry-run the body goes to the endpoint of each command: the

@@ -154,7 +154,11 @@ func resolveSkusKey(ctx context.Context, c *api.Client, path, flag, value, what 
 
 	switch {
 	case len(items) == 0:
-		return "", usageErr(fmt.Sprintf("%s %s: no SKUs %s match it; list them with %s", flag, value, what, lookup))
+		// An account without the dataset reads every SKUs catalog empty, so
+		// "no match" can mean either.
+		return "", usageErr(fmt.Sprintf("%s %s: no SKUs %s match it; list them with %s. If that lists "+
+			"nothing at all, the SKUs dataset is not enabled for this account: 'intuizi reference common "+
+			"dataset-types' lists the types it has", flag, value, what, lookup))
 	case len(items) == 1 && !partial:
 		return pick(items[0])
 	}

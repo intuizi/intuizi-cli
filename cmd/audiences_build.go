@@ -315,9 +315,14 @@ func resolveAll(ctx context.Context, c *api.Client, path, search, what string) (
 		return nil, usageErr(fmt.Sprintf("no %s match %q", what, search))
 	}
 	if pg != nil && pg.LastPage > 1 {
+		// A SKUs brand has a key, not an id.
+		way := "pass ids"
+		if path == skusBrandsPath {
+			way = "pass the keys with --brand"
+		}
 		return nil, usageErr(fmt.Sprintf(
-			"%q matches %d %s across %d pages - narrow the search, or name them one by one",
-			search, pg.Total, what, pg.LastPage))
+			"%q matches %d %s across %d pages - narrow the search, or %s",
+			search, pg.Total, what, pg.LastPage, way))
 	}
 
 	ids := make([]any, 0, len(items))
