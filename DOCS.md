@@ -588,7 +588,8 @@ intuizi audiences create --type skus \
 A SKUs dataset cannot be combined with a Cohorts, Demographics, Origin,
 Connectivity or Deidentified dataset, and an audience with a SKUs dataset
 takes no additional analyses (`analyses`, `crossvisitation`,
-`crosspurchase`) and no `refine` (the Audience Modifier). The flags build
+`crosspurchase`) and no `refine` (the Audience Modifier). Combined with a
+Competitors dataset, the Competitors dataset comes first. The flags build
 none of these shapes; do not send them with `--file`. A completed SKUs
 audience reads `uniques`, `avg_uniques`, `orders`, `orders_per_unique`,
 `unique_brands` and `unique_merchants` in its `totals`.

@@ -155,7 +155,8 @@ providers, so no provider catalog is read, and --provider, --city and
 A SKUs dataset cannot be combined with a Cohorts, Demographics, Origin,
 Connectivity or Deidentified dataset, and an audience with a SKUs dataset
 takes no additional analyses (analyses, crossvisitation, crosspurchase) and
-no refine. The flags build none of these; do not send them with --file.
+no refine. With a Competitors dataset, the Competitors dataset comes first.
+The flags build none of these; do not send them with --file.
 
 Omitting --provider includes every signal provider for the dataset type, which
 is almost always what you want. The CLI reads that catalog first, and a
