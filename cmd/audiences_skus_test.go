@@ -657,7 +657,7 @@ func TestSkusDeviceUnresolved(t *testing.T) {
 			[]string{"--device-os ipad", "not a value of the SKUs catalog",
 				"'intuizi reference skus device-values --field os'"}, "not enabled"},
 		{"cut short at the cap", skusCategories(models...), []string{"--device-model", "iphone"},
-			[]string{"--device-model iphone", "cut short at 500", "--file"}, "not a value"},
+			[]string{"--device-model iphone", "cut short at 500", "--file"}, "longer value"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, got := stub(t, tc.reply)
