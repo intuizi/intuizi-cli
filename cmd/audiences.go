@@ -72,7 +72,7 @@ an error listing what was found, and so is an exact label on a result too long
 to arrive in one page. --brand-all takes every match for a search instead, for
 the deliberate "all the coffee brands" case, and reports to stderr how many it
 selected. --brand applies to POI and SKUs (see --type skus below). --category
-applies to POI, Apps, WebDomain and AffinityTransactions, each resolving
+applies to POI, Apps, WebDomain, AffinityTransactions and SKUs, each resolving
 against its own catalog. For WebDomain that is 'intuizi reference web
 iab-categories', whose id is the number in its id column, not the IAB code in
 its value column. Its labels read "CODE - name", so there an exact IAB code or

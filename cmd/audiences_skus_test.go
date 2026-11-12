@@ -673,3 +673,11 @@ func TestSkusDeviceUnresolved(t *testing.T) {
 		})
 	}
 }
+
+// The --category sentence of the create help names every type with a category catalog, SKUs too.
+func TestCreateHelpCategoryNamesSkus(t *testing.T) {
+	long := strings.Join(strings.Fields(audiencesCreateCommand().Long), " ")
+	if !strings.Contains(long, "--category applies to POI, Apps, WebDomain, AffinityTransactions and SKUs") {
+		t.Fatalf("the --category sentence of the help does not name SKUs")
+	}
+}
