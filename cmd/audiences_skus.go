@@ -111,8 +111,8 @@ func resolveSkusDevices(ctx context.Context, c *api.Client, d skusDevice, values
 					"reference common dataset-types' lists the types it has", d.flag, v, d.help, lookup))
 			case len(items) >= skusDeviceValuesCap:
 				return nil, usageErr(fmt.Sprintf("--%s %s: the search was cut short at %d SKUs %s values, the "+
-					"most orders first, and %s is not among them, so it cannot be checked; pass a longer value, "+
-					"or send it as the catalog holds it (upper case) in a --file body", d.flag, v,
+					"most orders first, and %s is not among them, so it cannot be checked; send it "+
+					"as the catalog holds it (upper case) in a --file body", d.flag, v,
 					skusDeviceValuesCap, d.help, v))
 			}
 			return nil, usageErr(fmt.Sprintf("--%s %s: not a value of the SKUs catalog; list them with %s",

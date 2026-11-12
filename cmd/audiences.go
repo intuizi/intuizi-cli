@@ -128,7 +128,7 @@ account. Only 'audiences create' takes these flags, because an estimate and a
 quote never run the analysis.
 
 --type skus targets the devices seen on the home networks of online purchases
-of a product brand, or from a merchant. The data is online purchases at
+of a product brand or category, or from a merchant. The data is online purchases at
 product level from a panel of affiliate-tracked orders, strongest at large
 United States retailers, and the devices are those seen on the home network
 the purchase click came from: an order with no tracked click adds no device. The
@@ -140,7 +140,7 @@ skus categories' (the Google Product Taxonomy with finer levels such as Dry Dog
 Food); a category includes every category under it. --device-type,
 --device-os, --device-make and --device-model filter the device of the purchase
 click (values from 'intuizi reference skus device-values --field <field>',
-case-insensitive). Each value is a
+case-insensitive). Each --merchant and --brand value is a
 catalog key or a name, looked up in 'intuizi reference skus merchants' or
 'intuizi reference skus brands --search <name>' and sent as the key the
 catalog returns, each once. --brand-all takes every brand a search matches.

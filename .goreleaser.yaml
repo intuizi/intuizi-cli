@@ -46,8 +46,8 @@ changelog:
   sort: asc
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
+      - '^docs(\(.+\))?:'
+      - '^test(\(.+\))?:'
   # Subjects without a prefix fall into Other, so the notes stay complete
   # while the convention is adopted. The match is against the bare subject,
   # like the filters above, so the prefix is anchored: "prefix: ..." is not a fix.
