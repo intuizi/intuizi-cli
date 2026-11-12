@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -465,4 +466,45 @@ func TestSkusDeviceResolvesCase(t *testing.T) {
 	}
 	_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "3530", "--device-os", "OS X", "--dry-run")...)
 	wantUsageErr(t, err, "--device-os OS X", "reference skus device-values --field os")
+}
+
+// A device value the catalog does not answer is a usage error, and nothing is
+// created. An empty answer can also mean the account lacks the dataset, and a
+// search the API cut short at 500 values cannot prove the value is missing.
+func TestSkusDeviceUnresolved(t *testing.T) {
+	models := make([]string, 0, skusDeviceValuesCap)
+	for i := range skusDeviceValuesCap {
+		models = append(models, fmt.Sprintf(`{"value":"IPHONE %d","text":"IPHONE %d"}`, i, i))
+	}
+	for _, tc := range []struct {
+		name  string
+		reply string
+		args  []string
+		want  []string
+		not   string
+	}{
+		{"none at all", skusCategories(), []string{"--device-os", "ios"},
+			[]string{"--device-os ios", "no SKUs OS value matches it",
+				"'intuizi reference skus device-values --field os'",
+				"If that lists nothing at all, the SKUs dataset is not enabled for this account",
+				"'intuizi reference common dataset-types'"}, "cut short"},
+		{"no exact match", skusCategories(`{"value":"IPADOS","text":"IPADOS"}`), []string{"--device-os", "ipad"},
+			[]string{"--device-os ipad", "not a value of the SKUs catalog",
+				"'intuizi reference skus device-values --field os'"}, "not enabled"},
+		{"cut short at the cap", skusCategories(models...), []string{"--device-model", "iphone"},
+			[]string{"--device-model iphone", "cut short at 500", "--file"}, "not a value"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, tc.reply)
+			_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, append([]string{"--category", "3530"},
+				tc.args...)...)...)
+			wantUsageErr(t, err, tc.want...)
+			if err != nil && strings.Contains(err.Error(), tc.not) {
+				t.Errorf("error says %q: %v", tc.not, err)
+			}
+			if len(got.paths) != 1 || got.paths[0] != "/api/v2"+skusDeviceValuesPath {
+				t.Errorf("only the device lookup should be sent, got %v", got.paths)
+			}
+		})
+	}
 }

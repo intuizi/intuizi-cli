@@ -66,6 +66,11 @@ var skusDeviceFlags = []skusDevice{
 
 const skusDeviceValuesPath = referencePrefix + "skus/device-values"
 
+// skusDeviceValuesCap is the most rows the device-values catalog answers a
+// search with, the most orders first. It is not paged, so a full answer may
+// have cut off the value searched for.
+const skusDeviceValuesCap = 500
+
 // resolveSkusDevices sends each value of one device flag as the catalog holds it: the API matches exactly (upper
 // case), the CLI matches ignoring case. A value the catalog does not hold is a usage error naming it. skusOptions
 // has already refused an empty value.
@@ -88,8 +93,22 @@ func resolveSkusDevices(ctx context.Context, c *api.Client, d skusDevice, values
 			}
 		}
 		if found == "" {
-			return nil, usageErr(fmt.Sprintf("--%s %s: not a value of the SKUs catalog; list them with "+
-				"'intuizi reference skus device-values --field %s'", d.flag, v, d.field))
+			lookup := "'intuizi reference skus device-values --field " + d.field + "'"
+			switch {
+			case len(items) == 0:
+				// An account without the dataset reads every SKUs catalog
+				// empty, so "no match" can mean either.
+				return nil, usageErr(fmt.Sprintf("--%s %s: no SKUs %s value matches it; list them with %s. If "+
+					"that lists nothing at all, the SKUs dataset is not enabled for this account: 'intuizi "+
+					"reference common dataset-types' lists the types it has", d.flag, v, d.help, lookup))
+			case len(items) >= skusDeviceValuesCap:
+				return nil, usageErr(fmt.Sprintf("--%s %s: the search was cut short at %d SKUs %s values, the "+
+					"most orders first, and %s is not among them, so it cannot be checked; pass a longer value, "+
+					"or send it as the catalog holds it (upper case) in a --file body", d.flag, v,
+					skusDeviceValuesCap, d.help, v))
+			}
+			return nil, usageErr(fmt.Sprintf("--%s %s: not a value of the SKUs catalog; list them with %s",
+				d.flag, v, lookup))
 		}
 		out = append(out, found)
 	}
