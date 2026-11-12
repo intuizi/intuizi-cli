@@ -525,9 +525,21 @@ available on request: `reference common dataset-types` lists `SKUs` when
 your account has it, and an account without it reads both SKUs catalogs
 empty.
 
-A SKUs dataset needs `--merchant` or `--brand`, or both. The values of one
-flag are alternatives, and the two flags narrow each other: a brand with a
-merchant is that brand bought from that merchant.
+A SKUs dataset needs `--merchant`, `--brand` or `--category`. The values of
+one flag are alternatives, and the flags narrow each other on the same order
+line: a brand with a merchant is that brand bought from that merchant, and a
+brand with a category is that brand bought in that category.
+
+- `--category` names product categories from `reference skus categories`
+  (the Google Product Taxonomy with finer levels such as Dry Dog Food; walk
+  it with `--parent-id`, or `--search` any level), sent as `categories`. A
+  number is taken as the id; a name must resolve to one category. A category
+  selects itself and every category under it.
+- `--device-type`, `--device-os`, `--device-make` and `--device-model` filter
+  the device of the purchase click, with values from `reference skus
+  device-values --field type|os|make|model`, matched ignoring case and sent
+  as the catalog holds them (`IOS`). The audience is still every device seen
+  on that home network.
 
 - `--merchant` names merchants from `reference skus merchants`, sent as
   `merchants`.
@@ -555,9 +567,9 @@ without a country the purchases of every country are read. A SKUs dataset
 takes no signal providers, so no provider catalog is read and the body
 carries no `signal_providers`. `--provider`, `--city` and `--zipcode` are
 refused on SKUs, and `--merchant` and `--match-strictness` on any other
-type, before anything is sent, exit 2. So are `--category`, `--filter`,
-`--no-filters`, `--frequency` and the Connectivity and switching flags on
-SKUs.
+type, before anything is sent, exit 2, and so are the device flags. So are
+`--filter`, `--no-filters`, `--frequency` and the Connectivity and switching
+flags on SKUs.
 
 ```bash
 intuizi audiences create --type skus \

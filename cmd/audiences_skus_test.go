@@ -282,7 +282,8 @@ func TestAudiencesSkusUsageErrors(t *testing.T) {
 		want []string
 	}{
 		{"no merchant and no brand", with(skusFlagsBase, "--country", "USA"),
-			[]string{"--type SKUs needs --merchant or --brand", "reference skus merchants", "reference skus brands"}},
+			[]string{"--type SKUs needs --merchant, --brand or --category", "reference skus merchants", "reference skus brands",
+				"reference skus categories"}},
 		{"provider", with(brand, "--provider", "aaa"), []string{"--provider does not apply to --type SKUs"}},
 		{"city", with(brand, "--country", "USA", "--city", "Dallas"),
 			[]string{"--city does not apply to --type SKUs", "--country and --state only"}},
@@ -301,7 +302,6 @@ func TestAudiencesSkusUsageErrors(t *testing.T) {
 			[]string{"--match-strictness applies to --type SKUs, not WebDomain", "max_devices_per_ip needs --file"}},
 		{"--merchant on AffinityTransactions", with(swap(poi, "--type", "affinitytransactions"), "--merchant", "x"),
 			[]string{"--merchant applies to --type SKUs, not AffinityTransactions"}},
-		{"--category on SKUs", with(brand, "--category", "x"), []string{"--category applies to", "not SKUs"}},
 		{"--filter on SKUs", with(brand, "--filter", "strict_gps"),
 			[]string{"--filter applies to --type POI, not SKUs"}},
 		{"--no-filters on SKUs", with(brand, "--no-filters"),
@@ -389,4 +389,46 @@ func TestReferenceSkusCatalogs(t *testing.T) {
 	if !strings.Contains(brands.Flags().Lookup("search").Usage, "brand name") {
 		t.Errorf("brands --search help = %q", brands.Flags().Lookup("search").Usage)
 	}
+}
+
+// skusCategories is the categories catalog's answer to a search.
+func skusCategories(rows ...string) string {
+	return `{"status":"success","code":200,"message":"ok","data":[` + strings.Join(rows, ",") + `]}`
+}
+
+// --category on SKUs takes a category id, or a name the catalog resolves to exactly one category.
+func TestSkusCategoryByName(t *testing.T) {
+	srv, _ := stub(t, skusCategories(
+		`{"value":3530,"text":"Dog Food","path":"Animals & Pet Supplies > Pet Supplies > Dog Supplies > Dog Food"}`))
+
+	body := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "dog food")...)
+
+	if raw := jsonOf(firstDataset(t, body)["categories"]); raw != `[3530]` {
+		t.Errorf("categories = %s", raw)
+	}
+	byID := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "10000000")...)
+	if raw := jsonOf(firstDataset(t, byID)["categories"]); raw != `[10000000]` {
+		t.Errorf("categories by id = %s", raw)
+	}
+}
+
+// A name that matches several categories, none labelled with it, is a usage error.
+func TestSkusCategoryAmbiguous(t *testing.T) {
+	srv, _ := stub(t, skusCategories(`{"value":10000000,"text":"Dry Dog Food"}`, `{"value":10000002,"text":"Dry Cat Food"}`))
+
+	_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "dry", "--dry-run")...)
+	wantUsageErr(t, err, "2 categories match \"dry\"", "Dry Dog Food", "Dry Cat Food")
+}
+
+// A device value is matched ignoring case and sent as the catalog holds it.
+func TestSkusDeviceResolvesCase(t *testing.T) {
+	srv, _ := stub(t, skusCategories(`{"value":"IOS","text":"IOS"}`, `{"value":"IPADOS","text":"IPADOS"}`))
+
+	body := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "3530", "--device-os", "ios")...)
+
+	if raw := jsonOf(firstDataset(t, body)["device_oses"]); raw != `["IOS"]` {
+		t.Errorf("device_oses = %s", raw)
+	}
+	_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "3530", "--device-os", "OS X", "--dry-run")...)
+	wantUsageErr(t, err, "--device-os OS X", "reference skus device-values --field os")
 }

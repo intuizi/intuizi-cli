@@ -40,7 +40,55 @@ const maxSearchPage = 500
 
 // skusFlags are the flags that write a SKUs dataset's own keys, refused on any
 // other type. --brand and --brand-all are shared with POI.
-var skusFlags = []string{"merchant", "match-strictness"}
+var skusFlags = []string{"merchant", "match-strictness", "device-type", "device-os", "device-make", "device-model"}
+
+// skusDevice is one "Purchased on" flag: the flag, the device-values field it reads and its help noun.
+type skusDevice struct {
+	flag  string
+	field string
+	help  string
+}
+
+var skusDeviceFlags = []skusDevice{
+	{"device-type", "type", "device type"},
+	{"device-os", "os", "OS"},
+	{"device-make", "make", "device make"},
+	{"device-model", "model", "device model"},
+}
+
+const skusDeviceValuesPath = referencePrefix + "skus/device-values"
+
+// resolveSkusDevices sends each value of one device flag as the catalog holds it: the API matches exactly (upper
+// case), the CLI matches ignoring case. A value the catalog does not hold is a usage error naming it.
+func resolveSkusDevices(ctx context.Context, c *api.Client, d skusDevice, values []string) ([]string, error) {
+	out := []string{}
+	for _, v := range values {
+		want := strings.TrimSpace(v)
+		if want == "" {
+			continue
+		}
+		query := url.Values{}
+		query.Set("field", d.field)
+		query.Set("search", want)
+		items, _, err := api.ReadList[output.Record](ctx, c, skusDeviceValuesPath, query)
+		if err != nil {
+			return nil, err
+		}
+		found := ""
+		for _, it := range items {
+			if s, ok := it["value"].(string); ok && strings.EqualFold(s, want) {
+				found = s
+				break
+			}
+		}
+		if found == "" {
+			return nil, usageErr(fmt.Sprintf("--%s %s: not a value of the SKUs catalog; list them with "+
+				"'intuizi reference skus device-values --field %s'", d.flag, v, d.field))
+		}
+		out = append(out, found)
+	}
+	return dedupe(out), nil
+}
 
 // skusSpec is what the SKUs flags ask for, checked before any key is looked
 // up.
@@ -81,9 +129,10 @@ func (r *audienceRequest) skusOptions(dsType string, changed func(string) bool) 
 	if err := nonEmpty("merchant", r.merchants...); err != nil {
 		return skusSpec{}, err
 	}
-	if len(r.merchants)+len(r.brands)+len(r.brandAll) == 0 {
-		return skusSpec{}, usageErr("--type SKUs needs --merchant or --brand, or both; find the keys with " +
-			"'intuizi reference skus merchants' and 'intuizi reference skus brands --search <name>'")
+	if len(r.merchants)+len(r.brands)+len(r.brandAll)+len(r.categories) == 0 {
+		return skusSpec{}, usageErr("--type SKUs needs --merchant, --brand or --category; find them with " +
+			"'intuizi reference skus merchants', 'intuizi reference skus brands --search <name>' and " +
+			"'intuizi reference skus categories --search <name>'")
 	}
 	if changed("match-strictness") && (r.strictness < minMatchStrictness || r.strictness > maxMatchStrictness) {
 		return skusSpec{}, usageErr(fmt.Sprintf("--match-strictness must be between %d and %d, not %d",

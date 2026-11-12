@@ -195,7 +195,16 @@ var referenceGroups = []referenceGroup{
 			// The value is the key a SKUs dataset takes, matched exactly by
 			// the API; the text is the name.
 			{item: "merchants", short: "Merchants a SKUs dataset can name, most orders first"},
-			{item: "brands", short: "Product brands a SKUs dataset can name", paged: true, searchHelp: searchSkusBrand},
+			{item: "brands", short: "Product brands a SKUs dataset can name", paged: true, searchHelp: searchSkusBrand,
+				params: []param{{name: "categories", kind: str,
+					help: "comma-separated category ids: only the brands sold under them"}}},
+			{item: "categories", short: "Product categories a SKUs dataset can name (a tree)", params: []param{
+				{name: "parent_id", kind: num, help: "list the children of this category (the top level when left out)"},
+			}},
+			{item: "device-values", short: "Purchase-device values a SKUs dataset can name", params: []param{
+				{name: "field", kind: str, required: true, values: []string{"type", "os", "make", "model"},
+					help: "type, os, make or model"},
+			}},
 		},
 	},
 	{

@@ -132,9 +132,15 @@ of a product brand, or from a merchant. The data is online purchases at
 product level from a panel of affiliate-tracked orders, strongest at large
 United States retailers, and the devices are those seen on the home network
 the purchase click came from: an order with no tracked click adds no device. The
-dataset is available on request. It needs --merchant or --brand, or both. The
-values of one flag are alternatives, and the two narrow each other: a brand
-with a merchant is that brand bought from that merchant. Each value is a
+dataset is available on request. It needs --merchant, --brand or --category.
+The values of one flag are alternatives, and the flags narrow each other on
+the same order line: a brand with a merchant is that brand bought from that
+merchant. --category takes a category id or a name from 'intuizi reference
+skus categories' (the Google Product Taxonomy with finer levels such as Dry Dog
+Food); a category includes every category under it. --device-type,
+--device-os, --device-make and --device-model filter the device of the purchase
+click (values from 'intuizi reference skus device-values --field <field>',
+case-insensitive). Each value is a
 catalog key or a name, looked up in 'intuizi reference skus merchants' or
 'intuizi reference skus brands --search <name>' and sent as the key the
 catalog returns, each once. --brand-all takes every brand a search matches.
@@ -285,6 +291,8 @@ type audienceRequest struct {
 	// serve SKUs too.
 	merchants  []string
 	strictness int
+	// SKUs "Purchased on": device values of the purchase click, by field.
+	devices map[string]*[]string
 
 	// Network Switching: registered on 'audiences create' only.
 	switchFrom    string
@@ -360,6 +368,13 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 			"closely a device must match the home network of the purchase click\n"+
 			"(the API's default is 3)")
 	completeValues(cmd, "match-strictness", matchStrictnessLevels)
+	r.devices = map[string]*[]string{}
+	for _, d := range skusDeviceFlags {
+		values := []string{}
+		r.devices[d.flag] = &values
+		f.StringArrayVar(&values, d.flag, nil, "SKUs only: the "+d.help+" of the purchase click, from\n"+
+			"'reference skus device-values --field "+d.field+"' (case-insensitive; repeatable)")
+	}
 	// No MarkFlagsOneRequired("file", "type"): cobra checks flag groups after
 	// PersistentPreRunE, so its error exits 1. missingFlags covers --type.
 }
@@ -582,6 +597,22 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 		// one --brand already named.
 		ds.Brands = dedupe(brands)
 		ds.MaxDevicesPerIP = skus.strictness
+		for _, d := range skusDeviceFlags {
+			values, err := resolveSkusDevices(ctx, c, d, *r.devices[d.flag])
+			if err != nil {
+				return audienceBody{}, err
+			}
+			switch d.field {
+			case "type":
+				ds.DeviceTypes = values
+			case "os":
+				ds.DeviceOSes = values
+			case "make":
+				ds.DeviceMakes = values
+			case "model":
+				ds.DeviceModels = values
+			}
+		}
 	} else {
 		for _, b := range r.brands {
 			id, err := resolveOrID(ctx, c, brandsPath, "--brand", b, "brands")

@@ -36,6 +36,8 @@ var categoryCatalogs = map[string]categoryCatalog{
 	"Apps":                 {referencePrefix + "apps/categories", "categories"},
 	"AffinityTransactions": {referencePrefix + "affinity-transactions/categories", "categories"},
 	"WebDomain":            {iabCategoriesPath, "iab_category_codes"},
+	// SKUs: the Google Product Taxonomy with finer levels; a search reads every level.
+	"SKUs": {referencePrefix + "skus/categories", "categories"},
 }
 
 // categoryFor rejects types with no category catalog, rather than sending a
@@ -379,6 +381,10 @@ type audienceDataset struct {
 	Merchants                []string  `json:"merchants,omitempty"`
 	Brands                   []string  `json:"brands,omitempty"`
 	MaxDevicesPerIP          int       `json:"max_devices_per_ip,omitempty"`
+	DeviceTypes              []string  `json:"device_types,omitempty"`
+	DeviceOSes               []string  `json:"device_oses,omitempty"`
+	DeviceMakes              []string  `json:"device_makes,omitempty"`
+	DeviceModels             []string  `json:"device_models,omitempty"`
 }
 
 // audienceBody is the single-dataset payload; two datasets go through --file.
