@@ -71,8 +71,9 @@ though "Example Coffee Reserve" also matches. Otherwise no match or several is
 an error listing what was found, and so is an exact label on a result too long
 to arrive in one page. --brand-all takes every match for a search instead, for
 the deliberate "all the coffee brands" case, and reports to stderr how many it
-selected. --brand applies to POI. --category applies to POI, Apps, WebDomain
-and AffinityTransactions, each resolving against its own catalog. For
+selected. --brand applies to POI and SKUs (see --type skus below). --category
+applies to POI, Apps, WebDomain and AffinityTransactions, each resolving
+against its own catalog. For
 WebDomain that is 'intuizi reference web iab-categories', whose id is the
 number in its id column, not the IAB code in its value column. Its labels read
 "CODE - name", so there an exact IAB code or an exact name picks its row too:
@@ -80,8 +81,8 @@ IAB1 resolves to IAB1, not to a list of IAB1 to IAB19. Every selector repeats
 for more than one value.
 
 Most types also need --country: the API rejects a dataset without one on
-every type except Cohorts, AffinityTransactions and ProfileAttributes. The CLI
-checks for it before sending only on Origin and Connectivity.
+every type except Cohorts, AffinityTransactions, ProfileAttributes and SKUs.
+The CLI checks for it before sending only on Origin and Connectivity.
 
 --type origin targets devices by their home location rather than the places
 they visited, so its only filters are geographic. --country is required, and
@@ -126,6 +127,36 @@ Completed. The analysis requires additional permissions which need to be
 approved by your Account Manager: a 403 means they are not enabled for the
 account. Only 'audiences create' takes these flags, because an estimate and a
 quote never run the analysis.
+
+--type skus targets the devices of the households that bought a product
+brand, or bought from a merchant, online. The data is online purchases at
+product level from a panel of affiliate-tracked orders, strongest at large
+United States retailers, and the devices are those of the household the
+purchase click came from: an order with no tracked click adds no device. The
+dataset is available on request. It needs --merchant or --brand, or both. The
+values of one flag are alternatives, and the two narrow each other: a brand
+with a merchant is that brand bought from that merchant. Each value is a
+catalog key or a name, looked up in 'intuizi reference skus merchants' or
+'intuizi reference skus brands --search <name>' and sent as the key the
+catalog returns, each once. --brand-all takes every brand a search matches.
+--match-strictness sets how strictly a device must be tied to the household
+of the purchase click, from 1 (Very Strict, the fewest devices) to 5 (More
+Reach, every device linked to the household); the API's default is 3. The
+dates are the purchase dates. --country and --state are optional: without a
+country the purchases of every country are read. SKUs takes no signal
+providers, so no provider catalog is read, and --provider, --city and
+--zipcode are refused before anything is sent:
+
+    intuizi audiences create --type skus \
+      --merchant "Example Outdoor Store" --brand dove \
+      --country USA --match-strictness 3 \
+      --start-date 2026-10-01 --end-date 2026-10-31 \
+      --name "Dove buyers - October 2026"
+
+A SKUs dataset cannot be combined with a Cohorts, Demographics, Origin,
+Connectivity or Deidentified dataset, and an audience with a SKUs dataset
+takes no additional analyses (analyses, crossvisitation, crosspurchase) and
+no refine. The flags build none of these; do not send them with --file.
 
 Omitting --provider includes every signal provider for the dataset type, which
 is almost always what you want. The CLI reads that catalog first, and a
@@ -250,6 +281,11 @@ type audienceRequest struct {
 	technologies []string
 	minDays      int
 
+	// SKUs: valid with --type SKUs only. --brand and --brand-all, above,
+	// serve SKUs too.
+	merchants  []string
+	strictness int
+
 	// Network Switching: registered on 'audiences create' only.
 	switchFrom    string
 	switchTo      string
@@ -266,21 +302,23 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 		"Print the body the flags produce; creates nothing (names still resolve)")
 	f.StringVar(&r.dsType, "type", "",
 		"Dataset type, case-insensitive: poi, apps, webdomain, ctv,\n"+
-			"affinitytransactions, deidentified, origin or connectivity (cohorts,\n"+
-			"demographics and profileattributes need --file)")
+			"affinitytransactions, deidentified, origin, connectivity or skus\n"+
+			"(cohorts, demographics and profileattributes need --file)")
 	f.StringVar(&r.name, "name", "", "Name for the audience")
 	completeValues(cmd, "type", flagTypes())
 	f.StringVar(&r.startDate, "start-date", "", "First day of the window, YYYY-MM-DD")
 	f.StringVar(&r.endDate, "end-date", "", "Last day of the window, YYYY-MM-DD")
 	// StringArray, not StringSlice: a city name may contain a comma.
 	f.StringArrayVar(&r.brands, "brand", nil,
-		"Brand name or id, POI only (repeat the flag for more than one)")
+		"POI: a brand name or id. SKUs: a product brand key or name\n"+
+			"(repeat the flag for more than one)")
 	f.StringArrayVar(&r.brandAll, "brand-all", nil,
-		"Take every brand matching this search, POI only (repeatable)")
+		"Take every brand matching this search, POI or SKUs (repeatable)")
 	f.StringArrayVar(&r.categories, "category", nil,
 		"Category name or id, per the dataset type\n(repeat the flag for more than one)")
 	f.StringArrayVar(&r.providers, "provider", nil,
-		"Signal provider id (repeatable; default every provider for the type)")
+		"Signal provider id (repeatable; default every provider for the type;\n"+
+			"not SKUs, which takes none)")
 	f.StringArrayVar(&r.countries, "country", nil,
 		"Country code, ISO-3 (repeat the flag for more than one)")
 	f.StringArrayVar(&r.states, "state", nil,
@@ -314,6 +352,14 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 	f.IntVar(&r.minDays, "min-days", 0,
 		"Connectivity only: the fewest days of a week a device must use the\n"+
 			"network, 1 to 7 (the API's default is 3)")
+	f.StringArrayVar(&r.merchants, "merchant", nil,
+		"SKUs only: a merchant key or name from 'reference skus merchants'\n"+
+			"(repeat the flag for more than one)")
+	f.IntVar(&r.strictness, "match-strictness", 0,
+		"SKUs only: Match Strictness, 1 (very strict) to 5 (more reach), how\n"+
+			"strictly a device must be tied to the household of the purchase\n"+
+			"(the API's default is 3)")
+	completeValues(cmd, "match-strictness", matchStrictnessLevels)
 	// No MarkFlagsOneRequired("file", "type"): cobra checks flag groups after
 	// PersistentPreRunE, so its error exits 1. missingFlags covers --type.
 }
@@ -420,12 +466,12 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 	if err := parseWindow(r.startDate, r.endDate); err != nil {
 		return audienceBody{}, err
 	}
-	if len(r.brands)+len(r.brandAll) > 0 && dsType != "POI" {
+	if len(r.brands)+len(r.brandAll) > 0 && dsType != "POI" && dsType != "SKUs" {
 		flag := "--brand"
 		if len(r.brands) == 0 {
 			flag = "--brand-all"
 		}
-		return audienceBody{}, usageErr(flag + " applies to --type POI, not " + dsType + brandHint(dsType))
+		return audienceBody{}, usageErr(flag + " applies to --type POI and SKUs, not " + dsType + brandHint(dsType))
 	}
 	if len(r.filters) > 0 && dsType != "POI" {
 		return audienceBody{}, usageErr("--filter applies to --type POI, not " + dsType)
@@ -482,6 +528,10 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 	if err != nil {
 		return audienceBody{}, err
 	}
+	skus, err := r.skusOptions(dsType, flags.Changed)
+	if err != nil {
+		return audienceBody{}, err
+	}
 	// The API requires a country on Origin, and its geography is the
 	// whole filter; a body without one is a 422.
 	if dsType == "Origin" && len(r.countries) == 0 {
@@ -511,27 +561,43 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 		}
 	}
 
-	for _, b := range r.brands {
-		id, err := resolveOrID(ctx, c, brandsPath, "--brand", b, "brands")
+	if dsType == "SKUs" {
+		if ds.Merchants, err = resolveSkusKeys(ctx, c, skusMerchantsPath, "--merchant", skus.merchants,
+			"merchants"); err != nil {
+			return audienceBody{}, err
+		}
+		brands, err := resolveSkusKeys(ctx, c, skusBrandsPath, "--brand", skus.brands, "brands")
 		if err != nil {
 			return audienceBody{}, err
 		}
-		ds.Analysisdata = append(ds.Analysisdata, id)
-	}
-	for _, search := range r.brandAll {
-		ids, err := resolveAll(ctx, c, brandsPath, search, "brands")
-		if err != nil {
-			return audienceBody{}, err
+		for _, search := range skus.brandAll {
+			keys, err := skusAll(ctx, c, search)
+			if err != nil {
+				return audienceBody{}, err
+			}
+			noteBrandAll(cmd, search, len(keys))
+			brands = append(brands, keys...)
 		}
-		// One word becoming nine ids should be visible; stderr keeps a
-		// piped --dry-run to the payload.
-		noun := "brands"
-		if len(ids) == 1 {
-			noun = "brand"
+		// The API refuses a key named twice, and --brand-all can repeat
+		// one --brand already named.
+		ds.Brands = dedupe(brands)
+		ds.MaxDevicesPerIP = skus.strictness
+	} else {
+		for _, b := range r.brands {
+			id, err := resolveOrID(ctx, c, brandsPath, "--brand", b, "brands")
+			if err != nil {
+				return audienceBody{}, err
+			}
+			ds.Analysisdata = append(ds.Analysisdata, id)
 		}
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "--brand-all %q selected %d %s\n",
-			search, len(ids), noun)
-		ds.Analysisdata = append(ds.Analysisdata, ids...)
+		for _, search := range r.brandAll {
+			ids, err := resolveAll(ctx, c, brandsPath, search, "brands")
+			if err != nil {
+				return audienceBody{}, err
+			}
+			noteBrandAll(cmd, search, len(ids))
+			ds.Analysisdata = append(ds.Analysisdata, ids...)
+		}
 	}
 	if len(r.categories) > 0 {
 		ids := make([]any, 0, len(r.categories))
@@ -551,15 +617,18 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 	}
 
 	// The catalog is read either way: it is the default, and the check
-	// that a given --provider belongs to this type.
-	all, err := allProviders(ctx, c, dsType)
-	if err != nil {
-		return audienceBody{}, err
-	}
-	if len(r.providers) == 0 {
-		ds.SignalProviders = all
-	} else if ds.SignalProviders, err = checkProviders(r.providers, all, dsType); err != nil {
-		return audienceBody{}, err
+	// that a given --provider belongs to this type. SKUs takes no signal
+	// providers, so there is nothing to read.
+	if dsType != "SKUs" {
+		all, err := allProviders(ctx, c, dsType)
+		if err != nil {
+			return audienceBody{}, err
+		}
+		if len(r.providers) == 0 {
+			ds.SignalProviders = all
+		} else if ds.SignalProviders, err = checkProviders(r.providers, all, dsType); err != nil {
+			return audienceBody{}, err
+		}
 	}
 
 	if len(r.countries)+len(r.states)+len(r.cities)+len(r.zipcodes) > 0 {
@@ -577,6 +646,17 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 
 	return audienceBody{Name: r.name, Datasets: []audienceDataset{ds}, Analyses: analyses,
 		NetworkSwitching: switching}, nil
+}
+
+// noteBrandAll reports how many brands a --brand-all search selected. One
+// word becoming nine ids should be visible; stderr keeps a piped --dry-run to
+// the payload.
+func noteBrandAll(cmd *cobra.Command, search string, n int) {
+	noun := "brands"
+	if n == 1 {
+		noun = "brand"
+	}
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "--brand-all %q selected %d %s\n", search, n, noun)
 }
 
 // postBody posts body to lc.create and prints the record that comes back, or
@@ -612,6 +692,7 @@ var audienceFields = []string{
 	"brand", "brand-all", "category",
 	"provider", "country", "state", "city", "zipcode", "filter", "no-filters", "frequency",
 	"network-kind", "network", "technology", "min-days",
+	"merchant", "match-strictness",
 	"switch-from", "switch-to", "switch-network", "switch-min-days",
 }
 

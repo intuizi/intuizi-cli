@@ -324,7 +324,7 @@ func TestAudiencesCreateBrandHintPerType(t *testing.T) {
 	}
 	for _, typ := range datasetTypes {
 		// The file-only types are refused before --brand is looked at.
-		if _, fileOnly := fileOnlyTypes[typ]; typ == "POI" || fileOnly {
+		if _, fileOnly := fileOnlyTypes[typ]; typ == "POI" || typ == "SKUs" || fileOnly {
 			continue
 		}
 		hint, ok := hints[typ]
@@ -337,7 +337,7 @@ func TestAudiencesCreateBrandHintPerType(t *testing.T) {
 				"--start-date", "2026-09-01", "--end-date", "2026-09-07", "--country", "USA", "--brand", "coffee")
 
 			wantUsageErr(t, err)
-			if want := "--brand applies to --type POI, not " + typ + hint; err.Error() != want {
+			if want := "--brand applies to --type POI and SKUs, not " + typ + hint; err.Error() != want {
 				t.Errorf("err = %q\nwant  %q", err, want)
 			}
 		})
@@ -378,7 +378,7 @@ func TestAudiencesCreateRefusesTheTypesFlagsCannotBuild(t *testing.T) {
 // Completion offers only the types the flag path builds.
 func TestFlagTypesLeavesOutTheFileOnlyTypes(t *testing.T) {
 	got := strings.Join(flagTypes(), ",")
-	if want := "affinitytransactions,apps,connectivity,ctv,deidentified,origin,poi,webdomain"; got != want {
+	if want := "affinitytransactions,apps,connectivity,ctv,deidentified,origin,poi,skus,webdomain"; got != want {
 		t.Errorf("flagTypes() = %s, want %s", got, want)
 	}
 }

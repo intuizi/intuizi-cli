@@ -65,6 +65,7 @@ const (
 	searchIncomeCode  = "Case-insensitive contains match on the value code in the value column,\nnot the text label"
 	searchAppName     = "Case-insensitive contains match on the app name"
 	searchNameAddr    = "Case-insensitive contains match on the name or address"
+	searchSkusBrand   = "Case-insensitive contains match on the brand name; names that start\nwith it come first"
 )
 
 // referenceGroup is one URL segment below /analyses/reference: reference <group> <item>.
@@ -188,6 +189,16 @@ var referenceGroups = []referenceGroup{
 		},
 	},
 	{
+		name:  "skus",
+		short: "Merchants and product brands of online purchases",
+		endpoints: []endpoint{
+			// The value is the key a SKUs dataset takes, matched exactly by
+			// the API; the text is the name.
+			{item: "merchants", short: "Merchants a SKUs dataset can name, most orders first"},
+			{item: "brands", short: "Product brands a SKUs dataset can name", paged: true, searchHelp: searchSkusBrand},
+		},
+	},
+	{
 		name:  "web",
 		short: "IAB categories, web domains, browsers and devices",
 		endpoints: []endpoint{
@@ -290,14 +301,19 @@ its id column instead.
     intuizi reference common states --countries USA
     intuizi reference apps categories --search fitness
     intuizi reference connectivity networks --kind home
+    intuizi reference skus brands --search dove
     intuizi reference web domains --category-codes IAB2 --json
 
 Each read accepts --search, a case-insensitive contains match, except
 profile-attributes recency-limits, which takes no flags of its own. Most reads
 match the item label. The demographics genders, marital-statuses and incomes
 match the value code instead (--search F, not female), apps bundle-ids matches
-the app name, and poi locations matches the name or address. Paginated reads
-add --page and --per-page, and return one page per call.`,
+the app name, and poi locations matches the name or address. skus brands
+matches the brand name and lists the names that start with the search first.
+Paginated reads add --page and --per-page, and return one page per call.
+
+The skus catalogs return a value, the key a SKUs dataset takes, and a text,
+the name. Send the value: the API matches a key exactly.`,
 }
 
 func init() {
