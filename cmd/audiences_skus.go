@@ -67,14 +67,12 @@ var skusDeviceFlags = []skusDevice{
 const skusDeviceValuesPath = referencePrefix + "skus/device-values"
 
 // resolveSkusDevices sends each value of one device flag as the catalog holds it: the API matches exactly (upper
-// case), the CLI matches ignoring case. A value the catalog does not hold is a usage error naming it.
+// case), the CLI matches ignoring case. A value the catalog does not hold is a usage error naming it. skusOptions
+// has already refused an empty value.
 func resolveSkusDevices(ctx context.Context, c *api.Client, d skusDevice, values []string) ([]string, error) {
 	out := []string{}
 	for _, v := range values {
 		want := strings.TrimSpace(v)
-		if want == "" {
-			continue
-		}
 		query := url.Values{}
 		query.Set("field", d.field)
 		query.Set("search", want)
@@ -136,6 +134,13 @@ func (r *audienceRequest) skusOptions(dsType string, changed func(string) bool) 
 	}
 	if err := nonEmpty("merchant", r.merchants...); err != nil {
 		return skusSpec{}, err
+	}
+	// An empty value would otherwise drop out, and an unset shell variable
+	// would post an audience of every purchase device.
+	for _, d := range skusDeviceFlags {
+		if err := nonEmpty(d.flag, *r.devices[d.flag]...); err != nil {
+			return skusSpec{}, err
+		}
 	}
 	if len(r.merchants)+len(r.brands)+len(r.brandAll)+len(r.categories) == 0 {
 		return skusSpec{}, usageErr("--type SKUs needs --merchant, --brand or --category; find them with " +
