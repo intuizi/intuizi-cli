@@ -85,6 +85,8 @@ var wantPaths = []string{
 	"/analyses/reference/profile-attributes/keys",
 	"/analyses/reference/profile-attributes/recency-limits",
 	"/analyses/reference/profile-attributes/values",
+	"/analyses/reference/skus/brands",
+	"/analyses/reference/skus/merchants",
 	"/analyses/reference/web/browsers",
 	"/analyses/reference/web/device-makes",
 	"/analyses/reference/web/device-oses",
@@ -120,8 +122,8 @@ func TestReferenceCoversEveryDocumentedPath(t *testing.T) {
 	for extra := range built {
 		t.Errorf("command builds %s, which is not in wantPaths", extra)
 	}
-	if len(wantPaths) != 62 {
-		t.Errorf("wantPaths has %d entries, want 62", len(wantPaths))
+	if len(wantPaths) != 64 {
+		t.Errorf("wantPaths has %d entries, want 64", len(wantPaths))
 	}
 }
 

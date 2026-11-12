@@ -204,7 +204,7 @@ func TestAudiencesConnectivityUsageErrors(t *testing.T) {
 		{"--min-days on CTV", with(swap(poi, "--type", "ctv"), "--min-days", "3"),
 			[]string{"--min-days applies to --type Connectivity, not CTV"}},
 		{"--brand on Connectivity", with(connectivityFlagsHome, "--brand", "coffee"),
-			[]string{"--brand applies to --type POI, not Connectivity", "--network-kind"}},
+			[]string{"--brand applies to --type POI and SKUs, not Connectivity", "--network-kind"}},
 		{"--category on Connectivity", with(connectivityFlagsHome, "--category", "coffee"),
 			[]string{"--category applies to", "not Connectivity"}},
 		{"--filter on Connectivity", with(connectivityFlagsHome, "--filter", "strict_gps"),

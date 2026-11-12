@@ -297,11 +297,11 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--type` | one dataset type, case-insensitive | `reference common dataset-types` |
 | `--name` | any string | - |
 | `--start-date` `--end-date` | `YYYY-MM-DD` | - |
-| `--brand` | name or id, POI only, repeatable | `reference poi brands --search <name>` |
-| `--brand-all` | a search, taking every match; POI only | `reference poi brands` |
+| `--brand` | POI: name or id. SKUs: product brand key or name. Repeatable | `reference poi brands --search <name>`, `reference skus brands --search <name>` |
+| `--brand-all` | a search, taking every match; POI or SKUs | `reference poi brands`, `reference skus brands` |
 | `--category` | name or id, repeatable | one catalog per type, below |
-| `--provider` | id, repeatable | `reference common signal-providers --data-type <type>` |
-| `--country` | ISO-3 code, repeatable; the API requires it for every type except Cohorts, AffinityTransactions and ProfileAttributes, and the CLI checks it before sending only on Origin and Connectivity | `reference common countries` |
+| `--provider` | id, repeatable; not SKUs, which takes none | `reference common signal-providers --data-type <type>` |
+| `--country` | ISO-3 code, repeatable; the API requires it for every type except Cohorts, AffinityTransactions, ProfileAttributes and SKUs, and the CLI checks it before sending only on Origin and Connectivity | `reference common countries` |
 | `--state` | state code, repeatable | `reference common states --countries USA` |
 | `--city` | city name, repeatable | `reference common cities --states CA` |
 | `--zipcode` | zip code, repeatable | `reference common zipcodes --cities "San Francisco"` |
@@ -312,6 +312,8 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--network` | network name, repeatable; Connectivity only, checked against the catalog of the kind | `reference connectivity networks --kind <kind>` |
 | `--technology` | `Fiber`, `Cable`, `DSL`, `Cable or DSL`, `Satellite` or `Fixed wireless`, repeatable; Connectivity home networks only | - |
 | `--min-days` | 1 to 7; Connectivity only, the API's default is 3 | - |
+| `--merchant` | merchant key or name, repeatable; SKUs only | `reference skus merchants` |
+| `--match-strictness` | 1 to 5, Match Strictness; SKUs only, the API's default is 3 | - |
 | `--switch-from` `--switch-to` | `YYYY-MM`, both or neither: run the Network Switching analysis; `audiences create` only | - |
 | `--switch-network` | `home` (default) or `mobile` | - |
 | `--switch-min-days` | 2 to 5, default 3 | - |
@@ -319,7 +321,7 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 
 `--type` is case-insensitive in and canonical out: `poi` sends `POI`. The
 flags build POI, Apps, WebDomain, CTV, AffinityTransactions, Deidentified,
-Origin and Connectivity. Cohorts, Demographics and ProfileAttributes are refused before
+Origin, Connectivity and SKUs. Cohorts, Demographics and ProfileAttributes are refused before
 anything is sent, exit 2, and go through `--file`: each requires a field no
 flag writes (a `cohort_id`, at least one demographic filter, or
 `profile_attributes` rows or `profile_attribute_groups`), and Demographics
@@ -343,8 +345,12 @@ code. Its label reads `IAB2 - Automotive`, so the exact-match rule takes the
 row whose code (`IAB1`) or name (`Automotive`) is the one given: `IAB1`
 resolves to IAB1 rather than failing because IAB10 to IAB19 also contain it.
 
-`--brand` is POI only. AffinityTransactions has brands too, in its own
-`brands` field, which no flag writes yet; that filter needs `--file`.
+`--brand` applies to POI and SKUs, each resolving against its own catalog: a
+POI brand goes into `analysisdata`, a SKUs brand into `brands` (see
+`--type skus` below). AffinityTransactions has brands too, in its own
+`brands` field, which no flag writes yet; that filter needs `--file`. The
+affinity and SKUs brand catalogs are different: never send a value of one on
+the other type.
 
 `--frequency` runs the dataset type's frequency analysis as the audience
 builds, the toggle Audience Manager calls Visitation Frequency (POI), Apps
@@ -507,6 +513,88 @@ from               to                 devices  switched  reverse  reverse_switch
 EXAMPLE DSL        EXAMPLE SATELLITE  12000    3000      5000     1000
 EXAMPLE SATELLITE  EXAMPLE DSL        5000     1000      12000    3000
 ```
+
+`--type skus` targets the devices seen on the home networks of online
+purchases of a product brand, or from a merchant. The data is online
+purchases at product level from a panel of affiliate-tracked orders, and it
+is strongest at large United States retailers. The devices are those seen on
+the home network the purchase click came from, so an order with no tracked
+click adds no device.
+Treat the counts as a panel, not as a merchant's sales. The dataset is
+available on request: `reference common dataset-types` lists `SKUs` when
+your account has it, and an account without it reads both SKUs catalogs
+empty.
+
+A SKUs dataset needs `--merchant` or `--brand`, or both. The values of one
+flag are alternatives, and the two flags narrow each other: a brand with a
+merchant is that brand bought from that merchant.
+
+- `--merchant` names merchants from `reference skus merchants`, sent as
+  `merchants`.
+- `--brand` names product brands from `reference skus brands --search
+  <name>`, sent as `brands`. `--brand-all` takes every brand a search
+  matches, and refuses a search that runs past one page of 500.
+- `--match-strictness` is the Match Strictness, sent as
+  `max_devices_per_ip` only when given: how closely a device must match the
+  home network the purchase click came from. `1` (Very Strict) keeps the
+  fewest devices, `5` (More Reach) every device seen on that network, so the
+  most devices, including shared networks. The API's default is `3`
+  (Recommended). Choose a low level for precision and a high level for
+  reach.
+
+Each `--merchant` and `--brand` value is a catalog key or a name. The API
+matches a key exactly, case included, and refuses a name, so the CLI looks
+each value up and sends the key the catalog returns: a row whose key is the
+value typed is taken at once, then, as for a POI brand, a single match or
+the one row labelled with the value, ignoring case. Every key is sent once,
+since the API refuses a repeat. The lookup searches the name, so a key that
+does not contain its own name goes in a `--file` body.
+
+The dates are the purchase dates. `--country` and `--state` are optional:
+without a country the purchases of every country are read. A SKUs dataset
+takes no signal providers, so no provider catalog is read and the body
+carries no `signal_providers`. `--provider`, `--city` and `--zipcode` are
+refused on SKUs, and `--merchant` and `--match-strictness` on any other
+type, before anything is sent, exit 2. So are `--category`, `--filter`,
+`--no-filters`, `--frequency` and the Connectivity and switching flags on
+SKUs.
+
+```bash
+intuizi audiences create --type skus \
+  --merchant "Example Outdoor Store" --brand dove --brand "Dove Men+Care" \
+  --country USA --state TX --match-strictness 3 \
+  --start-date 2026-10-01 --end-date 2026-10-31 \
+  --name "Dove buyers - October 2026" --dry-run
+```
+
+```json
+{
+  "name": "Dove buyers - October 2026",
+  "datasets": [
+    {
+      "type": "SKUs",
+      "start_date": "2026-10-01",
+      "end_date": "2026-10-31",
+      "location": {
+        "countries": ["USA"],
+        "states": ["TX"]
+      },
+      "merchants": ["example outdoor store"],
+      "brands": ["dove", "dove men+care"],
+      "max_devices_per_ip": 3
+    }
+  ]
+}
+```
+
+A SKUs dataset cannot be combined with a Cohorts, Demographics, Origin,
+Connectivity or Deidentified dataset, and an audience with a SKUs dataset
+takes no additional analyses (`analyses`, `crossvisitation`,
+`crosspurchase`) and no `refine` (the Audience Modifier). Combined with a
+Competitors dataset, the Competitors dataset comes first. The flags build
+none of these shapes; do not send them with `--file`. A completed SKUs
+audience reads `uniques`, `avg_uniques`, `orders`, `orders_per_unique`,
+`unique_brands` and `unique_merchants` in its `totals`.
 
 `--brand-all` takes a search and selects every match, where `--brand` insists
 on exactly one. It reports what it selected to stderr, so an expansion is
@@ -682,7 +770,10 @@ ProfileAttributes types; and any other field no flag writes, such as
 `project_id` to file the audience under a project, POI `locations`, DMAs,
 `analyses` beyond the one key `--frequency` writes (the day-part variant, or
 a frequency analysis for each dataset of a two-dataset body), and
-`datastreams`. An audience built without a frequency analysis cannot have it
+`datastreams`. A SKUs dataset combines with one other dataset of any type
+but Cohorts, Demographics, Origin, Connectivity and Deidentified, and its
+audience takes no `analyses`, `crossvisitation`, `crosspurchase` or
+`refine`. An audience built without a frequency analysis cannot have it
 added after the build, and `activations preview` needs it, so put it in the
 body when you plan to preview a `--file` audience. `datastreams` asks for data
 stream visualizations, which the audience draws as status `109` before it
@@ -752,6 +843,10 @@ whose dates reach past the data the sketches hold. A `--file` body with a
 filter the sketches do not hold goes to a worker as well, for example incomes
 or spend bounds, or CTV genres, device types or languages. So does a
 `max_devices_per_ip` other than `3`.
+
+A `SKUs` estimate is always answered by a worker. It comes back `pending`,
+and `--wait`, or `audiences estimate show <id> --wait`, follows it like any
+other worker estimate.
 
 Any other estimate comes back `pending` with no figures. How long that takes
 depends on the datasets. It can take minutes, for example `AND`, `OR`, `NOTIN`,
@@ -1292,6 +1387,7 @@ not the text label (`--search F`, not `female`, for genders, and `M`, not
 - **profile-attributes** - categories, keys, values, recency-limits
 - **deidentified** - fields
 - **connectivity** - networks
+- **skus** - merchants, brands
 - **cohorts** - list
 
 Several catalogs cascade: a child read takes values from the level above to
@@ -1325,6 +1421,22 @@ catalog unfiltered:
 `--kind mobile` narrows it to one kind, and any other value is refused before
 anything is sent. The list holds curated brands only, and it is empty until
 the first weekly catalog is published.
+
+`skus merchants` and `skus brands` list the keys a SKUs dataset's
+`--merchant` and `--brand` take. Each row has a `value`, the key, and a
+`text`, the name; `--quiet` prints the keys. Send the key, never the name:
+the API matches a key exactly. `merchants` is one flat list, the merchants
+with the most orders in the last 90 days first, and `--search` narrows it by
+name. `brands` is a large catalog, paged (100 a page by default, up to 500):
+find a brand with `--search`, which lists the names that start with it
+first, then the names that contain it. Without a search the brands with the
+most orders in the last 90 days come first. An account without the SKUs
+dataset reads both empty.
+
+```bash
+intuizi reference skus merchants --search outdoor
+intuizi reference skus brands --search dove --per-page 25
+```
 
 `datastreams` and `datastream-visualizations` are different catalogs.
 `datastreams --partner-id <id>` lists a partner's delivery outputs, which an
@@ -1605,7 +1717,8 @@ locations.
 Completion covers commands, flag names, and the values of `--type`,
 `--signal`, `--file-format`, `--identifier-type`, `schedules create
 --frequency`, `--purpose`, `--network-kind`, `--technology`,
-`--switch-network` and `reference connectivity networks --kind`. Other flags that take a fixed set, such as `poi submissions list
+`--match-strictness`, `--switch-network` and `reference connectivity networks
+--kind`. Other flags that take a fixed set, such as `poi submissions list
 --sort-by` and `--order`, `poi locations list --geometry` and `poi submissions
 create --key`, complete no values; their help lists them.
 

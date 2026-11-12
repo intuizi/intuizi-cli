@@ -57,10 +57,7 @@ func categoryFor(dsType string) (categoryCatalog, error) {
 // that completes with no devices and no error. ReadList takes both catalog
 // shapes, so nothing here switches on that.
 func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (any, error) {
-	query := url.Values{}
-	query.Set("search", search)
-
-	items, pg, err := api.ReadList[output.Record](ctx, c, path, query)
+	items, pg, err := api.ReadList[output.Record](ctx, c, path, searchValues(path, search))
 	if err != nil {
 		return nil, err
 	}
@@ -244,6 +241,7 @@ var datasetTypes = map[string]string{
 	"profileattributes":    "ProfileAttributes",
 	"origin":               "Origin",
 	"connectivity":         "Connectivity",
+	"skus":                 "SKUs",
 }
 
 // fileOnlyTypes are the types no flag set can build, with what stops them.
@@ -309,10 +307,7 @@ func canonicalFilters(values []string) ([]string, error) {
 // resolveAll backs --brand-all: every match, where resolveOne insists on one.
 // A multi-page catalog is refused rather than quietly taking the first page.
 func resolveAll(ctx context.Context, c *api.Client, path, search, what string) ([]any, error) {
-	query := url.Values{}
-	query.Set("search", search)
-
-	items, pg, err := api.ReadList[output.Record](ctx, c, path, query)
+	items, pg, err := api.ReadList[output.Record](ctx, c, path, searchValues(path, search))
 	if err != nil {
 		return nil, err
 	}
@@ -320,9 +315,14 @@ func resolveAll(ctx context.Context, c *api.Client, path, search, what string) (
 		return nil, usageErr(fmt.Sprintf("no %s match %q", what, search))
 	}
 	if pg != nil && pg.LastPage > 1 {
+		// A SKUs brand has a key, not an id.
+		way := "pass ids"
+		if path == skusBrandsPath {
+			way = "pass the keys with --brand"
+		}
 		return nil, usageErr(fmt.Sprintf(
-			"%q matches %d %s across %d pages - narrow the search, or pass ids",
-			search, pg.Total, what, pg.LastPage))
+			"%q matches %d %s across %d pages - narrow the search, or %s",
+			search, pg.Total, what, pg.LastPage, way))
 	}
 
 	ids := make([]any, 0, len(items))
@@ -347,7 +347,13 @@ type audienceLocation struct {
 
 // audienceDataset is typed, not a map, so a misspelled key is a compile error
 // - the one mistake --file cannot catch. analysisdata is POI's brand selector;
-// AffinityTransactions calls the same thing "brands".
+// AffinityTransactions calls the same thing "brands", which no flag writes on
+// that type.
+//
+// merchants, brands and max_devices_per_ip are written on a SKUs dataset only:
+// catalog keys, and its Match Strictness, sent only when --match-strictness
+// was given (1 to 5, so 0 is never a value). A SKUs dataset takes no
+// signal_providers, so the key is left out there.
 //
 // The connectivity_ keys are a Connectivity dataset's own, and every one is
 // left out on any other type. connectivity_min_days is sent only when
@@ -370,6 +376,9 @@ type audienceDataset struct {
 	ConnectivityNetworks     []string  `json:"connectivity_networks,omitempty"`
 	ConnectivityTechnologies []string  `json:"connectivity_technologies,omitempty"`
 	ConnectivityMinDays      int       `json:"connectivity_min_days,omitempty"`
+	Merchants                []string  `json:"merchants,omitempty"`
+	Brands                   []string  `json:"brands,omitempty"`
+	MaxDevicesPerIP          int       `json:"max_devices_per_ip,omitempty"`
 }
 
 // audienceBody is the single-dataset payload; two datasets go through --file.

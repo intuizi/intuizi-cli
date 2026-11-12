@@ -26,6 +26,8 @@ func TestFlagCompletionMatchesValidation(t *testing.T) {
 		{"network-kind", []string{"audiences", "estimate", "create"}, networkKinds},
 		{"technology", []string{"audiences", "create"}, connectivityTechnologies},
 		{"switch-network", []string{"audiences", "create"}, networkKinds},
+		{"match-strictness", []string{"audiences", "create"}, matchStrictnessLevels},
+		{"match-strictness", []string{"audiences", "estimate", "create"}, matchStrictnessLevels},
 		{"signal", []string{"audiences", "lookalike", "create"}, sortedKeys(lookalikeSignals)},
 		{"kind", []string{"reference", "connectivity", "networks"}, networkKinds},
 	} {

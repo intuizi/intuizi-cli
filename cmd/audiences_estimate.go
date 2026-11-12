@@ -150,7 +150,7 @@ country or state level, of one AffinityTransactions dataset by brands or
 categories, or of one CTV dataset at country or state level, optionally with
 vendors or with channel names, usually comes back completed at once: a fast
 answer. It is metered on the bytes it reads and does not count toward the
-build budget.
+build budget. A SKUs estimate is always answered by a worker.
 
     intuizi audiences estimate create --type poi --brand starbucks ... --wait
     intuizi audiences estimate show 12`,
@@ -225,6 +225,10 @@ dates reach past the data the sketches hold. A --file body with a filter the
 sketches do not hold goes to a worker as well, for example incomes or spend
 bounds, or CTV genres, device types or languages. So does a max_devices_per_ip
 other than 3.
+
+A SKUs estimate is always answered by a worker: it comes back pending, and
+--wait or 'intuizi audiences estimate show <id> --wait' follows it like any
+other worker estimate.
 
 Any other estimate comes back pending, with no figures. How long that takes
 depends on the datasets. It can take minutes, for example AND, OR, NOTIN, and

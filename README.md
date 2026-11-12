@@ -192,7 +192,7 @@ in [DOCS.md](DOCS.md); `--help` on any command lists all of its flags.
 | `projects` | `list`, `show`, `create`, `delete` |
 | `poi` | `segments`, `categories`, `brands`, `locations`, `submissions` |
 | `uploads` | `reserve`, `put` |
-| `reference` | 62 read-only catalogs across 11 groups |
+| `reference` | 64 read-only catalogs across 12 groups |
 | `usage` | monthly data-scan usage |
 | `credits` | the credit balance, and `statement` (organizations billed in credits) |
 | `webhooks` | `list` |
