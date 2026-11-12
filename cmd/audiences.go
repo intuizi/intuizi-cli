@@ -143,12 +143,17 @@ Food); a category includes every category under it. --device-type, --device-os,
 case-insensitive). Each --merchant and --brand value is a catalog key or a
 name, looked up in 'intuizi reference skus merchants' or 'intuizi reference
 skus brands --search <name>' and sent as the key the catalog returns, each
-once. --brand-all takes every brand a search matches. --match-strictness sets
-how closely a device must match the home network of the purchase click, from 1
-(Very Strict, the fewest devices) to 5 (More Reach, every device seen on that
-network); the API's default is 3. The dates are the purchase dates. --country
-and --state are optional: without a country the purchases of every country are
-read. SKUs takes no signal providers, so no provider catalog is read, and
+once. --item-price-min and --item-price-max filter each purchased item by
+price. --spend-min, --spend-max, --orders-min and --orders-max count what each
+home network bought in the picked purchases over the dates. --top-spenders
+(50, 25, 10, 5 or 1) ranks every home network with a matching purchase by
+spend and keeps the top share, ties kept. Amounts in USD. --brand-all takes
+every brand a search matches. --match-strictness sets how closely a device
+must match the home network of the purchase click, from 1 (Very Strict, the
+fewest devices) to 5 (More Reach, every device seen on that network); the
+API's default is 3. The dates are the purchase dates. --country and --state
+are optional: without a country the purchases of every country are read. SKUs
+takes no signal providers, so no provider catalog is read, and
 --provider, --city and --zipcode are refused before anything is sent:
 
     intuizi audiences create --type skus \
@@ -292,6 +297,8 @@ type audienceRequest struct {
 	strictness int
 	// SKUs "Purchased on": device values of the purchase click, by field.
 	devices map[string]*[]string
+	// SKUs spend filters, the raw text of each flag, parsed by skusOptions.
+	spend map[string]*string
 
 	// Network Switching: registered on 'audiences create' only.
 	switchFrom    string
@@ -374,6 +381,29 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 		f.StringArrayVar(&values, d.flag, nil, "SKUs only: the "+d.help+" of the purchase click, from\n"+
 			"'reference skus device-values --field "+d.field+"' (case-insensitive; repeatable)")
 	}
+	r.spend = map[string]*string{}
+	for _, sf := range skusSpendFlags {
+		v := ""
+		r.spend[sf.flag] = &v
+	}
+	f.StringVar(r.spend["item-price-min"], "item-price-min", "",
+		"SKUs only: keep purchased items priced at least this much, USD, 0 to 1e9")
+	f.StringVar(r.spend["item-price-max"], "item-price-max", "",
+		"SKUs only: keep purchased items priced at most this much, USD, 0 to 1e9")
+	f.StringVar(r.spend["spend-min"], "spend-min", "",
+		"SKUs only: keep home networks that spent at least this much in the\n"+
+			"picked purchases, USD, 0 to 1e9")
+	f.StringVar(r.spend["spend-max"], "spend-max", "",
+		"SKUs only: keep home networks that spent at most this much in the\n"+
+			"picked purchases, USD, 0 to 1e9")
+	f.StringVar(r.spend["orders-min"], "orders-min", "",
+		"SKUs only: keep home networks with at least this many orders, 1 to 1000000")
+	f.StringVar(r.spend["orders-max"], "orders-max", "",
+		"SKUs only: keep home networks with at most this many orders, 1 to 1000000")
+	f.StringVar(r.spend["top-spenders"], "top-spenders", "",
+		"SKUs only: keep the top share of home networks by spend, in percent:\n"+
+			"50, 25, 10, 5 or 1 (ties kept)")
+	completeValues(cmd, "top-spenders", topSpenderShares)
 	// No MarkFlagsOneRequired("file", "type"): cobra checks flag groups after
 	// PersistentPreRunE, so its error exits 1. missingFlags covers --type.
 }
@@ -596,6 +626,13 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 		// one --brand already named.
 		ds.Brands = dedupe(brands)
 		ds.MaxDevicesPerIP = skus.strictness
+		ds.ItemPriceMin = specFloat(skus.spend, "item-price-min")
+		ds.ItemPriceMax = specFloat(skus.spend, "item-price-max")
+		ds.SpendMin = specFloat(skus.spend, "spend-min")
+		ds.SpendMax = specFloat(skus.spend, "spend-max")
+		ds.OrdersMin = specInt(skus.spend, "orders-min")
+		ds.OrdersMax = specInt(skus.spend, "orders-max")
+		ds.SpendTopPercent = specInt(skus.spend, "top-spenders")
 		for _, d := range skusDeviceFlags {
 			values, err := resolveSkusDevices(ctx, c, d, *r.devices[d.flag])
 			if err != nil {

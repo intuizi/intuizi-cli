@@ -398,6 +398,13 @@ type audienceDataset struct {
 	DeviceOSes               []string  `json:"device_oses,omitempty"`
 	DeviceMakes              []string  `json:"device_makes,omitempty"`
 	DeviceModels             []string  `json:"device_models,omitempty"`
+	ItemPriceMin             *float64  `json:"item_price_min,omitempty"`
+	ItemPriceMax             *float64  `json:"item_price_max,omitempty"`
+	SpendMin                 *float64  `json:"spend_min,omitempty"`
+	SpendMax                 *float64  `json:"spend_max,omitempty"`
+	OrdersMin                *int      `json:"orders_min,omitempty"`
+	OrdersMax                *int      `json:"orders_max,omitempty"`
+	SpendTopPercent          *int      `json:"spend_top_percent,omitempty"`
 }
 
 // audienceBody is the single-dataset payload; two datasets go through --file.

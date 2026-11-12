@@ -318,6 +318,10 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--device-os` | OS of the purchase click, case-insensitive, repeatable; SKUs only | `reference skus device-values --field os` |
 | `--device-make` | device make of the purchase click, case-insensitive, repeatable; SKUs only | `reference skus device-values --field make` |
 | `--device-model` | device model of the purchase click, case-insensitive, repeatable; SKUs only | `reference skus device-values --field model` |
+| `--item-price-min`, `--item-price-max` | keep purchased items priced in this range, USD, 0 to 1e9; SKUs only | - |
+| `--spend-min`, `--spend-max` | keep home networks whose spend in the picked purchases is in this range, USD, 0 to 1e9; SKUs only | - |
+| `--orders-min`, `--orders-max` | keep home networks whose order count in the picked purchases is in this range, 1 to 1000000; SKUs only | - |
+| `--top-spenders` | keep the top share of home networks by spend, in percent: 50, 25, 10, 5 or 1; SKUs only | - |
 | `--switch-from` `--switch-to` | `YYYY-MM`, both or neither: run the Network Switching analysis; `audiences create` only | - |
 | `--switch-network` | `home` (default) or `mobile` | - |
 | `--switch-min-days` | 2 to 5, default 3 | - |
@@ -566,6 +570,16 @@ brand with a category is that brand bought in that category.
   most devices, including shared networks. The API's default is `3`
   (Recommended). Choose a low level for precision and a high level for
   reach.
+- `--item-price-min` and `--item-price-max` filter each purchased item by
+  price, sent as `item_price_min` and `item_price_max`. `--spend-min`,
+  `--spend-max`, `--orders-min` and `--orders-max` count what each home
+  network bought in the picked purchases over the dates, sent as `spend_min`,
+  `spend_max`, `orders_min` and `orders_max`. `--top-spenders` ranks every
+  home network with a matching purchase by spend and keeps the top share
+  (`spend_top_percent`: 50, 25, 10, 5 or 1), ties kept. Amounts are in USD.
+  Each is sent only when given, a zero bound included. A value outside its
+  range, a bound pair with the minimum above the maximum, and a
+  `--top-spenders` outside the set are refused before anything is sent, exit 2.
 
 Each `--merchant` and `--brand` value is a catalog key or a name. The API
 matches a key exactly, case included, and refuses a name, so the CLI looks
@@ -579,8 +593,8 @@ The dates are the purchase dates. `--country` and `--state` are optional:
 without a country the purchases of every country are read. A SKUs dataset
 takes no signal providers, so no provider catalog is read and the body
 carries no `signal_providers`. `--provider`, `--city` and `--zipcode` are
-refused on SKUs, and `--merchant`, `--match-strictness` and the four device
-flags on any other type, before anything is sent, exit 2. So are
+refused on SKUs, and `--merchant`, `--match-strictness`, the four device
+flags and the seven spend flags on any other type, before anything is sent, exit 2. So are
 `--filter`, `--no-filters`, `--frequency` and the Connectivity and switching
 flags on SKUs. Next to `--file`, every SKUs flag is refused, exit 2: the file
 carries the whole body.
@@ -620,6 +634,15 @@ device, sends `"categories": [3530]` and `"device_oses": ["IOS"]`:
 intuizi audiences create --type skus --category 3530 --device-os ios \
   --start-date 2026-10-01 --end-date 2026-10-31 \
   --name "Dog food on iOS - October 2026" --dry-run
+```
+
+The top 10 percent of home networks by spend for a category, here Dry Dog
+Food, sends `"spend_top_percent": 10`:
+
+```bash
+intuizi audiences create --type skus --category "Dry Dog Food" --top-spenders 10 \
+  --start-date 2026-10-01 --end-date 2026-10-31 \
+  --name "Dry dog food top spenders - October 2026" --dry-run
 ```
 
 A SKUs dataset cannot be combined with a Cohorts, Demographics, Origin,
