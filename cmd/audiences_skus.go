@@ -15,11 +15,14 @@ import (
 // product brand. Contracts: docs-src/content/api/v2/audiences.md (SKUs
 // fields) and docs-src/content/api/v2/reference/skus.md in intuizi-console.
 
-// The two catalogs a SKUs dataset names keys from. Merchants is one flat
-// list; brands is paged, and searched by name.
+// The catalogs a SKUs dataset names keys from. Merchants is one flat list;
+// brands is paged, and searched by name. Categories is a tree (the Google
+// Product Taxonomy with finer levels) whose search reads every level, at most
+// 100 rows and not paged. Device values (skusDeviceValuesPath) come per field.
 const (
-	skusMerchantsPath = referencePrefix + "skus/merchants"
-	skusBrandsPath    = referencePrefix + "skus/brands"
+	skusMerchantsPath  = referencePrefix + "skus/merchants"
+	skusBrandsPath     = referencePrefix + "skus/brands"
+	skusCategoriesPath = referencePrefix + "skus/categories"
 )
 
 // Match Strictness, the API's max_devices_per_ip on a SKUs dataset: 1 Very

@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The SKUs dataset: merchant and product brand keys, Match Strictness, and the
-// two catalogs the keys come from.
+// The SKUs dataset: merchant, product brand and category keys, the
+// purchase-device values, Match Strictness, and the catalogs they come from.
 
 // skusFlagsBase is a SKUs audience with the dates and a name, but no merchant
 // or brand yet.
@@ -21,7 +21,8 @@ var skusFlagsBase = []string{"--type", "skus", "--name", "Dove buyers",
 // skusDatasetKeys are the keys the API's SKUs rules accept on a dataset.
 var skusDatasetKeys = map[string]bool{
 	"type": true, "start_date": true, "end_date": true, "location": true,
-	"merchants": true, "brands": true, "max_devices_per_ip": true,
+	"merchants": true, "brands": true, "max_devices_per_ip": true, "categories": true,
+	"device_types": true, "device_oses": true, "device_makes": true, "device_models": true,
 }
 
 // skusMerchants is the flat merchants catalog, as a search for "example
@@ -92,6 +93,74 @@ func TestAudiencesSkusBuildsTheBody(t *testing.T) {
 				"brands":             `["dove","dove men+care"]`,
 				"location":           `{"countries":["USA"],"states":["TX","CA"]}`,
 				"max_devices_per_ip": `4`,
+			} {
+				if got := jsonOf(ds[key]); got != want {
+					t.Errorf("%s = %s, want %s", key, got, want)
+				}
+			}
+		})
+	}
+}
+
+// Every SKUs flag at once: each lookup in the order build reads them (merchant,
+// brand, the four device fields, then the category), and a body that carries
+// every key of skusDatasetKeys and no other.
+func TestAudiencesSkusEveryKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+	}{
+		{"create", audiencesCreateCommand},
+		{"estimate", estimateCreateCommand},
+		{"quote", audiencesQuoteCommand},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stubSeq(t, reply{body: skusMerchants}, reply{body: skusMenCare},
+				reply{body: skusCategories(`{"value":"MOBILE","text":"MOBILE"}`)},
+				reply{body: skusCategories(`{"value":"IPADOS","text":"IPADOS"}`, `{"value":"IOS","text":"IOS"}`)},
+				reply{body: skusCategories(`{"value":"APPLE","text":"APPLE"}`)},
+				reply{body: skusCategories(`{"value":"IPHONE 15","text":"IPHONE 15"}`, `{"value":"IPHONE","text":"IPHONE"}`)},
+				reply{body: skusCategories(`{"value":3530,"text":"Dog Food","path":"Animals & Pet Supplies > Dog Food"}`)})
+
+			body := dryRunBody(t, tc.cmd(), srv, with(skusFlagsBase,
+				"--merchant", "Example Outdoor Store", "--brand", "Dove Men+Care", "--category", "Dog Food",
+				"--device-type", "mobile", "--device-os", "iOS", "--device-make", "Apple", "--device-model", "iphone",
+				"--country", "USA", "--state", "TX", "--match-strictness", "2")...)
+
+			wantPaths := []string{skusMerchantsPath, skusBrandsPath, skusDeviceValuesPath, skusDeviceValuesPath,
+				skusDeviceValuesPath, skusDeviceValuesPath, skusCategoriesPath}
+			for i := range wantPaths {
+				wantPaths[i] = "/api/v2" + wantPaths[i]
+			}
+			wantQueries := []string{"search=Example+Outdoor+Store", "per_page=500&search=Dove+Men%2BCare",
+				"field=type&search=mobile", "field=os&search=iOS", "field=make&search=Apple",
+				"field=model&search=iphone", "search=Dog+Food"}
+			if strings.Join(got.paths, " ") != strings.Join(wantPaths, " ") ||
+				strings.Join(got.queries, " ") != strings.Join(wantQueries, " ") {
+				t.Errorf("reads:\n paths   = %v\n queries = %v", got.paths, got.queries)
+			}
+			ds := firstDataset(t, body)
+			for k := range ds {
+				if !skusDatasetKeys[k] {
+					t.Errorf("the API rejects %q on a SKUs dataset: %v", k, ds)
+				}
+			}
+			for k := range skusDatasetKeys {
+				if _, ok := ds[k]; !ok {
+					t.Errorf("the body omits %q: %v", k, ds)
+				}
+			}
+			for key, want := range map[string]string{
+				"type":               `"SKUs"`,
+				"merchants":          `["example outdoor store"]`,
+				"brands":             `["dove men+care"]`,
+				"categories":         `[3530]`,
+				"device_types":       `["MOBILE"]`,
+				"device_oses":        `["IOS"]`,
+				"device_makes":       `["APPLE"]`,
+				"device_models":      `["IPHONE"]`,
+				"location":           `{"countries":["USA"],"states":["TX"]}`,
+				"max_devices_per_ip": `2`,
 			} {
 				if got := jsonOf(ds[key]); got != want {
 					t.Errorf("%s = %s, want %s", key, got, want)
@@ -433,7 +502,7 @@ func skusCategories(rows ...string) string {
 
 // --category on SKUs takes a category id, or a name the catalog resolves to exactly one category.
 func TestSkusCategoryByName(t *testing.T) {
-	srv, _ := stub(t, skusCategories(
+	srv, got := stub(t, skusCategories(
 		`{"value":3530,"text":"Dog Food","path":"Animals & Pet Supplies > Pet Supplies > Dog Supplies > Dog Food"}`))
 
 	body := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "dog food")...)
@@ -441,9 +510,16 @@ func TestSkusCategoryByName(t *testing.T) {
 	if raw := jsonOf(firstDataset(t, body)["categories"]); raw != `[3530]` {
 		t.Errorf("categories = %s", raw)
 	}
+	// The name is searched in the SKUs categories catalog, every level at once, and nothing else is read.
+	if strings.Join(got.paths, " ") != "/api/v2"+skusCategoriesPath || strings.Join(got.queries, " ") != "search=dog+food" {
+		t.Errorf("reads: paths = %v, queries = %v", got.paths, got.queries)
+	}
 	byID := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "10000000")...)
 	if raw := jsonOf(firstDataset(t, byID)["categories"]); raw != `[10000000]` {
 		t.Errorf("categories by id = %s", raw)
+	}
+	if len(got.paths) != 1 {
+		t.Errorf("an id is sent as it is, with no lookup: paths = %v", got.paths)
 	}
 }
 
@@ -457,12 +533,17 @@ func TestSkusCategoryAmbiguous(t *testing.T) {
 
 // A device value is matched ignoring case and sent as the catalog holds it.
 func TestSkusDeviceResolvesCase(t *testing.T) {
-	srv, _ := stub(t, skusCategories(`{"value":"IOS","text":"IOS"}`, `{"value":"IPADOS","text":"IPADOS"}`))
+	srv, got := stub(t, skusCategories(`{"value":"IOS","text":"IOS"}`, `{"value":"IPADOS","text":"IPADOS"}`))
 
 	body := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "3530", "--device-os", "ios")...)
 
 	if raw := jsonOf(firstDataset(t, body)["device_oses"]); raw != `["IOS"]` {
 		t.Errorf("device_oses = %s", raw)
+	}
+	// One device-values read for the os field; the category id needs none.
+	if strings.Join(got.paths, " ") != "/api/v2"+skusDeviceValuesPath ||
+		strings.Join(got.queries, " ") != "field=os&search=ios" {
+		t.Errorf("reads: paths = %v, queries = %v", got.paths, got.queries)
 	}
 	_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "3530", "--device-os", "OS X", "--dry-run")...)
 	wantUsageErr(t, err, "--device-os OS X", "reference skus device-values --field os")

@@ -37,7 +37,7 @@ var categoryCatalogs = map[string]categoryCatalog{
 	"AffinityTransactions": {referencePrefix + "affinity-transactions/categories", "categories"},
 	"WebDomain":            {iabCategoriesPath, "iab_category_codes"},
 	// SKUs: the Google Product Taxonomy with finer levels; a search reads every level.
-	"SKUs": {referencePrefix + "skus/categories", "categories"},
+	"SKUs": {skusCategoriesPath, "categories"},
 }
 
 // categoryFor rejects types with no category catalog, rather than sending a
