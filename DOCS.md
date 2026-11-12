@@ -314,6 +314,10 @@ See [Checking what the API accepted](#checking-what-the-api-accepted).
 | `--min-days` | 1 to 7; Connectivity only, the API's default is 3 | - |
 | `--merchant` | merchant key or name, repeatable; SKUs only | `reference skus merchants` |
 | `--match-strictness` | 1 to 5, Match Strictness; SKUs only, the API's default is 3 | - |
+| `--device-type` | device type of the purchase click, case-insensitive, repeatable; SKUs only | `reference skus device-values --field type` |
+| `--device-os` | OS of the purchase click, case-insensitive, repeatable; SKUs only | `reference skus device-values --field os` |
+| `--device-make` | device make of the purchase click, case-insensitive, repeatable; SKUs only | `reference skus device-values --field make` |
+| `--device-model` | device model of the purchase click, case-insensitive, repeatable; SKUs only | `reference skus device-values --field model` |
 | `--switch-from` `--switch-to` | `YYYY-MM`, both or neither: run the Network Switching analysis; `audiences create` only | - |
 | `--switch-network` | `home` (default) or `mobile` | - |
 | `--switch-min-days` | 2 to 5, default 3 | - |
@@ -336,6 +340,7 @@ resolved ids go into a different payload field:
 | Apps | `reference apps categories` | `categories` |
 | AffinityTransactions | `reference transactions categories` | `categories` |
 | WebDomain | `reference web iab-categories` | `iab_category_codes` |
+| SKUs | `reference skus categories` | `categories` |
 
 An IAB category row carries two identifiers: the IAB code (`IAB2`) as `value`,
 which `reference web domains --category-codes` takes, and the catalog `id`
@@ -515,25 +520,45 @@ EXAMPLE SATELLITE  EXAMPLE DSL        5000     1000      12000    3000
 ```
 
 `--type skus` targets the devices seen on the home networks of online
-purchases of a product brand, or from a merchant. The data is online
-purchases at product level from a panel of affiliate-tracked orders, and it
-is strongest at large United States retailers. The devices are those seen on
-the home network the purchase click came from, so an order with no tracked
-click adds no device.
+purchases of a product brand or category, or from a merchant. The data is
+online purchases at product level from a panel of affiliate-tracked orders,
+and it is strongest at large United States retailers. The devices are those
+seen on the home network the purchase click came from, so an order with no
+tracked click adds no device.
 Treat the counts as a panel, not as a merchant's sales. The dataset is
 available on request: `reference common dataset-types` lists `SKUs` when
-your account has it, and an account without it reads both SKUs catalogs
+your account has it, and an account without it reads every SKUs catalog
 empty.
 
-A SKUs dataset needs `--merchant` or `--brand`, or both. The values of one
-flag are alternatives, and the two flags narrow each other: a brand with a
-merchant is that brand bought from that merchant.
+A SKUs dataset needs `--merchant`, `--brand` or `--category`. The values of
+one flag are alternatives, and the flags narrow each other on the same order
+line: a brand with a merchant is that brand bought from that merchant, and a
+brand with a category is that brand bought in that category.
 
 - `--merchant` names merchants from `reference skus merchants`, sent as
   `merchants`.
 - `--brand` names product brands from `reference skus brands --search
   <name>`, sent as `brands`. `--brand-all` takes every brand a search
   matches, and refuses a search that runs past one page of 500.
+- `--category` names product categories from `reference skus categories`
+  (the Google Product Taxonomy with finer levels such as Dry Dog Food; walk
+  it with `--parent-id`, or `--search` any level), sent as `categories`. A
+  number is taken as the id; a name must resolve to one category. When
+  several match, the list shows each one's path, since a name such as
+  Accessories sits under several parents. The catalog answers a search with
+  at most 100 rows and is not paged, so a name whose search fills 100 rows
+  is refused even with one exact match: pass the id. A category selects
+  itself and every category under it.
+- `--device-type`, `--device-os`, `--device-make` and `--device-model` filter
+  the device of the purchase click, with values from `reference skus
+  device-values --field type|os|make|model`, matched ignoring case and sent
+  as the catalog holds them (`IOS`), as `device_types`, `device_oses`,
+  `device_makes` and `device_models`. The audience is still every device
+  seen on that home network. The catalog answers a search with at most 500
+  values, the most orders first, and is not paged: a value it does not hold
+  is refused, and so is one whose search fills 500 rows without it, since
+  that cannot be checked (send such a value in a `--file` body). An empty
+  value is refused before anything is sent.
 - `--match-strictness` is the Match Strictness, sent as
   `max_devices_per_ip` only when given: how closely a device must match the
   home network the purchase click came from. `1` (Very Strict) keeps the
@@ -554,10 +579,11 @@ The dates are the purchase dates. `--country` and `--state` are optional:
 without a country the purchases of every country are read. A SKUs dataset
 takes no signal providers, so no provider catalog is read and the body
 carries no `signal_providers`. `--provider`, `--city` and `--zipcode` are
-refused on SKUs, and `--merchant` and `--match-strictness` on any other
-type, before anything is sent, exit 2. So are `--category`, `--filter`,
-`--no-filters`, `--frequency` and the Connectivity and switching flags on
-SKUs.
+refused on SKUs, and `--merchant`, `--match-strictness` and the four device
+flags on any other type, before anything is sent, exit 2. So are
+`--filter`, `--no-filters`, `--frequency` and the Connectivity and switching
+flags on SKUs. Next to `--file`, every SKUs flag is refused, exit 2: the file
+carries the whole body.
 
 ```bash
 intuizi audiences create --type skus \
@@ -585,6 +611,15 @@ intuizi audiences create --type skus \
     }
   ]
 }
+```
+
+A category with a device filter, here Dog Food (3530) bought from an iOS
+device, sends `"categories": [3530]` and `"device_oses": ["IOS"]`:
+
+```bash
+intuizi audiences create --type skus --category 3530 --device-os ios \
+  --start-date 2026-10-01 --end-date 2026-10-31 \
+  --name "Dog food on iOS - October 2026" --dry-run
 ```
 
 A SKUs dataset cannot be combined with a Cohorts, Demographics, Origin,
@@ -1387,7 +1422,7 @@ not the text label (`--search F`, not `female`, for genders, and `M`, not
 - **profile-attributes** - categories, keys, values, recency-limits
 - **deidentified** - fields
 - **connectivity** - networks
-- **skus** - merchants, brands
+- **skus** - merchants, brands, categories, device-values
 - **cohorts** - list
 
 Several catalogs cascade: a child read takes values from the level above to
@@ -1415,6 +1450,11 @@ catalog unfiltered:
   `--subcategory-codes`). An `iab-categories` row's `value` is the IAB code,
   which `--quiet` prints and `domains --category-codes` takes; a WebDomain
   audience's `iab_category_codes` takes the number in its `id` column instead.
+- **skus** - `categories`, then `brands` (`--categories`). `categories` is a
+  tree: without `--parent-id` it lists the top level, with it the children of
+  that category. `brands --categories` takes the category ids as one
+  comma-separated value (`--categories 3530,10000000`), sent as one string
+  that the API splits on commas.
 
 `connectivity networks` lists the network names a Connectivity dataset's
 `--network` takes, with each home network's technologies. `--kind home` or
@@ -1430,12 +1470,33 @@ with the most orders in the last 90 days first, and `--search` narrows it by
 name. `brands` is a large catalog, paged (100 a page by default, up to 500):
 find a brand with `--search`, which lists the names that start with it
 first, then the names that contain it. Without a search the brands with the
-most orders in the last 90 days come first. An account without the SKUs
-dataset reads both empty.
+most orders in the last 90 days come first. `--categories` narrows it to the
+brands with orders under those category ids.
+
+`skus categories` lists the ids a SKUs dataset's `--category` takes: the
+Google Product Taxonomy with finer levels. Each row has a `value`, the
+numeric id, a `text`, the name, and its `path` (the full path, joined with
+` > `), `parent_id`, `level`, `has_children` and `orders`. Without a search
+it lists one level, the top level or the children of `--parent-id`, the
+most orders first. `--search` matches a name at every level and answers at
+most 100 rows. Neither is paged.
+
+`skus device-values --field type|os|make|model` lists the values a SKUs
+dataset's `--device-type`, `--device-os`, `--device-make` and
+`--device-model` take, as the dataset holds them, in upper case (`IOS`,
+`ANDROID`, `APPLE`, `IPHONE`), the most orders first. `--field` is required,
+and any other value is refused before anything is sent. `--search` is a
+contains match, and a read answers at most 500 rows, not paged.
+
+An account without the SKUs dataset reads every SKUs catalog empty.
 
 ```bash
 intuizi reference skus merchants --search outdoor
 intuizi reference skus brands --search dove --per-page 25
+intuizi reference skus brands --categories 3530 --per-page 25
+intuizi reference skus categories --search "dog food"
+intuizi reference skus categories --parent-id 3530
+intuizi reference skus device-values --field os
 ```
 
 `datastreams` and `datastream-visualizations` are different catalogs.
