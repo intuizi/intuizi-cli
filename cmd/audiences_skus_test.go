@@ -495,6 +495,59 @@ func TestReferenceSkusCatalogs(t *testing.T) {
 	}
 }
 
+// The other SKUs reads and the query each flag writes. brands --categories is
+// one comma-separated string, which the API splits (it takes an array too);
+// categories walks the tree with --parent-id or searches every level;
+// device-values needs --field, one of four, sent lower case.
+func TestReferenceSkusTaxonomyReads(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		item  string
+		args  []string
+		path  string
+		query string
+	}{
+		{"brands by category", "brands", []string{"--categories", "3530,10000000"}, skusBrandsPath,
+			"categories=3530%2C10000000"},
+		{"categories top level", "categories", nil, skusCategoriesPath, ""},
+		{"categories children", "categories", []string{"--parent-id", "3530"}, skusCategoriesPath, "parent_id=3530"},
+		{"categories search", "categories", []string{"--search", "food"}, skusCategoriesPath, "search=food"},
+		{"device-values", "device-values", []string{"--field", "OS"}, skusDeviceValuesPath, "field=os"},
+		{"device-values search", "device-values", []string{"--field", "model", "--search", "iphone"},
+			skusDeviceValuesPath, "field=model&search=iphone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, skusCategories(`{"value":"IOS","text":"IOS"}`))
+			if _, _, err := run(t, findEndpoint(t, "skus", tc.item).command("skus"), srv, tc.args...); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if len(got.paths) != 1 || got.paths[0] != "/api/v2"+tc.path || got.queries[0] != tc.query {
+				t.Errorf("read %v ? %v, want %s ? %s", got.paths, got.queries, tc.path, tc.query)
+			}
+		})
+	}
+
+	// The help names what the group holds, and the row caps of the two
+	// searches that are not paged.
+	for _, g := range referenceGroups {
+		if g.name == "skus" && g.short != "Merchants, brands, categories and purchase devices of online purchases" {
+			t.Errorf("reference skus Short = %q", g.short)
+		}
+	}
+	for item, want := range map[string]string{"categories": "at most 100 rows", "device-values": "at most 500 rows"} {
+		if help := findEndpoint(t, "skus", item).command("skus").Flags().Lookup("search").Usage; !strings.Contains(help, want) {
+			t.Errorf("skus %s --search help = %q, want %q", item, help, want)
+		}
+	}
+
+	srv, got := stub(t, skusCategories())
+	_, _, err := run(t, findEndpoint(t, "skus", "device-values").command("skus"), srv, "--field", "color")
+	wantUsageErr(t, err, "unknown --field color", "type, os, make, model")
+	if len(got.paths) != 0 {
+		t.Errorf("an unknown field should cost no round trip, got %v", got.paths)
+	}
+}
+
 // skusCategories is the categories catalog's answer to a search.
 func skusCategories(rows ...string) string {
 	return `{"status":"success","code":200,"message":"ok","data":[` + strings.Join(rows, ",") + `]}`
@@ -524,11 +577,42 @@ func TestSkusCategoryByName(t *testing.T) {
 }
 
 // A name that matches several categories, none labelled with it, is a usage error.
+// The same leaf name sits under several parents, so the list shows each row's
+// path. The search stops at 100 rows and is not paged, so a full answer is
+// refused even with one exact label: its twin may be past the 100th row.
 func TestSkusCategoryAmbiguous(t *testing.T) {
-	srv, _ := stub(t, skusCategories(`{"value":10000000,"text":"Dry Dog Food"}`, `{"value":10000002,"text":"Dry Cat Food"}`))
-
-	_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "dry", "--dry-run")...)
-	wantUsageErr(t, err, "2 categories match \"dry\"", "Dry Dog Food", "Dry Cat Food")
+	full := make([]string, 0, skusCategoriesSearchCap)
+	full = append(full, `{"value":3530,"text":"Dog Food","path":"Animals & Pet Supplies > Dog Food"}`)
+	for i := 1; i < skusCategoriesSearchCap; i++ {
+		full = append(full, fmt.Sprintf(`{"value":%d,"text":"Dog Food Bowls %d"}`, 20000000+i, i))
+	}
+	for _, tc := range []struct {
+		name     string
+		reply    string
+		category string
+		want     []string
+	}{
+		{"none labelled with it", skusCategories(`{"value":10000000,"text":"Dry Dog Food"}`,
+			`{"value":10000002,"text":"Dry Cat Food"}`), "dry",
+			[]string{"2 categories match \"dry\"", "Dry Dog Food", "Dry Cat Food"}},
+		{"twins under two parents", skusCategories(
+			`{"value":10000010,"text":"Accessories","path":"Electronics > Accessories"}`,
+			`{"value":10000011,"text":"Accessories","path":"Vehicles & Parts > Accessories"}`), "accessories",
+			[]string{"2 categories match \"accessories\"", "Accessories (Electronics > Accessories)",
+				"Accessories (Vehicles & Parts > Accessories)"}},
+		{"cut short at the cap", skusCategories(full...), "dog food",
+			[]string{"100 or more categories match \"dog food\"", "the search stops at 100", "pass an id",
+				"Dog Food (Animals & Pet Supplies > Dog Food)"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, tc.reply)
+			_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", tc.category, "--dry-run")...)
+			wantUsageErr(t, err, tc.want...)
+			if len(got.paths) != 1 {
+				t.Errorf("only the category lookup should be sent, got %v", got.paths)
+			}
+		})
+	}
 }
 
 // A device value is matched ignoring case and sent as the catalog holds it.

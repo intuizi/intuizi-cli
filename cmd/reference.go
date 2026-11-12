@@ -57,7 +57,7 @@ type endpoint struct {
 	params     []param
 }
 
-// Where --search is not matched on the label.
+// Where --search is not a plain match on the label of one page.
 const (
 	// Each catalog its own example: the codes look nothing alike.
 	searchGenderCode  = "Case-insensitive contains match on the value code (F, not female)"
@@ -66,6 +66,9 @@ const (
 	searchAppName     = "Case-insensitive contains match on the app name"
 	searchNameAddr    = "Case-insensitive contains match on the name or address"
 	searchSkusBrand   = "Case-insensitive contains match on the brand name; names that start\nwith it come first"
+	// Neither SKUs read below is paged: a search answers at most this many rows.
+	searchSkusCategory = "Case-insensitive contains match on the category name, at every level\n(at most 100 rows)"
+	searchSkusDevice   = "Case-insensitive contains match on the value (at most 500 rows, the\nmost orders first)"
 )
 
 // referenceGroup is one URL segment below /analyses/reference: reference <group> <item>.
@@ -190,21 +193,27 @@ var referenceGroups = []referenceGroup{
 	},
 	{
 		name:  "skus",
-		short: "Merchants and product brands of online purchases",
+		short: "Merchants, brands, categories and purchase devices of online purchases",
 		endpoints: []endpoint{
-			// The value is the key a SKUs dataset takes, matched exactly by
-			// the API; the text is the name.
+			// Each row's value is what a SKUs dataset takes, matched exactly
+			// by the API: the merchant or brand key (the text is the name),
+			// the numeric category id (with the name and its path), or the
+			// device value as the dataset holds it, upper case (IOS).
 			{item: "merchants", short: "Merchants a SKUs dataset can name, most orders first"},
+			// categories is one comma-separated string, not nums: the API
+			// splits a string on commas and takes an array too.
 			{item: "brands", short: "Product brands a SKUs dataset can name", paged: true, searchHelp: searchSkusBrand,
 				params: []param{{name: "categories", kind: str,
-					help: "comma-separated category ids: only the brands sold under them"}}},
-			{item: "categories", short: "Product categories a SKUs dataset can name (a tree)", params: []param{
-				{name: "parent_id", kind: num, help: "list the children of this category (the top level when left out)"},
-			}},
-			{item: "device-values", short: "Purchase-device values a SKUs dataset can name", params: []param{
-				{name: "field", kind: str, required: true, values: []string{"type", "os", "make", "model"},
-					help: "type, os, make or model"},
-			}},
+					help: "comma-separated category ids: only the brands with orders under them"}}},
+			{item: "categories", short: "Product categories a SKUs dataset can name (a tree)",
+				searchHelp: searchSkusCategory, params: []param{
+					{name: "parent_id", kind: num, help: "list the children of this category (the top level when left out)"},
+				}},
+			{item: "device-values", short: "Purchase-device values a SKUs dataset can name",
+				searchHelp: searchSkusDevice, params: []param{
+					{name: "field", kind: str, required: true, values: []string{"type", "os", "make", "model"},
+						help: "type, os, make or model"},
+				}},
 		},
 	},
 	{

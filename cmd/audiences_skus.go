@@ -25,6 +25,11 @@ const (
 	skusCategoriesPath = referencePrefix + "skus/categories"
 )
 
+// skusCategoriesSearchCap is the most rows the categories catalog answers a
+// search with. It is not paged, so a full answer may hide a twin of an exact
+// label (the same leaf name sits under several parents).
+const skusCategoriesSearchCap = 100
+
 // Match Strictness, the API's max_devices_per_ip on a SKUs dataset: 1 Very
 // Strict to 5 More Reach. The API's default is 3.
 const (
