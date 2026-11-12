@@ -73,12 +73,11 @@ to arrive in one page. --brand-all takes every match for a search instead, for
 the deliberate "all the coffee brands" case, and reports to stderr how many it
 selected. --brand applies to POI and SKUs (see --type skus below). --category
 applies to POI, Apps, WebDomain and AffinityTransactions, each resolving
-against its own catalog. For
-WebDomain that is 'intuizi reference web iab-categories', whose id is the
-number in its id column, not the IAB code in its value column. Its labels read
-"CODE - name", so there an exact IAB code or an exact name picks its row too:
-IAB1 resolves to IAB1, not to a list of IAB1 to IAB19. Every selector repeats
-for more than one value.
+against its own catalog. For WebDomain that is 'intuizi reference web
+iab-categories', whose id is the number in its id column, not the IAB code in
+its value column. Its labels read "CODE - name", so there an exact IAB code or
+an exact name picks its row too: IAB1 resolves to IAB1, not to a list of IAB1
+to IAB19. Every selector repeats for more than one value.
 
 Most types also need --country: the API rejects a dataset without one on
 every type except Cohorts, AffinityTransactions, ProfileAttributes and SKUs.
