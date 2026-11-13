@@ -761,10 +761,55 @@ earlier one is rejected with a 422 that names it. The dates here, and in
 `operator` is `AND`, `OR` or `NOTIN`, from `reference common operators`.
 `NOTIN` is order-sensitive: it subtracts the second dataset from the first.
 
+#### Three to five datasets, joined by an expression
+
+Three to five datasets are a Multi condition audience. They are joined by an
+`expression` instead of an `operator`: a group `{"op": "AND" or "OR",
+"children": [...]}` whose leaves `{"dataset": <index>}` name every dataset
+once, in the order of `datasets`. A group may hold one more group of
+datasets. `"not_in": true` on a child of an `AND` group leaves that child's
+devices out. It is never on the first child, and never inside an `OR` group.
+A group inside the root may carry a `"name"`, 1 to 40 letters, numbers,
+spaces, hyphens, or underscores, which the console shows on the group. A group
+without one reads back as `Group 1`, `Group 2`.
+
+**`examples/audience-expression.json`**, (Apps OR WebDomain) AND POI:
+
+```json
+{
+  "name": "Apps or Web, and McDonalds visitors - US - 1 week",
+  "datasets": [
+    { "type": "Apps", "...": "as in two-datasets.json" },
+    { "type": "WebDomain", "...": "as in two-datasets.json" },
+    { "type": "POI", "...": "as in audience-poi.json" }
+  ],
+  "expression": {
+    "op": "AND",
+    "children": [
+      { "op": "OR", "children": [{ "dataset": 0 }, { "dataset": 1 }] },
+      { "dataset": 2 }
+    ]
+  }
+}
+```
+
+**Send it with:**
+
+```bash
+intuizi audiences create --file examples/audience-expression.json --wait
+```
+
+Multi condition audiences are enabled per organization: without the feature
+the API answers 403. They take no `analyses`, `crossvisitation`,
+`crosspurchase`, `networkswitching`, `datastreams` or `refine`, and an
+`operator` cannot be sent next to an `expression`. Reading the audience back
+returns the same `expression`, with `operator` null, so the body can be
+sent again as it reads.
+
 Note that the selector field differs per type. Apps uses `categories`,
 WebDomain uses `iab_category_codes`, and POI uses `analysisdata` for brands.
 
-Needs `--file`: two datasets with an operator; the nested `refine`,
+Needs `--file`: two to five datasets with an operator or an expression; the nested `refine`,
 `crossvisitation` and `crosspurchase` blocks; the Cohorts, Demographics and
 ProfileAttributes types; and any other field no flag writes, such as
 `project_id` to file the audience under a project, POI `locations`, DMAs,

@@ -161,7 +161,8 @@ intuizi audiences create --type poi --brand starbucks ... --dry-run > audience.j
 ```
 
 `--file payload.json` (or `-` for stdin) stays for what the flags do not
-model: two datasets combined with an operator, the refine, crossvisitation and
+model: two to five datasets combined with an operator or an expression, the
+refine, crossvisitation and
 crosspurchase blocks, the Cohorts, Demographics and ProfileAttributes audience
 types, any other audience field no flag writes (project_id, POI locations,
 DMAs, the day-part frequency analysis, datastreams), an

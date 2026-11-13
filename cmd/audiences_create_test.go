@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -607,5 +609,51 @@ func TestNoFiltersIsABodyFlag(t *testing.T) {
 	wantUsageErr(t, err, "--file", "--no-filters")
 	if len(got.paths) != 0 {
 		t.Errorf("should cost no round trip, got %v", got.paths)
+	}
+}
+
+// A Multi condition audience, three to five datasets joined by an expression,
+// is built with --file only. The body reaches each endpoint as the file holds
+// it, the shipped example included, so the CLI never drops the expression.
+func TestAudiencesExpressionFileIsSentAsWritten(t *testing.T) {
+	example, err := os.ReadFile("../examples/audience-expression.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The file goes out compacted, every key and value as written.
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, example); err != nil {
+		t.Fatalf("the example is not JSON: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(example, &parsed); err != nil {
+		t.Fatalf("the example is not JSON: %v", err)
+	}
+	if _, ok := parsed["expression"]; !ok {
+		t.Fatal("the example has no expression")
+	}
+
+	for _, tc := range []struct {
+		name  string
+		cmd   func() *cobra.Command
+		reply reply
+		path  string
+	}{
+		{"create", audiencesCreateCommand, reply{body: created}, "/api/v2/analyses/audiences/create"},
+		{"estimate", estimateCreateCommand, createdEstimate, estimateCreatePath},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stubSeq(t, tc.reply)
+
+			if _, _, err := run(t, tc.cmd(), srv, "--file", payloadFile(t, string(example))); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if len(got.paths) != 1 || got.paths[0] != tc.path {
+				t.Fatalf("paths = %v, want %s", got.paths, tc.path)
+			}
+			if got.bodies[0] != compact.String() {
+				t.Errorf("body = %s\nwant the file as written", got.bodies[0])
+			}
+		})
 	}
 }

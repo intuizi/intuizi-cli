@@ -29,7 +29,7 @@ var audiencesCmd = &cobra.Command{
 	Short: "Manage audiences",
 	Long: `Manage audiences.
 
-An audience defines a group of devices drawn from one or two datasets - places
+An audience defines a group of devices drawn from one to five datasets - places
 visited, apps used, CTV viewing, web activity, the networks devices use.
 Delivering one somewhere is a separate step: see 'intuizi activations'.
 
@@ -169,8 +169,9 @@ doubles as a starting point for the file form:
 
     intuizi audiences create --type POI ... --dry-run > audience.json
 
-Two datasets need an operator, and refine, crossvisitation and crosspurchase
-are nested, so those are passed whole instead. So are the Cohorts,
+Two datasets need an operator and three to five an expression, and refine,
+crossvisitation and crosspurchase are nested, so those are passed whole
+instead. So are the Cohorts,
 Demographics and ProfileAttributes types, which the flags refuse before
 anything is sent: they require fields no flag writes (a cohort_id, a
 demographic filter, profile_attributes rows or profile_attribute_groups), and
@@ -181,6 +182,7 @@ file is forwarded untouched, so a field this CLI has never heard of still
 reaches the API:
 
     intuizi audiences create --file examples/audience-two-datasets.json
+    intuizi audiences create --file examples/audience-expression.json
     jq '.name = "Q3 rerun"' base.json | intuizi audiences create --file -
 
 --frequency runs the dataset type's frequency analysis as the audience builds:
