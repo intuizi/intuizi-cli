@@ -230,6 +230,9 @@ skus brands --search dove --per-page 5
 skus categories
 skus categories --search food
 skus device-values --field os
+skus coverage
+skus insights --dimension total
+skus insights --dimension brand --limit 5
 cohorts list
 CATS
 

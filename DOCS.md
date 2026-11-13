@@ -1511,22 +1511,55 @@ dataset's `--device-type`, `--device-os`, `--device-make` and
 and any other value is refused before anything is sent. `--search` is a
 contains match, and a read answers at most 500 rows, not paged.
 
-`skus coverage` prints one row for the SKUs dataset: `first_day`,
-`newest_purchase_day`, `settled_day`, `newest_device_day` (`-` while there is
-none), the number of `empty_ranges` (ranges of days without purchases) and of
-`thin_days`, and `computed_at`. The lists themselves are in `--json`, as
-`empty_days` (a list of `[from, to]` pairs) and `thin_days`. It takes no flags.
+`skus coverage` prints one row for the SKUs dataset, updated once a day:
+`first_day`, `newest_purchase_day`, `settled_day`, `newest_device_day`,
+`empty_ranges`, `thin_days` and `computed_at`.
 
-`skus insights --dimension brand|merchant|category|total` reads spend, orders
-and networks, one row per brand, merchant or category (one row for `total`). The table shows `value` (the key or id), `text`, `orders`,
-`spend`, `avg_order_value`, `networks`, `devices` and `share_of_orders`, with
-`-` where there is no number; a category row also shows its `path`. `--json`
-adds `as_of` and `period_days`. Narrow it with `--period 7|30|90` (default
-30), `--category <id>` and `--merchant <key>` (not with `--dimension
-merchant`), and `--limit 1..50` (default 20). Send keys and ids, not names:
+- `settled_day` is two days before `newest_purchase_day`. A purchase day
+  keeps filling for about three days, so the days after `settled_day` still
+  read low.
+- `newest_device_day` is the newest purchase-click day with matched devices
+  (`-` before the first device refresh). A purchase clicked after it adds no
+  device yet.
+- `empty_ranges` counts the ranges of days with no purchases, and `thin_days`
+  counts the days that hold only a small part of their usual purchases. The
+  lists are in `--json`, as `empty_days` (`[first, last]` pairs, both days
+  included) and `thin_days`.
+
+A period with empty or thin days, or one that ends after `settled_day` or
+`newest_device_day`, holds fewer purchases or fewer devices. The read takes
+no search or paging and no flags of its own; the global flags work, except
+`--quiet`, because the row has no id.
+
+`skus insights --dimension brand|merchant|category|total` ranks what the
+dataset holds over the last `--period` days (`7`, `30` or `90`, default 30),
+ending on the settled day. It is updated once a day. `--limit 1..50` (default
+20) caps the rows, `--category <id>` (a whole number of 1 or more) counts only
+orders under that category, and `--merchant <key>` counts only that merchant
+(not with `--dimension merchant`). `--dimension category` lists the categories
+one level under `--category`, or the top level without it. `--dimension
+total` prints one row, with the value `ALL`. Send keys and ids, not names:
 find them with `skus categories` and `skus merchants`. Any value outside
-these is refused before anything is sent. `networks` counts home networks and
-is not added up across rows.
+these is refused before anything is sent.
+
+The table shows `value` (the key, or the category id), `text`, `orders`,
+`spend` (USD), `avg_order_value` (USD), `networks` (home networks),
+`devices` (devices seen on those home networks) and `share_of_orders`, with
+`-` where there is no number. A category row also ends with its `path`.
+`share_of_orders` is a fraction of the total row of the same slice: `0.1707`
+is 17.07%. `--json` adds `as_of` and `period_days`.
+
+Read the figures with care:
+
+- They are panel counts, not a merchant's sales.
+- `networks` and `devices` are approximate. Never add them across rows.
+- Rows with fewer than 10 home networks, or fewer than 10 orders, are not
+  listed, and `devices` is `-` below 10.
+- An order with two brands counts under both, so the shares of brands can add
+  up to more than 100%.
+
+Both reads are empty for an account without the SKUs dataset, and for any
+account before the first daily update.
 
 An account without the SKUs dataset reads every SKUs catalog empty.
 
