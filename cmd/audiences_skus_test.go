@@ -2,14 +2,16 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
 
-// The SKUs dataset: merchant and product brand keys, Match Strictness, and the
-// two catalogs the keys come from.
+// The SKUs dataset: merchant, product brand and category keys, the
+// purchase-device values, Match Strictness, and the catalogs they come from.
 
 // skusFlagsBase is a SKUs audience with the dates and a name, but no merchant
 // or brand yet.
@@ -19,7 +21,10 @@ var skusFlagsBase = []string{"--type", "skus", "--name", "Dove buyers",
 // skusDatasetKeys are the keys the API's SKUs rules accept on a dataset.
 var skusDatasetKeys = map[string]bool{
 	"type": true, "start_date": true, "end_date": true, "location": true,
-	"merchants": true, "brands": true, "max_devices_per_ip": true,
+	"merchants": true, "brands": true, "max_devices_per_ip": true, "categories": true,
+	"device_types": true, "device_oses": true, "device_makes": true, "device_models": true,
+	"item_price_min": true, "item_price_max": true, "spend_min": true, "spend_max": true,
+	"orders_min": true, "orders_max": true, "spend_top_percent": true,
 }
 
 // skusMerchants is the flat merchants catalog, as a search for "example
@@ -90,6 +95,78 @@ func TestAudiencesSkusBuildsTheBody(t *testing.T) {
 				"brands":             `["dove","dove men+care"]`,
 				"location":           `{"countries":["USA"],"states":["TX","CA"]}`,
 				"max_devices_per_ip": `4`,
+			} {
+				if got := jsonOf(ds[key]); got != want {
+					t.Errorf("%s = %s, want %s", key, got, want)
+				}
+			}
+		})
+	}
+}
+
+// Every SKUs flag at once: each lookup in the order build reads them (merchant,
+// brand, the four device fields, then the category), and a body that carries
+// every key of skusDatasetKeys and no other.
+func TestAudiencesSkusEveryKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+	}{
+		{"create", audiencesCreateCommand},
+		{"estimate", estimateCreateCommand},
+		{"quote", audiencesQuoteCommand},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stubSeq(t, reply{body: skusMerchants}, reply{body: skusMenCare},
+				reply{body: skusCategories(`{"value":"MOBILE","text":"MOBILE"}`)},
+				reply{body: skusCategories(`{"value":"IPADOS","text":"IPADOS"}`, `{"value":"IOS","text":"IOS"}`)},
+				reply{body: skusCategories(`{"value":"APPLE","text":"APPLE"}`)},
+				reply{body: skusCategories(`{"value":"IPHONE 15","text":"IPHONE 15"}`, `{"value":"IPHONE","text":"IPHONE"}`)},
+				reply{body: skusCategories(`{"value":3530,"text":"Dog Food","path":"Animals & Pet Supplies > Dog Food"}`)})
+
+			body := dryRunBody(t, tc.cmd(), srv, with(skusFlagsBase,
+				"--merchant", "Example Outdoor Store", "--brand", "Dove Men+Care", "--category", "Dog Food",
+				"--device-type", "mobile", "--device-os", "iOS", "--device-make", "Apple", "--device-model", "iphone",
+				"--country", "USA", "--state", "TX", "--match-strictness", "2",
+				"--item-price-min", "5", "--item-price-max", "50", "--spend-min", "100", "--spend-max", "900",
+				"--orders-min", "2", "--orders-max", "9", "--top-spenders", "10")...)
+
+			wantPaths := []string{skusMerchantsPath, skusBrandsPath, skusDeviceValuesPath, skusDeviceValuesPath,
+				skusDeviceValuesPath, skusDeviceValuesPath, skusCategoriesPath}
+			for i := range wantPaths {
+				wantPaths[i] = "/api/v2" + wantPaths[i]
+			}
+			wantQueries := []string{"search=Example+Outdoor+Store", "per_page=500&search=Dove+Men%2BCare",
+				"field=type&search=mobile", "field=os&search=iOS", "field=make&search=Apple",
+				"field=model&search=iphone", "search=Dog+Food"}
+			if strings.Join(got.paths, " ") != strings.Join(wantPaths, " ") ||
+				strings.Join(got.queries, " ") != strings.Join(wantQueries, " ") {
+				t.Errorf("reads:\n paths   = %v\n queries = %v", got.paths, got.queries)
+			}
+			ds := firstDataset(t, body)
+			for k := range ds {
+				if !skusDatasetKeys[k] {
+					t.Errorf("the API rejects %q on a SKUs dataset: %v", k, ds)
+				}
+			}
+			for k := range skusDatasetKeys {
+				if _, ok := ds[k]; !ok {
+					t.Errorf("the body omits %q: %v", k, ds)
+				}
+			}
+			for key, want := range map[string]string{
+				"type":               `"SKUs"`,
+				"merchants":          `["example outdoor store"]`,
+				"brands":             `["dove men+care"]`,
+				"categories":         `[3530]`,
+				"device_types":       `["MOBILE"]`,
+				"device_oses":        `["IOS"]`,
+				"device_makes":       `["APPLE"]`,
+				"device_models":      `["IPHONE"]`,
+				"location":           `{"countries":["USA"],"states":["TX"]}`,
+				"max_devices_per_ip": `2`,
+				"item_price_min":     `5`, "item_price_max": `50`, "spend_min": `100`, "spend_max": `900`,
+				"orders_min": `2`, "orders_max": `9`, "spend_top_percent": `10`,
 			} {
 				if got := jsonOf(ds[key]); got != want {
 					t.Errorf("%s = %s, want %s", key, got, want)
@@ -282,7 +359,8 @@ func TestAudiencesSkusUsageErrors(t *testing.T) {
 		want []string
 	}{
 		{"no merchant and no brand", with(skusFlagsBase, "--country", "USA"),
-			[]string{"--type SKUs needs --merchant or --brand", "reference skus merchants", "reference skus brands"}},
+			[]string{"--type SKUs needs --merchant, --brand or --category", "reference skus merchants", "reference skus brands",
+				"reference skus categories"}},
 		{"provider", with(brand, "--provider", "aaa"), []string{"--provider does not apply to --type SKUs"}},
 		{"city", with(brand, "--country", "USA", "--city", "Dallas"),
 			[]string{"--city does not apply to --type SKUs", "--country and --state only"}},
@@ -293,6 +371,20 @@ func TestAudiencesSkusUsageErrors(t *testing.T) {
 			[]string{"--match-strictness must be between 1 and 5, not 6"}},
 		{"empty merchant", with(brand, "--merchant", " "), []string{"--merchant cannot be empty"}},
 		{"empty brand", with(skusFlagsBase, "--brand", ""), []string{"--brand cannot be empty"}},
+		{"empty category", with(skusFlagsBase, "--category", ""), []string{"--category cannot be empty"}},
+		// An unset shell variable must not post an audience of every purchase device.
+		{"empty device-type", with(brand, "--device-type", ""), []string{"--device-type cannot be empty"}},
+		{"empty device-os", with(brand, "--device-os", "IOS", "--device-os", ""), []string{"--device-os cannot be empty"}},
+		{"blank device-make", with(brand, "--device-make", " "), []string{"--device-make cannot be empty"}},
+		{"empty device-model", with(brand, "--device-model", ""), []string{"--device-model cannot be empty"}},
+		{"--device-type on POI", with(poi, "--device-type", "mobile"),
+			[]string{"--device-type applies to --type SKUs, not POI"}},
+		{"--device-os on Apps", with(swap(poi, "--type", "apps"), "--device-os", "ios"),
+			[]string{"--device-os applies to --type SKUs, not Apps"}},
+		{"--device-make on WebDomain", with(swap(poi, "--type", "webdomain"), "--device-make", "apple"),
+			[]string{"--device-make applies to --type SKUs, not WebDomain"}},
+		{"--device-model on AffinityTransactions", with(swap(poi, "--type", "affinitytransactions"), "--device-model", "iphone"),
+			[]string{"--device-model applies to --type SKUs, not AffinityTransactions"}},
 		{"--merchant on POI", with(poi, "--merchant", "target"),
 			[]string{"--merchant applies to --type SKUs, not POI"}},
 		{"--match-strictness on POI", with(poi, "--match-strictness", "3"),
@@ -301,7 +393,6 @@ func TestAudiencesSkusUsageErrors(t *testing.T) {
 			[]string{"--match-strictness applies to --type SKUs, not WebDomain", "max_devices_per_ip needs --file"}},
 		{"--merchant on AffinityTransactions", with(swap(poi, "--type", "affinitytransactions"), "--merchant", "x"),
 			[]string{"--merchant applies to --type SKUs, not AffinityTransactions"}},
-		{"--category on SKUs", with(brand, "--category", "x"), []string{"--category applies to", "not SKUs"}},
 		{"--filter on SKUs", with(brand, "--filter", "strict_gps"),
 			[]string{"--filter applies to --type POI, not SKUs"}},
 		{"--no-filters on SKUs", with(brand, "--no-filters"),
@@ -322,21 +413,43 @@ func TestAudiencesSkusUsageErrors(t *testing.T) {
 	}
 }
 
-// A --file body carries its own SKUs keys, so the SKUs flags are refused with
-// it rather than silently dropped.
+// A --file body carries its own SKUs keys, so every SKUs flag, the device
+// flags among them, is refused with it on create, estimate and quote rather
+// than silently dropped while the file body is posted.
 func TestAudiencesSkusFlagsAreBodyFlags(t *testing.T) {
-	for _, flag := range [][]string{{"--merchant", "target"}, {"--match-strictness", "3"}} {
-		t.Run(flag[0], func(t *testing.T) {
-			srv, got := stub(t, created)
-
-			_, _, err := run(t, audiencesCreateCommand(), srv,
-				append([]string{"--file", payloadFile(t, `{"name":"x","datasets":[{"type":"SKUs"}]}`)}, flag...)...)
-
-			wantUsageErr(t, err, "--file", flag[0])
-			if len(got.paths) != 0 {
-				t.Errorf("should cost no round trip, got %v", got.paths)
+	for _, d := range skusDeviceFlags {
+		if !slices.Contains(skusFlags, d.flag) {
+			t.Errorf("--%s is not in skusFlags, so it is neither refused on other types nor next to --file", d.flag)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+	}{
+		{"create", audiencesCreateCommand},
+		{"estimate", estimateCreateCommand},
+		{"quote", audiencesQuoteCommand},
+	} {
+		for _, flag := range skusFlags {
+			value := "ios"
+			if flag == "match-strictness" {
+				value = "3"
 			}
-		})
+			if _, ok := skusSpendValue[flag]; ok {
+				value = skusSpendValue[flag]
+			}
+			t.Run(tc.name+" --"+flag, func(t *testing.T) {
+				srv, got := stub(t, created)
+
+				_, _, err := run(t, tc.cmd(), srv, "--file",
+					payloadFile(t, `{"name":"x","datasets":[{"type":"SKUs"}]}`), "--"+flag, value)
+
+				wantUsageErr(t, err, "--file", "--"+flag)
+				if len(got.paths) != 0 {
+					t.Errorf("should cost no round trip, got %v", got.paths)
+				}
+			})
+		}
 	}
 }
 
@@ -388,5 +501,356 @@ func TestReferenceSkusCatalogs(t *testing.T) {
 	}
 	if !strings.Contains(brands.Flags().Lookup("search").Usage, "brand name") {
 		t.Errorf("brands --search help = %q", brands.Flags().Lookup("search").Usage)
+	}
+}
+
+// The other SKUs reads and the query each flag writes. brands --categories is
+// one comma-separated string, which the API splits (it takes an array too);
+// categories walks the tree with --parent-id or searches every level;
+// device-values needs --field, one of four, sent lower case.
+func TestReferenceSkusTaxonomyReads(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		item  string
+		args  []string
+		path  string
+		query string
+	}{
+		{"brands by category", "brands", []string{"--categories", "3530,10000000"}, skusBrandsPath,
+			"categories=3530%2C10000000"},
+		{"categories top level", "categories", nil, skusCategoriesPath, ""},
+		{"categories children", "categories", []string{"--parent-id", "3530"}, skusCategoriesPath, "parent_id=3530"},
+		{"categories search", "categories", []string{"--search", "food"}, skusCategoriesPath, "search=food"},
+		{"device-values", "device-values", []string{"--field", "OS"}, skusDeviceValuesPath, "field=os"},
+		{"device-values search", "device-values", []string{"--field", "model", "--search", "iphone"},
+			skusDeviceValuesPath, "field=model&search=iphone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, skusCategories(`{"value":"IOS","text":"IOS"}`))
+			if _, _, err := run(t, findEndpoint(t, "skus", tc.item).command("skus"), srv, tc.args...); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if len(got.paths) != 1 || got.paths[0] != "/api/v2"+tc.path || got.queries[0] != tc.query {
+				t.Errorf("read %v ? %v, want %s ? %s", got.paths, got.queries, tc.path, tc.query)
+			}
+		})
+	}
+
+	// The help names what the group holds, and the row caps of the two
+	// searches that are not paged.
+	for _, g := range referenceGroups {
+		if g.name == "skus" && g.short != "Merchants, brands, categories and purchase devices of online purchases" {
+			t.Errorf("reference skus Short = %q", g.short)
+		}
+	}
+	for item, want := range map[string]string{"categories": "at most 100 rows", "device-values": "at most 500 rows"} {
+		if help := findEndpoint(t, "skus", item).command("skus").Flags().Lookup("search").Usage; !strings.Contains(help, want) {
+			t.Errorf("skus %s --search help = %q, want %q", item, help, want)
+		}
+	}
+
+	srv, got := stub(t, skusCategories())
+	_, _, err := run(t, findEndpoint(t, "skus", "device-values").command("skus"), srv, "--field", "color")
+	wantUsageErr(t, err, "unknown --field color", "type, os, make, model")
+	if len(got.paths) != 0 {
+		t.Errorf("an unknown field should cost no round trip, got %v", got.paths)
+	}
+}
+
+// skusCategories is the categories catalog's answer to a search.
+func skusCategories(rows ...string) string {
+	return `{"status":"success","code":200,"message":"ok","data":[` + strings.Join(rows, ",") + `]}`
+}
+
+// --category on SKUs takes a category id, or a name the catalog resolves to exactly one category.
+func TestSkusCategoryByName(t *testing.T) {
+	srv, got := stub(t, skusCategories(
+		`{"value":3530,"text":"Dog Food","path":"Animals & Pet Supplies > Pet Supplies > Dog Supplies > Dog Food"}`))
+
+	body := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "dog food")...)
+
+	if raw := jsonOf(firstDataset(t, body)["categories"]); raw != `[3530]` {
+		t.Errorf("categories = %s", raw)
+	}
+	// The name is searched in the SKUs categories catalog, every level at once, and nothing else is read.
+	if strings.Join(got.paths, " ") != "/api/v2"+skusCategoriesPath || strings.Join(got.queries, " ") != "search=dog+food" {
+		t.Errorf("reads: paths = %v, queries = %v", got.paths, got.queries)
+	}
+	byID := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "10000000")...)
+	if raw := jsonOf(firstDataset(t, byID)["categories"]); raw != `[10000000]` {
+		t.Errorf("categories by id = %s", raw)
+	}
+	if len(got.paths) != 1 {
+		t.Errorf("an id is sent as it is, with no lookup: paths = %v", got.paths)
+	}
+}
+
+// A name that matches several categories, none labelled with it, is a usage error.
+// The same leaf name sits under several parents, so the list shows each row's
+// path. The search stops at 100 rows and is not paged, so a full answer is
+// refused even with one exact label: its twin may be past the 100th row.
+func TestSkusCategoryAmbiguous(t *testing.T) {
+	full := make([]string, 0, skusCategoriesSearchCap)
+	full = append(full, `{"value":3530,"text":"Dog Food","path":"Animals & Pet Supplies > Dog Food"}`)
+	for i := 1; i < skusCategoriesSearchCap; i++ {
+		full = append(full, fmt.Sprintf(`{"value":%d,"text":"Dog Food Bowls %d"}`, 20000000+i, i))
+	}
+	for _, tc := range []struct {
+		name     string
+		reply    string
+		category string
+		want     []string
+	}{
+		{"none labelled with it", skusCategories(`{"value":10000000,"text":"Dry Dog Food"}`,
+			`{"value":10000002,"text":"Dry Cat Food"}`), "dry",
+			[]string{"2 categories match \"dry\"", "Dry Dog Food", "Dry Cat Food"}},
+		{"twins under two parents", skusCategories(
+			`{"value":10000010,"text":"Accessories","path":"Electronics > Accessories"}`,
+			`{"value":10000011,"text":"Accessories","path":"Vehicles & Parts > Accessories"}`), "accessories",
+			[]string{"2 categories match \"accessories\"", "Accessories (Electronics > Accessories)",
+				"Accessories (Vehicles & Parts > Accessories)"}},
+		{"cut short at the cap", skusCategories(full...), "dog food",
+			[]string{"100 or more categories match \"dog food\"", "the search stops at 100", "pass an id",
+				"Dog Food (Animals & Pet Supplies > Dog Food)"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, tc.reply)
+			_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", tc.category, "--dry-run")...)
+			wantUsageErr(t, err, tc.want...)
+			if len(got.paths) != 1 {
+				t.Errorf("only the category lookup should be sent, got %v", got.paths)
+			}
+		})
+	}
+}
+
+// A device value is matched ignoring case and sent as the catalog holds it.
+func TestSkusDeviceResolvesCase(t *testing.T) {
+	srv, got := stub(t, skusCategories(`{"value":"IOS","text":"IOS"}`, `{"value":"IPADOS","text":"IPADOS"}`))
+
+	body := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "3530", "--device-os", "ios")...)
+
+	if raw := jsonOf(firstDataset(t, body)["device_oses"]); raw != `["IOS"]` {
+		t.Errorf("device_oses = %s", raw)
+	}
+	// One device-values read for the os field; the category id needs none.
+	if strings.Join(got.paths, " ") != "/api/v2"+skusDeviceValuesPath ||
+		strings.Join(got.queries, " ") != "field=os&search=ios" {
+		t.Errorf("reads: paths = %v, queries = %v", got.paths, got.queries)
+	}
+	_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "3530", "--device-os", "OS X", "--dry-run")...)
+	wantUsageErr(t, err, "--device-os OS X", "reference skus device-values --field os")
+}
+
+// A device value the catalog does not answer is a usage error, and nothing is
+// created. An empty answer can also mean the account lacks the dataset, and a
+// search the API cut short at 500 values cannot prove the value is missing.
+func TestSkusDeviceUnresolved(t *testing.T) {
+	models := make([]string, 0, skusDeviceValuesCap)
+	for i := range skusDeviceValuesCap {
+		models = append(models, fmt.Sprintf(`{"value":"IPHONE %d","text":"IPHONE %d"}`, i, i))
+	}
+	for _, tc := range []struct {
+		name  string
+		reply string
+		args  []string
+		want  []string
+		not   string
+	}{
+		{"none at all", skusCategories(), []string{"--device-os", "ios"},
+			[]string{"--device-os ios", "no SKUs OS value matches it",
+				"'intuizi reference skus device-values --field os'",
+				"If that lists nothing at all, the SKUs dataset is not enabled for this account",
+				"'intuizi reference common dataset-types'"}, "cut short"},
+		{"no exact match", skusCategories(`{"value":"IPADOS","text":"IPADOS"}`), []string{"--device-os", "ipad"},
+			[]string{"--device-os ipad", "not a value of the SKUs catalog",
+				"'intuizi reference skus device-values --field os'"}, "not enabled"},
+		{"cut short at the cap", skusCategories(models...), []string{"--device-model", "iphone"},
+			[]string{"--device-model iphone", "cut short at 500", "--file"}, "longer value"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := stub(t, tc.reply)
+			_, _, err := run(t, audiencesCreateCommand(), srv, with(skusFlagsBase, append([]string{"--category", "3530"},
+				tc.args...)...)...)
+			wantUsageErr(t, err, tc.want...)
+			if err != nil && strings.Contains(err.Error(), tc.not) {
+				t.Errorf("error says %q: %v", tc.not, err)
+			}
+			if len(got.paths) != 1 || got.paths[0] != "/api/v2"+skusDeviceValuesPath {
+				t.Errorf("only the device lookup should be sent, got %v", got.paths)
+			}
+		})
+	}
+}
+
+// The --category sentence of the create help names every type with a category catalog, SKUs too.
+func TestCreateHelpCategoryNamesSkus(t *testing.T) {
+	long := strings.Join(strings.Fields(audiencesCreateCommand().Long), " ")
+	if !strings.Contains(long, "--category applies to POI, Apps, WebDomain, AffinityTransactions and SKUs") {
+		t.Fatalf("the --category sentence of the help does not name SKUs")
+	}
+}
+
+// skusSpendValue is a valid value for each spend flag, to send next to --file.
+var skusSpendValue = map[string]string{
+	"item-price-min": "5", "item-price-max": "50", "spend-min": "100", "spend-max": "900",
+	"orders-min": "2", "orders-max": "9", "top-spenders": "10",
+}
+
+// Each spend flag lands in its own API key, as a number (an integer for orders and the top share), on create,
+// estimate and quote; a zero lower bound is sent, not dropped.
+func TestAudiencesSkusSpendFlagsBuildTheBody(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+	}{
+		{"create", audiencesCreateCommand},
+		{"estimate", estimateCreateCommand},
+		{"quote", audiencesQuoteCommand},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := stubSeq(t, reply{body: skusDove})
+			body := dryRunBody(t, tc.cmd(), srv, with(skusFlagsBase, "--brand", "dove",
+				"--item-price-min", "4.5", "--item-price-max", "60", "--spend-min", "0", "--spend-max", "1500.25",
+				"--orders-min", "2", "--orders-max", "10", "--top-spenders", "10")...)
+			ds := firstDataset(t, body)
+			for k := range ds {
+				if !skusDatasetKeys[k] {
+					t.Errorf("the API rejects %q on a SKUs dataset: %v", k, ds)
+				}
+			}
+			for key, want := range map[string]string{
+				"item_price_min": `4.5`, "item_price_max": `60`, "spend_min": `0`, "spend_max": `1500.25`,
+				"orders_min": `2`, "orders_max": `10`, "spend_top_percent": `10`,
+			} {
+				if got := jsonOf(ds[key]); got != want {
+					t.Errorf("%s = %s, want %s", key, got, want)
+				}
+			}
+		})
+	}
+}
+
+// Flags not given send no key.
+func TestAudiencesSkusSpendFlagsOmittedWhenNotGiven(t *testing.T) {
+	srv, _ := stubSeq(t, reply{body: skusDove})
+	ds := firstDataset(t, dryRunBody(t, audiencesCreateCommand(), srv,
+		with(skusFlagsBase, "--brand", "dove", "--top-spenders", "5")...))
+	for _, k := range []string{"item_price_min", "item_price_max", "spend_min", "spend_max", "orders_min", "orders_max"} {
+		if _, ok := ds[k]; ok {
+			t.Errorf("%s sent without its flag: %v", k, ds)
+		}
+	}
+	if got := jsonOf(ds["spend_top_percent"]); got != "5" {
+		t.Errorf("spend_top_percent = %s", got)
+	}
+}
+
+// A bad spend value is a usage error before any request, no token needed.
+func TestAudiencesSkusSpendUsageErrors(t *testing.T) {
+	brand := with(skusFlagsBase, "--brand", "dove")
+	poi := []string{"--type", "poi", "--name", "x", "--start-date", "2026-10-01", "--end-date", "2026-10-31",
+		"--country", "USA"}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"price below 0", with(brand, "--item-price-min", "-1"), []string{"--item-price-min"}},
+		{"price above 1e9", with(brand, "--item-price-max", "1000000001"), []string{"--item-price-max"}},
+		{"spend not a number", with(brand, "--spend-min", "abc"), []string{"--spend-min", "abc"}},
+		{"spend NaN", with(brand, "--spend-max", "NaN"), []string{"--spend-max"}},
+		{"spend empty", with(brand, "--spend-max", ""), []string{"--spend-max"}},
+		{"seven decimals", with(brand, "--spend-min", "0.0000001"), []string{"--spend-min", "6 decimal places"}},
+		{"hex float", with(brand, "--spend-max", "0x1p3"), []string{"--spend-max", "0x1p3"}},
+		{"exponent", with(brand, "--item-price-max", "1e3"), []string{"--item-price-max", "1e3"}},
+		{"orders 0", with(brand, "--orders-min", "0"), []string{"--orders-min", "1"}},
+		{"orders above 1e6", with(brand, "--orders-max", "1000001"), []string{"--orders-max"}},
+		{"orders fraction", with(brand, "--orders-min", "1.5"), []string{"--orders-min"}},
+		{"price min above max", with(brand, "--item-price-min", "10", "--item-price-max", "5"),
+			[]string{"--item-price-min", "--item-price-max"}},
+		{"spend min above max", with(brand, "--spend-min", "10", "--spend-max", "5"),
+			[]string{"--spend-min", "--spend-max"}},
+		{"orders min above max", with(brand, "--orders-min", "10", "--orders-max", "5"),
+			[]string{"--orders-min", "--orders-max"}},
+		{"top 7", with(brand, "--top-spenders", "7"), []string{"--top-spenders", "50, 25, 10, 5 or 1"}},
+		{"top 0", with(brand, "--top-spenders", "0"), []string{"--top-spenders"}},
+		{"top text", with(brand, "--top-spenders", "ten"), []string{"--top-spenders"}},
+		{"item-price-min on POI", with(poi, "--item-price-min", "1"),
+			[]string{"--item-price-min applies to --type SKUs, not POI"}},
+		{"spend-min on POI", with(poi, "--spend-min", "1"), []string{"--spend-min applies to --type SKUs"}},
+		{"orders-max on Apps", with(swap(poi, "--type", "apps"), "--orders-max", "3"),
+			[]string{"--orders-max applies to --type SKUs, not Apps"}},
+		{"top-spenders on WebDomain", with(swap(poi, "--type", "webdomain"), "--top-spenders", "10"),
+			[]string{"--top-spenders applies to --type SKUs, not WebDomain"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, c := range []func() *cobra.Command{audiencesCreateCommand, estimateCreateCommand, audiencesQuoteCommand} {
+				err := runLoggedOut(t, c(), tc.args...)
+				wantUsageErr(t, err, tc.want...)
+				if strings.Contains(err.Error(), "not logged in") {
+					t.Errorf("reported as a login problem: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// Every spend flag is a body flag: in skusFlags, so it is refused next to --file.
+func TestAudiencesSkusSpendFlagsAreSkusFlags(t *testing.T) {
+	for flag := range skusSpendValue {
+		if !slices.Contains(skusFlags, flag) || !slices.Contains(audienceFields, flag) {
+			t.Errorf("--%s is not in skusFlags and audienceFields", flag)
+		}
+	}
+}
+
+// The create help explains the spend filters in one paragraph.
+func TestAudiencesSkusHelpNamesSpendFilters(t *testing.T) {
+	long := strings.Join(strings.Fields(audiencesCreateCommand().Long), " ")
+	for _, want := range []string{"--item-price-min", "--top-spenders", "ties kept", "Amounts in USD"} {
+		if !strings.Contains(long, want) {
+			t.Errorf("audiences create --help omits %q", want)
+		}
+	}
+}
+
+// The console takes plain decimal text with at most 6 decimals: those are sent, and
+// nothing else gets past the CLI (no hex, no exponent).
+func TestAudiencesSkusSpendAcceptsPlainDecimals(t *testing.T) {
+	srv, _ := stubSeq(t, reply{body: skusDove})
+	ds := firstDataset(t, dryRunBody(t, audiencesCreateCommand(), srv,
+		with(skusFlagsBase, "--brand", "dove", "--spend-min", "150000.55", "--item-price-min", "0.000001")...))
+	if got := jsonOf(ds["spend_min"]); got != "150000.55" {
+		t.Errorf("spend_min = %s", got)
+	}
+	if got := jsonOf(ds["item_price_min"]); got != "0.000001" {
+		t.Errorf("item_price_min = %s", got)
+	}
+}
+
+// The console refuses a category named twice, so each resolved id is sent once, in first-seen order:
+// an id repeated, and a name with its own id.
+func TestSkusCategorySentOnce(t *testing.T) {
+	srv, _ := stub(t, skusCategories(`{"value":3530,"text":"Dog Food","path":"Animals > Dog Food"}`))
+	for name, cats := range map[string][]string{
+		"id twice":     {"3530", "3530"},
+		"name and id":  {"dog food", "3530"},
+		"id then name": {"3530", "dog food"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			args := with(skusFlagsBase)
+			for _, c := range cats {
+				args = append(args, "--category", c)
+			}
+			body := dryRunBody(t, audiencesCreateCommand(), srv, args...)
+			if raw := jsonOf(firstDataset(t, body)["categories"]); raw != `[3530]` {
+				t.Errorf("categories = %s", raw)
+			}
+		})
+	}
+	body := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "7", "--category", "3530", "--category", "7")...)
+	if raw := jsonOf(firstDataset(t, body)["categories"]); raw != `[7,3530]` {
+		t.Errorf("order = %s", raw)
 	}
 }

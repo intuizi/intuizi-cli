@@ -72,7 +72,7 @@ an error listing what was found, and so is an exact label on a result too long
 to arrive in one page. --brand-all takes every match for a search instead, for
 the deliberate "all the coffee brands" case, and reports to stderr how many it
 selected. --brand applies to POI and SKUs (see --type skus below). --category
-applies to POI, Apps, WebDomain and AffinityTransactions, each resolving
+applies to POI, Apps, WebDomain, AffinityTransactions and SKUs, each resolving
 against its own catalog. For WebDomain that is 'intuizi reference web
 iab-categories', whose id is the number in its id column, not the IAB code in
 its value column. Its labels read "CODE - name", so there an exact IAB code or
@@ -128,23 +128,33 @@ account. Only 'audiences create' takes these flags, because an estimate and a
 quote never run the analysis.
 
 --type skus targets the devices seen on the home networks of online purchases
-of a product brand, or from a merchant. The data is online purchases at
-product level from a panel of affiliate-tracked orders, strongest at large
-United States retailers, and the devices are those seen on the home network
-the purchase click came from: an order with no tracked click adds no device. The
-dataset is available on request. It needs --merchant or --brand, or both. The
-values of one flag are alternatives, and the two narrow each other: a brand
-with a merchant is that brand bought from that merchant. Each value is a
-catalog key or a name, looked up in 'intuizi reference skus merchants' or
-'intuizi reference skus brands --search <name>' and sent as the key the
-catalog returns, each once. --brand-all takes every brand a search matches.
---match-strictness sets how closely a device must match the home network of
-the purchase click, from 1 (Very Strict, the fewest devices) to 5 (More Reach,
-every device seen on that network); the API's default is 3. The
-dates are the purchase dates. --country and --state are optional: without a
-country the purchases of every country are read. SKUs takes no signal
-providers, so no provider catalog is read, and --provider, --city and
---zipcode are refused before anything is sent:
+of a product brand or category, or from a merchant. The data is online
+purchases at product level from a panel of affiliate-tracked orders, strongest
+at large United States retailers, and the devices are those seen on the home
+network the purchase click came from: an order with no tracked click adds no
+device. The dataset is available on request. It needs --merchant, --brand or
+--category. The values of one flag are alternatives, and the flags narrow each
+other on the same order line: a brand with a merchant is that brand bought from
+that merchant. --category takes a category id or a name from 'intuizi reference
+skus categories' (the Google Product Taxonomy with finer levels such as Dry Dog
+Food); a category includes every category under it. --device-type, --device-os,
+--device-make and --device-model filter the device of the purchase click
+(values from 'intuizi reference skus device-values --field <field>',
+case-insensitive). Each --merchant and --brand value is a catalog key or a
+name, looked up in 'intuizi reference skus merchants' or 'intuizi reference
+skus brands --search <name>' and sent as the key the catalog returns, each
+once. --item-price-min and --item-price-max filter each purchased item by
+price. --spend-min, --spend-max, --orders-min and --orders-max count what each
+home network bought in the picked purchases over the dates. --top-spenders
+(50, 25, 10, 5 or 1) ranks every home network with a matching purchase by
+spend and keeps the top share, ties kept. Amounts in USD. --brand-all takes
+every brand a search matches. --match-strictness sets how closely a device
+must match the home network of the purchase click, from 1 (Very Strict, the
+fewest devices) to 5 (More Reach, every device seen on that network); the
+API's default is 3. The dates are the purchase dates. --country and --state
+are optional: without a country the purchases of every country are read. SKUs
+takes no signal providers, so no provider catalog is read, and
+--provider, --city and --zipcode are refused before anything is sent:
 
     intuizi audiences create --type skus \
       --merchant "Example Outdoor Store" --brand dove \
@@ -287,6 +297,10 @@ type audienceRequest struct {
 	// serve SKUs too.
 	merchants  []string
 	strictness int
+	// SKUs "Purchased on": device values of the purchase click, by field.
+	devices map[string]*[]string
+	// SKUs spend filters, the raw text of each flag, parsed by skusOptions.
+	spend map[string]*string
 
 	// Network Switching: registered on 'audiences create' only.
 	switchFrom    string
@@ -362,6 +376,36 @@ func (r *audienceRequest) register(cmd *cobra.Command) {
 			"closely a device must match the home network of the purchase click\n"+
 			"(the API's default is 3)")
 	completeValues(cmd, "match-strictness", matchStrictnessLevels)
+	r.devices = map[string]*[]string{}
+	for _, d := range skusDeviceFlags {
+		values := []string{}
+		r.devices[d.flag] = &values
+		f.StringArrayVar(&values, d.flag, nil, "SKUs only: the "+d.help+" of the purchase click, from\n"+
+			"'reference skus device-values --field "+d.field+"' (case-insensitive; repeatable)")
+	}
+	r.spend = map[string]*string{}
+	for _, sf := range skusSpendFlags {
+		v := ""
+		r.spend[sf.flag] = &v
+	}
+	f.StringVar(r.spend["item-price-min"], "item-price-min", "",
+		"SKUs only: keep purchased items priced at least this much, USD, 0 to 1e9")
+	f.StringVar(r.spend["item-price-max"], "item-price-max", "",
+		"SKUs only: keep purchased items priced at most this much, USD, 0 to 1e9")
+	f.StringVar(r.spend["spend-min"], "spend-min", "",
+		"SKUs only: keep home networks that spent at least this much in the\n"+
+			"picked purchases, USD, 0 to 1e9")
+	f.StringVar(r.spend["spend-max"], "spend-max", "",
+		"SKUs only: keep home networks that spent at most this much in the\n"+
+			"picked purchases, USD, 0 to 1e9")
+	f.StringVar(r.spend["orders-min"], "orders-min", "",
+		"SKUs only: keep home networks with at least this many orders, 1 to 1000000")
+	f.StringVar(r.spend["orders-max"], "orders-max", "",
+		"SKUs only: keep home networks with at most this many orders, 1 to 1000000")
+	f.StringVar(r.spend["top-spenders"], "top-spenders", "",
+		"SKUs only: keep the top share of home networks by spend, in percent:\n"+
+			"50, 25, 10, 5 or 1 (ties kept)")
+	completeValues(cmd, "top-spenders", topSpenderShares)
 	// No MarkFlagsOneRequired("file", "type"): cobra checks flag groups after
 	// PersistentPreRunE, so its error exits 1. missingFlags covers --type.
 }
@@ -584,6 +628,29 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 		// one --brand already named.
 		ds.Brands = dedupe(brands)
 		ds.MaxDevicesPerIP = skus.strictness
+		ds.ItemPriceMin = specFloat(skus.spend, "item-price-min")
+		ds.ItemPriceMax = specFloat(skus.spend, "item-price-max")
+		ds.SpendMin = specFloat(skus.spend, "spend-min")
+		ds.SpendMax = specFloat(skus.spend, "spend-max")
+		ds.OrdersMin = specInt(skus.spend, "orders-min")
+		ds.OrdersMax = specInt(skus.spend, "orders-max")
+		ds.SpendTopPercent = specInt(skus.spend, "top-spenders")
+		for _, d := range skusDeviceFlags {
+			values, err := resolveSkusDevices(ctx, c, d, *r.devices[d.flag])
+			if err != nil {
+				return audienceBody{}, err
+			}
+			switch d.field {
+			case "type":
+				ds.DeviceTypes = values
+			case "os":
+				ds.DeviceOSes = values
+			case "make":
+				ds.DeviceMakes = values
+			case "model":
+				ds.DeviceModels = values
+			}
+		}
 	} else {
 		for _, b := range r.brands {
 			id, err := resolveOrID(ctx, c, brandsPath, "--brand", b, "brands")
@@ -603,12 +670,18 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 	}
 	if len(r.categories) > 0 {
 		ids := make([]any, 0, len(r.categories))
+		seen := map[string]bool{}
 		for _, name := range r.categories {
 			id, err := resolveOrID(ctx, c, cat.path, "--category", name, "categories")
 			if err != nil {
 				return audienceBody{}, err
 			}
-			ids = append(ids, id)
+			// The console refuses a category named twice (by id, or by a
+			// name that resolves to the same id): send each once.
+			if !seen[fmt.Sprint(id)] {
+				seen[fmt.Sprint(id)] = true
+				ids = append(ids, id)
+			}
 		}
 		// WebDomain reads the same selection from a different field.
 		if cat.key == "iab_category_codes" {
@@ -688,15 +761,15 @@ func brandHint(dsType string) string {
 	return ""
 }
 
-// audienceFields are the body-building flags, for --file to reject.
-var audienceFields = []string{
+// audienceFields are the body-building flags, for --file to reject. The SKUs
+// flags come from skusFlags, so a new SKUs flag is refused next to --file too.
+var audienceFields = append([]string{
 	"type", "name", "start-date", "end-date",
 	"brand", "brand-all", "category",
 	"provider", "country", "state", "city", "zipcode", "filter", "no-filters", "frequency",
 	"network-kind", "network", "technology", "min-days",
-	"merchant", "match-strictness",
 	"switch-from", "switch-to", "switch-network", "switch-min-days",
-}
+}, skusFlags...)
 
 // audienceRequired is the minimum for a single dataset.
 var audienceRequired = []string{"type", "name", "start-date", "end-date"}

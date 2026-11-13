@@ -227,6 +227,9 @@ profile-attributes recency-limits
 deidentified fields
 skus merchants
 skus brands --search dove --per-page 5
+skus categories
+skus categories --search food
+skus device-values --field os
 cohorts list
 CATS
 
@@ -283,13 +286,25 @@ fi
 step 2 "audiences create --type origin --brand is refused" I audiences create --type origin --country USA --brand "$SBUX" --start-date "$START" --end-date "$END" --name "cli-live-origin $STAMP" --dry-run
 
 # SKUs: a --dry-run only, and only where this account has the dataset; without
-# it both SKUs catalogs read empty and there is no brand key to build from.
+# it every SKUs catalog reads empty and there is no brand key to build from.
 step 0 "reference skus brands --per-page 1 --quiet" I reference skus brands --per-page 1 --quiet
 SKUBRAND=$(first)
 if [ -n "$SKUBRAND" ]; then
   step 0 "audiences create --type skus --dry-run" I audiences create --type skus --brand "$SKUBRAND" --country USA --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
   step 0 "audiences estimate create --type skus --dry-run" I audiences estimate create --type skus --brand "$SKUBRAND" --match-strictness 3 --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
+  # A category id and an OS value read from this console; a value such as
+  # MAC OS holds a space, so it stays quoted.
+  step 0 "reference skus categories --quiet" I reference skus categories --quiet
+  SKUCAT=$(first)
+  step 0 "reference skus device-values --field os --quiet" I reference skus device-values --field os --quiet
+  SKUOS=$(first)
+  if [ -n "$SKUCAT" ] && [ -n "$SKUOS" ]; then
+    step 0 "audiences create --type skus --category --device-os --dry-run" I audiences create --type skus --category "$SKUCAT" --device-os "$SKUOS" --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
+  fi
+  step 0 "audiences create --type skus --top-spenders 10 --dry-run" I audiences create --type skus --brand "$SKUBRAND" --top-spenders 10 --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
+  step 2 "audiences create --type skus --top-spenders 7 is refused" I audiences create --type skus --brand "$SKUBRAND" --top-spenders 7 --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
 fi
+step 2 "audiences create --type skus --device-os \"\" is refused" I audiences create --type skus --brand dove --device-os "" --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
 step 2 "audiences create --type skus --provider is refused" I audiences create --type skus --brand dove --provider x --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
 
 step 0 "cohorts create --audience-id" I cohorts create --audience-id "$AUD" --device-limit 100 --quiet

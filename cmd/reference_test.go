@@ -86,6 +86,8 @@ var wantPaths = []string{
 	"/analyses/reference/profile-attributes/recency-limits",
 	"/analyses/reference/profile-attributes/values",
 	"/analyses/reference/skus/brands",
+	"/analyses/reference/skus/categories",
+	"/analyses/reference/skus/device-values",
 	"/analyses/reference/skus/merchants",
 	"/analyses/reference/web/browsers",
 	"/analyses/reference/web/device-makes",
@@ -122,8 +124,8 @@ func TestReferenceCoversEveryDocumentedPath(t *testing.T) {
 	for extra := range built {
 		t.Errorf("command builds %s, which is not in wantPaths", extra)
 	}
-	if len(wantPaths) != 64 {
-		t.Errorf("wantPaths has %d entries, want 64", len(wantPaths))
+	if len(wantPaths) != 66 {
+		t.Errorf("wantPaths has %d entries, want 66", len(wantPaths))
 	}
 }
 
@@ -177,6 +179,7 @@ func TestReferenceRequiredParams(t *testing.T) {
 		"common/signal-providers": {"dataType"},
 		"common/pricing-models":   {"partner_id"},
 		"common/datastreams":      {"partner_id"},
+		"skus/device-values":      {"field"},
 	}
 
 	for key, e := range referenceEndpoints(t) {
@@ -532,7 +535,11 @@ func TestEveryEndpointWorksWithJSON(t *testing.T) {
 				var args []string
 				for _, p := range e.params {
 					if p.required {
-						args = append(args, "--"+flagName(p.name), dummy(p.kind))
+						value := dummy(p.kind)
+						if len(p.values) > 0 {
+							value = p.values[0] // a fixed set refuses any other value before sending
+						}
+						args = append(args, "--"+flagName(p.name), value)
 					}
 				}
 

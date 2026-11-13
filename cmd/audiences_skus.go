@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -15,12 +17,20 @@ import (
 // product brand. Contracts: docs-src/content/api/v2/audiences.md (SKUs
 // fields) and docs-src/content/api/v2/reference/skus.md in intuizi-console.
 
-// The two catalogs a SKUs dataset names keys from. Merchants is one flat
-// list; brands is paged, and searched by name.
+// The catalogs a SKUs dataset names keys from. Merchants is one flat list;
+// brands is paged, and searched by name. Categories is a tree (the Google
+// Product Taxonomy with finer levels) whose search reads every level, at most
+// 100 rows and not paged. Device values (skusDeviceValuesPath) come per field.
 const (
-	skusMerchantsPath = referencePrefix + "skus/merchants"
-	skusBrandsPath    = referencePrefix + "skus/brands"
+	skusMerchantsPath  = referencePrefix + "skus/merchants"
+	skusBrandsPath     = referencePrefix + "skus/brands"
+	skusCategoriesPath = referencePrefix + "skus/categories"
 )
+
+// skusCategoriesSearchCap is the most rows the categories catalog answers a
+// search with. It is not paged, so a full answer may hide a twin of an exact
+// label (the same leaf name sits under several parents).
+const skusCategoriesSearchCap = 100
 
 // Match Strictness, the API's max_devices_per_ip on a SKUs dataset: 1 Very
 // Strict to 5 More Reach. The API's default is 3.
@@ -39,8 +49,170 @@ var matchStrictnessLevels = []string{"1", "2", "3", "4", "5"}
 const maxSearchPage = 500
 
 // skusFlags are the flags that write a SKUs dataset's own keys, refused on any
-// other type. --brand and --brand-all are shared with POI.
-var skusFlags = []string{"merchant", "match-strictness"}
+// other type and next to --file (audienceFields takes them from here). The
+// device flags come from skusDeviceFlags, so a new one cannot be left out.
+// --brand, --brand-all and --category are shared with other types.
+var skusFlags = func() []string {
+	flags := []string{"merchant", "match-strictness"}
+	for _, d := range skusDeviceFlags {
+		flags = append(flags, d.flag)
+	}
+	for _, f := range skusSpendFlags {
+		flags = append(flags, f.flag)
+	}
+	return flags
+}()
+
+// skusSpendFlag is one spend filter: its flag, the API key it writes and the
+// range of its value. Prices and spend are USD numbers, orders and the top
+// share integers.
+type skusSpendFlag struct {
+	flag    string
+	integer bool
+	min     float64
+	max     float64
+}
+
+// skusSpendFlags are listed pair by pair (min, then max), and --top-spenders
+// last; skusSpendPairs names the pairs whose min may not pass their max.
+var skusSpendFlags = []skusSpendFlag{
+	{"item-price-min", false, 0, 1e9},
+	{"item-price-max", false, 0, 1e9},
+	{"spend-min", false, 0, 1e9},
+	{"spend-max", false, 0, 1e9},
+	{"orders-min", true, 1, 1e6},
+	{"orders-max", true, 1, 1e6},
+	{"top-spenders", true, 1, 50},
+}
+
+var skusSpendPairs = [][2]string{
+	{"item-price-min", "item-price-max"},
+	{"spend-min", "spend-max"},
+	{"orders-min", "orders-max"},
+}
+
+// plainAmount is the amount text the console accepts: digits with up to 6
+// decimals. A leading minus passes here and is refused by the range.
+var plainAmount = regexp.MustCompile(`^-?[0-9]+(\.[0-9]{1,6})?$`)
+
+// topSpenderShares are the shares --top-spenders takes (the API's spend_top_percent).
+var topSpenderShares = []string{"50", "25", "10", "5", "1"}
+
+// parseSkusSpend checks the spend flags that were given and returns each as a
+// number by flag. Nothing here needs a token.
+func (r *audienceRequest) parseSkusSpend(changed func(string) bool) (map[string]float64, error) {
+	out := map[string]float64{}
+	for _, f := range skusSpendFlags {
+		if !changed(f.flag) {
+			continue
+		}
+		raw := strings.TrimSpace(*r.spend[f.flag])
+		var v float64
+		var err error
+		if f.integer {
+			var n int64
+			n, err = strconv.ParseInt(raw, 10, 64)
+			v = float64(n)
+		} else {
+			// The console takes plain decimal text with at most 6 decimals;
+			// ParseFloat alone would also take hex ("0x1p3") and exponents.
+			if !plainAmount.MatchString(raw) {
+				return nil, usageErr(fmt.Sprintf("--%s must be a plain decimal number with at most 6 decimal places, not %q",
+					f.flag, *r.spend[f.flag]))
+			}
+			v, err = strconv.ParseFloat(raw, 64)
+		}
+		if err != nil {
+			kind := "a number"
+			if f.integer {
+				kind = "a whole number"
+			}
+			return nil, usageErr(fmt.Sprintf("--%s must be %s, not %q", f.flag, kind, *r.spend[f.flag]))
+		}
+		if f.flag == "top-spenders" {
+			if !slices.Contains(topSpenderShares, strconv.FormatInt(int64(v), 10)) {
+				return nil, usageErr(fmt.Sprintf("--top-spenders must be one of 50, 25, 10, 5 or 1, not %s", raw))
+			}
+		} else if !(v >= f.min && v <= f.max) {
+			return nil, usageErr(fmt.Sprintf("--%s must be between %s and %s, not %s", f.flag,
+				strconv.FormatFloat(f.min, 'f', -1, 64), strconv.FormatFloat(f.max, 'f', -1, 64), raw))
+		}
+		out[f.flag] = v
+	}
+	for _, p := range skusSpendPairs {
+		lo, hasLo := out[p[0]]
+		hi, hasHi := out[p[1]]
+		if hasLo && hasHi && lo > hi {
+			return nil, usageErr(fmt.Sprintf("--%s (%s) is above --%s (%s)", p[0], *r.spend[p[0]], p[1], *r.spend[p[1]]))
+		}
+	}
+	return out, nil
+}
+
+// skusDevice is one "Purchased on" flag: the flag, the device-values field it reads and its help noun.
+type skusDevice struct {
+	flag  string
+	field string
+	help  string
+}
+
+var skusDeviceFlags = []skusDevice{
+	{"device-type", "type", "device type"},
+	{"device-os", "os", "OS"},
+	{"device-make", "make", "device make"},
+	{"device-model", "model", "device model"},
+}
+
+const skusDeviceValuesPath = referencePrefix + "skus/device-values"
+
+// skusDeviceValuesCap is the most rows the device-values catalog answers a
+// search with, the most orders first. It is not paged, so a full answer may
+// have cut off the value searched for.
+const skusDeviceValuesCap = 500
+
+// resolveSkusDevices sends each value of one device flag as the catalog holds it: the API matches exactly (upper
+// case), the CLI matches ignoring case. A value the catalog does not hold is a usage error naming it. skusOptions
+// has already refused an empty value.
+func resolveSkusDevices(ctx context.Context, c *api.Client, d skusDevice, values []string) ([]string, error) {
+	out := []string{}
+	for _, v := range values {
+		want := strings.TrimSpace(v)
+		query := url.Values{}
+		query.Set("field", d.field)
+		query.Set("search", want)
+		items, _, err := api.ReadList[output.Record](ctx, c, skusDeviceValuesPath, query)
+		if err != nil {
+			return nil, err
+		}
+		found := ""
+		for _, it := range items {
+			if s, ok := it["value"].(string); ok && strings.EqualFold(s, want) {
+				found = s
+				break
+			}
+		}
+		if found == "" {
+			lookup := "'intuizi reference skus device-values --field " + d.field + "'"
+			switch {
+			case len(items) == 0:
+				// An account without the dataset reads every SKUs catalog
+				// empty, so "no match" can mean either.
+				return nil, usageErr(fmt.Sprintf("--%s %s: no SKUs %s value matches it; list them with %s. If "+
+					"that lists nothing at all, the SKUs dataset is not enabled for this account: 'intuizi "+
+					"reference common dataset-types' lists the types it has", d.flag, v, d.help, lookup))
+			case len(items) >= skusDeviceValuesCap:
+				return nil, usageErr(fmt.Sprintf("--%s %s: the search was cut short at %d SKUs %s values, the "+
+					"most orders first, and %s is not among them, so it cannot be checked; send it "+
+					"as the catalog holds it (upper case) in a --file body", d.flag, v,
+					skusDeviceValuesCap, d.help, v))
+			}
+			return nil, usageErr(fmt.Sprintf("--%s %s: not a value of the SKUs catalog; list them with %s",
+				d.flag, v, lookup))
+		}
+		out = append(out, found)
+	}
+	return dedupe(out), nil
+}
 
 // skusSpec is what the SKUs flags ask for, checked before any key is looked
 // up.
@@ -49,6 +221,7 @@ type skusSpec struct {
 	brands     []string
 	brandAll   []string
 	strictness int // 0: not given, so not sent
+	spend      map[string]float64
 }
 
 // skusOptions checks the SKUs flags. On any other type the SKUs-only flags are
@@ -81,15 +254,28 @@ func (r *audienceRequest) skusOptions(dsType string, changed func(string) bool) 
 	if err := nonEmpty("merchant", r.merchants...); err != nil {
 		return skusSpec{}, err
 	}
-	if len(r.merchants)+len(r.brands)+len(r.brandAll) == 0 {
-		return skusSpec{}, usageErr("--type SKUs needs --merchant or --brand, or both; find the keys with " +
-			"'intuizi reference skus merchants' and 'intuizi reference skus brands --search <name>'")
+	// An empty value would otherwise drop out, and an unset shell variable
+	// would post an audience of every purchase device.
+	for _, d := range skusDeviceFlags {
+		if err := nonEmpty(d.flag, *r.devices[d.flag]...); err != nil {
+			return skusSpec{}, err
+		}
+	}
+	if len(r.merchants)+len(r.brands)+len(r.brandAll)+len(r.categories) == 0 {
+		return skusSpec{}, usageErr("--type SKUs needs --merchant, --brand or --category; find them with " +
+			"'intuizi reference skus merchants', 'intuizi reference skus brands --search <name>' and " +
+			"'intuizi reference skus categories --search <name>'")
 	}
 	if changed("match-strictness") && (r.strictness < minMatchStrictness || r.strictness > maxMatchStrictness) {
 		return skusSpec{}, usageErr(fmt.Sprintf("--match-strictness must be between %d and %d, not %d",
 			minMatchStrictness, maxMatchStrictness, r.strictness))
 	}
-	return skusSpec{merchants: r.merchants, brands: r.brands, brandAll: r.brandAll, strictness: r.strictness}, nil
+	spend, err := r.parseSkusSpend(changed)
+	if err != nil {
+		return skusSpec{}, err
+	}
+	return skusSpec{merchants: r.merchants, brands: r.brands, brandAll: r.brandAll, strictness: r.strictness,
+		spend: spend}, nil
 }
 
 // searchValues is the query a name lookup sends: the search, plus the largest
@@ -196,4 +382,21 @@ func skusAll(ctx context.Context, c *api.Client, search string) ([]string, error
 		keys = append(keys, key)
 	}
 	return keys, nil
+}
+
+// specFloat and specInt read one parsed spend flag: nil when it was not given,
+// so a zero bound is still sent.
+func specFloat(m map[string]float64, flag string) *float64 {
+	if v, ok := m[flag]; ok {
+		return &v
+	}
+	return nil
+}
+
+func specInt(m map[string]float64, flag string) *int {
+	if v, ok := m[flag]; ok {
+		n := int(v)
+		return &n
+	}
+	return nil
 }

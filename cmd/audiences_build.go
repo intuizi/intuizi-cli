@@ -36,6 +36,8 @@ var categoryCatalogs = map[string]categoryCatalog{
 	"Apps":                 {referencePrefix + "apps/categories", "categories"},
 	"AffinityTransactions": {referencePrefix + "affinity-transactions/categories", "categories"},
 	"WebDomain":            {iabCategoriesPath, "iab_category_codes"},
+	// SKUs: the Google Product Taxonomy with finer levels; a search reads every level.
+	"SKUs": {skusCategoriesPath, "categories"},
 }
 
 // categoryFor rejects types with no category catalog, rather than sending a
@@ -71,22 +73,35 @@ func resolveOne(ctx context.Context, c *api.Client, path, search, what string) (
 		// The search is a substring match, so "Example Coffee" also returns
 		// "Example Coffee Reserve". One exact label is the one that was meant,
 		// but only if every match came back: its twin may be on the next page.
+		// The SKUs categories search is not paged and stops at 100 rows, so
+		// a full answer is partial too.
+		capped := path == skusCategoriesPath && len(items) >= skusCategoriesSearchCap
 		partial := pg != nil && pg.Total > len(items)
-		if exact := exactMatches(items, search, path); len(exact) == 1 && !partial {
+		if exact := exactMatches(items, search, path); len(exact) == 1 && !partial && !capped {
 			return catalogValue(exact[0], path)
 		}
 		// Ids too: the fix is usually to pass one.
 		var b strings.Builder
-		if partial {
+		switch {
+		case partial:
 			// A paged catalog answered one page; the rest are not listed.
 			fmt.Fprintf(&b, "%d %s match %q - showing %d of %d matches, narrow the search or pass an id:",
 				pg.Total, what, search, len(items), pg.Total)
-		} else {
+		case capped:
+			fmt.Fprintf(&b, "%d or more %s match %q - the search stops at %d, narrow it or pass an id:",
+				len(items), what, search, len(items))
+		default:
 			fmt.Fprintf(&b, "%d %s match %q - narrow the search, or pass an id:",
 				len(items), what, search)
 		}
 		for _, it := range items {
-			fmt.Fprintf(&b, "\n  %-8v %v", catalogID(it, path), catalogLabel(it))
+			label := catalogLabel(it)
+			// A SKUs category's leaf name repeats under several parents
+			// (Accessories); its path tells them apart.
+			if p, ok := it["path"].(string); ok && p != "" && path == skusCategoriesPath {
+				label = fmt.Sprintf("%v (%s)", label, p)
+			}
+			fmt.Fprintf(&b, "\n  %-8v %v", catalogID(it, path), label)
 		}
 		return nil, usageErr(b.String())
 	}
@@ -379,6 +394,17 @@ type audienceDataset struct {
 	Merchants                []string  `json:"merchants,omitempty"`
 	Brands                   []string  `json:"brands,omitempty"`
 	MaxDevicesPerIP          int       `json:"max_devices_per_ip,omitempty"`
+	DeviceTypes              []string  `json:"device_types,omitempty"`
+	DeviceOSes               []string  `json:"device_oses,omitempty"`
+	DeviceMakes              []string  `json:"device_makes,omitempty"`
+	DeviceModels             []string  `json:"device_models,omitempty"`
+	ItemPriceMin             *float64  `json:"item_price_min,omitempty"`
+	ItemPriceMax             *float64  `json:"item_price_max,omitempty"`
+	SpendMin                 *float64  `json:"spend_min,omitempty"`
+	SpendMax                 *float64  `json:"spend_max,omitempty"`
+	OrdersMin                *int      `json:"orders_min,omitempty"`
+	OrdersMax                *int      `json:"orders_max,omitempty"`
+	SpendTopPercent          *int      `json:"spend_top_percent,omitempty"`
 }
 
 // audienceBody is the single-dataset payload; two datasets go through --file.
