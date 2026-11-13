@@ -156,12 +156,14 @@ step 0 "reference common endpoint-partners --quiet" I reference common endpoint-
 PARTNER=$(first); PARTNER=${PARTNER:-1}
 
 # Every reference catalog, --json and --quiet. Lines are eval'd so quoted
-# values survive. recency-limits refuses --quiet by design (rows have no id).
+# values survive. recency-limits and skus coverage refuse --quiet by design
+# (rows have no id), and so does skus insights with --dimension total (its one
+# row is the total); skus insights by brand prints its values.
 while IFS= read -r line; do
   [ -z "$line" ] && continue
   eval "set -- $line"
   step 0 "reference $*  --json" I reference "$@" --json
-  want=0; case "$1 $2" in "profile-attributes recency-limits") want=2;; esac
+  want=0; case "$*" in "profile-attributes recency-limits"|"skus coverage"|"skus insights --dimension total") want=2;; esac
   step $want "reference $*  --quiet" I reference "$@" --quiet
 done <<CATS
 common dataset-types
@@ -230,6 +232,9 @@ skus brands --search dove --per-page 5
 skus categories
 skus categories --search food
 skus device-values --field os
+skus coverage
+skus insights --dimension total
+skus insights --dimension brand --limit 5
 cohorts list
 CATS
 

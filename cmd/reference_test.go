@@ -87,7 +87,9 @@ var wantPaths = []string{
 	"/analyses/reference/profile-attributes/values",
 	"/analyses/reference/skus/brands",
 	"/analyses/reference/skus/categories",
+	"/analyses/reference/skus/coverage",
 	"/analyses/reference/skus/device-values",
+	"/analyses/reference/skus/insights",
 	"/analyses/reference/skus/merchants",
 	"/analyses/reference/web/browsers",
 	"/analyses/reference/web/device-makes",
@@ -124,8 +126,8 @@ func TestReferenceCoversEveryDocumentedPath(t *testing.T) {
 	for extra := range built {
 		t.Errorf("command builds %s, which is not in wantPaths", extra)
 	}
-	if len(wantPaths) != 66 {
-		t.Errorf("wantPaths has %d entries, want 66", len(wantPaths))
+	if len(wantPaths) != 68 {
+		t.Errorf("wantPaths has %d entries, want 68", len(wantPaths))
 	}
 }
 
@@ -134,8 +136,16 @@ func TestReferenceTableIsWellFormed(t *testing.T) {
 		if e.short == "" {
 			t.Errorf("%s: empty Short, so it is invisible in --help", key)
 		}
-		if e.noSearch && (len(e.params) > 0 || e.paged) {
-			t.Errorf("%s: noSearch means the read takes no parameters at all", key)
+		if e.noSearch && e.paged {
+			t.Errorf("%s: noSearch drops --search, and a paged read is searched", key)
+		}
+		// A read with no search takes no parameters, unless the row says
+		// outright that it does.
+		if e.noSearch && len(e.params) > 0 && !e.paramsWithoutSearch {
+			t.Errorf("%s: noSearch with params must set paramsWithoutSearch on purpose", key)
+		}
+		if e.paramsWithoutSearch && (!e.noSearch || len(e.params) == 0) {
+			t.Errorf("%s: paramsWithoutSearch needs noSearch and at least one param", key)
 		}
 		seen := make(map[string]bool)
 		seenFlags := make(map[string]bool)
@@ -169,7 +179,23 @@ func TestReferenceTableIsWellFormed(t *testing.T) {
 	}
 }
 
-// TestReferenceRequiredParams pins the seven reads with required parameters.
+// TestReferenceNoSearchRowsArePinned lists the reads that drop --search by
+// name: marking a searchable catalog noSearch by mistake would remove its
+// flag without any other test failing.
+func TestReferenceNoSearchRowsArePinned(t *testing.T) {
+	want := map[string]bool{
+		"profile-attributes/recency-limits": true,
+		"skus/coverage":                     true,
+		"skus/insights":                     true,
+	}
+	for key, e := range referenceEndpoints(t) {
+		if e.noSearch != want[key] {
+			t.Errorf("%s: noSearch = %v, want %v", key, e.noSearch, want[key])
+		}
+	}
+}
+
+// TestReferenceRequiredParams pins the reads with required parameters.
 func TestReferenceRequiredParams(t *testing.T) {
 	want := map[string][]string{
 		"common/states":           {"countries"},
@@ -180,6 +206,7 @@ func TestReferenceRequiredParams(t *testing.T) {
 		"common/pricing-models":   {"partner_id"},
 		"common/datastreams":      {"partner_id"},
 		"skus/device-values":      {"field"},
+		"skus/insights":           {"dimension"},
 	}
 
 	for key, e := range referenceEndpoints(t) {
