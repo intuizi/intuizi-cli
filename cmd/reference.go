@@ -1,6 +1,11 @@
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
+	"github.com/intuizi/intuizi-cli/internal/output"
+)
 
 // Every documented reference read, as a table rather than one function per
 // endpoint: endpoint.command in reference_run.go turns each row into a cobra
@@ -38,6 +43,10 @@ type param struct {
 	// values, on a str param, is the fixed set it takes, lower case: the
 	// shell completes them, and any other value is refused before it is sent.
 	values []string
+
+	// min and max bound a num param when max is set; a value outside them is
+	// refused before it is sent.
+	min, max int
 }
 
 // endpoint is one reference read. path is set only where the URL segment differs
@@ -55,6 +64,17 @@ type endpoint struct {
 	searchHelp string
 	noID       bool
 	params     []param
+
+	// long replaces short as the help text where a read needs more than a line.
+	long string
+
+	// check refuses a flag combination the per-param rules cannot see, before
+	// any request.
+	check func(flags *pflag.FlagSet) error
+
+	// table, when set, shapes the default table: it returns the rows to print
+	// and their columns. --json is never affected.
+	table func(items []output.Record) ([]output.Record, []string)
 }
 
 // Where --search is not a plain match on the label of one page.
@@ -213,6 +233,20 @@ var referenceGroups = []referenceGroup{
 				searchHelp: searchSkusDevice, params: []param{
 					{name: "field", kind: str, required: true, values: []string{"type", "os", "make", "model"},
 						help: "type, os, make or model"},
+				}},
+			{item: "coverage", short: "Days of online purchases a SKUs dataset covers", noSearch: true, noID: true,
+				long: skusCoverageLong, table: skusCoverageTable},
+			{item: "insights", short: "Spend, orders and networks by brand, merchant or category",
+				noSearch: true, noID: true, long: skusInsightsLong, check: skusInsightsCheck,
+				table: skusInsightsTable, params: []param{
+					{name: "dimension", kind: str, required: true, values: skusDimensions,
+						help: "what to group by: brand, merchant, category or total"},
+					{name: "period", kind: str, values: []string{"7", "30", "90"},
+						help: "days to cover: 7, 30 or 90 (default 30)"},
+					{name: "category", kind: str, help: "only purchases under this category id (see reference skus categories)"},
+					{name: "merchant", kind: str,
+						help: "only purchases at this merchant key (see reference skus merchants); not with --dimension merchant"},
+					{name: "limit", kind: num, min: 1, max: 50, help: "rows to return, 1 to 50 (default 20)"},
 				}},
 		},
 	},

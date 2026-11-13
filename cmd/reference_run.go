@@ -62,6 +62,9 @@ func (e endpoint) command(group string) *cobra.Command {
 		Short: e.short,
 		Args:  cobra.NoArgs,
 	}
+	if e.long != "" {
+		cmd.Long = e.long
+	}
 	flags := cmd.Flags()
 
 	if !e.noSearch {
@@ -116,6 +119,12 @@ func (e endpoint) command(group string) *cobra.Command {
 			return usageErr(cmd.CommandPath() + " returns rows with no id - --quiet does not apply, use --json")
 		}
 
+		if e.check != nil {
+			if err := e.check(flags); err != nil {
+				return err
+			}
+		}
+
 		query := url.Values{}
 
 		// Only flags the user set: an unset --per-page must not become
@@ -145,7 +154,12 @@ func (e endpoint) command(group string) *cobra.Command {
 				}
 				query.Set(p.name, v)
 			case num:
-				query.Set(p.name, strconv.Itoa(*numVal[p.name]))
+				n := *numVal[p.name]
+				if p.max > 0 && (n < p.min || n > p.max) {
+					return usageErr("--" + flagName(p.name) + " " + strconv.Itoa(n) +
+						" is out of range; " + strconv.Itoa(p.min) + " to " + strconv.Itoa(p.max))
+				}
+				query.Set(p.name, strconv.Itoa(n))
 			case strs:
 				if p.oneKind {
 					if err := oneKindOnly(flagName(p.name), *strsVal[p.name]); err != nil {
@@ -162,7 +176,7 @@ func (e endpoint) command(group string) *cobra.Command {
 			}
 		}
 
-		return runReference(cmd, path, query)
+		return runReferenceTable(cmd, path, query, e.table)
 	}
 
 	return cmd
@@ -213,6 +227,12 @@ func flagName(param string) string {
 // One request, one page. The biggest catalogs run to thousands of pages against
 // a 120 requests/min budget, so callers ask for more with --page.
 func runReference(cmd *cobra.Command, path string, query url.Values) error {
+	return runReferenceTable(cmd, path, query, nil)
+}
+
+// runReferenceTable is runReference with an optional shaper for the default
+// table, for the reads whose rows the generic table prints badly.
+func runReferenceTable(cmd *cobra.Command, path string, query url.Values, table func([]output.Record) ([]output.Record, []string)) error {
 	c, err := client()
 	if err != nil {
 		return err
@@ -242,6 +262,15 @@ func runReference(cmd *cobra.Command, path string, query url.Values) error {
 	// truncates silently.
 	if quietOutput {
 		if err := output.IDs(cmd.OutOrStdout(), items); err != nil {
+			return err
+		}
+		output.Footer(cmd.ErrOrStderr(), pg)
+		return nil
+	}
+
+	if table != nil {
+		rows, cols := table(items)
+		if err := output.TableWith(cmd.OutOrStdout(), rows, cols); err != nil {
 			return err
 		}
 		output.Footer(cmd.ErrOrStderr(), pg)
