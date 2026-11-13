@@ -155,9 +155,13 @@ func (e endpoint) command(group string) *cobra.Command {
 				query.Set(p.name, v)
 			case num:
 				n := *numVal[p.name]
-				if p.max > 0 && (n < p.min || n > p.max) {
+				if (p.min > 0 || p.max > 0) && (n < p.min || (p.max > 0 && n > p.max)) {
+					want := strconv.Itoa(p.min) + " or more"
+					if p.max > 0 {
+						want = strconv.Itoa(p.min) + " to " + strconv.Itoa(p.max)
+					}
 					return usageErr("--" + flagName(p.name) + " " + strconv.Itoa(n) +
-						" is out of range; " + strconv.Itoa(p.min) + " to " + strconv.Itoa(p.max))
+						" is out of range; " + want)
 				}
 				query.Set(p.name, strconv.Itoa(n))
 			case strs:
@@ -176,7 +180,7 @@ func (e endpoint) command(group string) *cobra.Command {
 			}
 		}
 
-		return runReferenceTable(cmd, path, query, e.table)
+		return runReferenceTable(cmd, path, query, e.table, e.empty)
 	}
 
 	return cmd
@@ -227,12 +231,12 @@ func flagName(param string) string {
 // One request, one page. The biggest catalogs run to thousands of pages against
 // a 120 requests/min budget, so callers ask for more with --page.
 func runReference(cmd *cobra.Command, path string, query url.Values) error {
-	return runReferenceTable(cmd, path, query, nil)
+	return runReferenceTable(cmd, path, query, nil, "")
 }
 
 // runReferenceTable is runReference with an optional shaper for the default
 // table, for the reads whose rows the generic table prints badly.
-func runReferenceTable(cmd *cobra.Command, path string, query url.Values, table func([]output.Record) ([]output.Record, []string)) error {
+func runReferenceTable(cmd *cobra.Command, path string, query url.Values, table func([]output.Record) ([]output.Record, []string), empty string) error {
 	c, err := client()
 	if err != nil {
 		return err
@@ -253,7 +257,11 @@ func runReferenceTable(cmd *cobra.Command, path string, query url.Values, table 
 	}
 
 	if len(items) == 0 {
-		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "no results")
+		msg := "no results"
+		if empty != "" {
+			msg += ": " + empty
+		}
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), msg)
 		return nil
 	}
 

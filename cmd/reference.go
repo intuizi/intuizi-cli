@@ -65,6 +65,13 @@ type endpoint struct {
 	noID       bool
 	params     []param
 
+	// paramsWithoutSearch says, on a noSearch row, that it takes parameters on
+	// purpose; without it a noSearch row must have none.
+	paramsWithoutSearch bool
+
+	// empty is what an empty answer says on stderr, after "no results".
+	empty string
+
 	// long replaces short as the help text where a read needs more than a line.
 	long string
 
@@ -235,17 +242,19 @@ var referenceGroups = []referenceGroup{
 						help: "type, os, make or model"},
 				}},
 			{item: "coverage", short: "Days of online purchases a SKUs dataset covers", noSearch: true, noID: true,
-				long: skusCoverageLong, table: skusCoverageTable},
+				empty: skusEmptyNote, long: skusCoverageLong, table: skusCoverageTable},
 			{item: "insights", short: "Spend, orders and networks by brand, merchant or category",
-				noSearch: true, noID: true, long: skusInsightsLong, check: skusInsightsCheck,
+				noSearch: true, noID: true, paramsWithoutSearch: true, empty: skusEmptyNote,
+				long: skusInsightsLong, check: skusInsightsCheck,
 				table: skusInsightsTable, params: []param{
 					{name: "dimension", kind: str, required: true, values: skusDimensions,
-						help: "what to group by: brand, merchant, category or total"},
+						help: "what to rank: brand, merchant, category or total"},
 					{name: "period", kind: str, values: []string{"7", "30", "90"},
-						help: "days to cover: 7, 30 or 90 (default 30)"},
-					{name: "category", kind: str, help: "only purchases under this category id (see reference skus categories)"},
+						help: "days counted: 7, 30 or 90 (default 30)"},
+					{name: "category", kind: num, min: 1,
+						help: "count only orders under this category id (1 or more; see reference skus categories)"},
 					{name: "merchant", kind: str,
-						help: "only purchases at this merchant key (see reference skus merchants); not with --dimension merchant"},
+						help: "count only this merchant key (see reference skus merchants); not with --dimension merchant"},
 					{name: "limit", kind: num, min: 1, max: 50, help: "rows to return, 1 to 50 (default 20)"},
 				}},
 		},

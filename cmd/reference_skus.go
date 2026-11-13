@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/pflag"
@@ -10,30 +12,66 @@ import (
 
 var skusDimensions = []string{"brand", "merchant", "category", "total"}
 
+// What an empty answer says: both reads are empty for the same two reasons.
+const skusEmptyNote = "an account without the SKUs dataset reads nothing, and so does any account " +
+	"before the first daily update"
+
 const skusCoverageLong = `Days of online purchases a SKUs dataset covers
 
-Prints one row: the first day with purchases, the newest purchase day, the
-settled day (the newest day whose numbers no longer change), the newest day
-with devices (- while there is none), how many ranges of days have no
-purchases, how many days are thin, and when the figures were computed. The
-lists of empty ranges and thin days are in --json (empty_days, thin_days).
+Prints one row, updated once a day:
 
-Takes no flags. An account without the SKUs dataset reads nothing.`
+  first_day            the first day with purchases
+  newest_purchase_day  the newest day with purchases
+  settled_day          two days before newest_purchase_day. A purchase day
+                       keeps filling for about three days, so the days after
+                       settled_day still read low
+  newest_device_day    the newest purchase-click day with matched devices
+                       (- before the first device refresh); a purchase
+                       clicked after it adds no device yet
+  empty_ranges         how many ranges of days have no purchases
+  thin_days            how many days hold only a small part of their usual
+                       purchases
+  computed_at          when the figures were computed
+
+A period with empty or thin days, or one that ends after settled_day or
+newest_device_day, holds fewer purchases or fewer devices. The two lists are
+in --json, as empty_days (a list of [first, last] pairs, both days included)
+and thin_days.
+
+The read takes no search or paging, and no flags of its own; the global
+flags work (--quiet does not: the row has no id). An empty list means an
+account without the SKUs dataset, or no daily update yet.`
 
 const skusInsightsLong = `Spend, orders and networks by brand, merchant or category
 
-Reads what a SKUs dataset holds, grouped by --dimension, over a
---period of 7, 30 or 90 days. Each row has the value (the key or id) and its text, orders,
-spend, avg_order_value, networks (home networks, never summed across rows),
-devices and share_of_orders (- where there is none), and the day the
-figures are as of. A category row also has its path. --dimension total reads
-one row for everything.
+Ranks what a SKUs dataset holds over the last --period days (7, 30 or 90),
+ending on the settled day of "reference skus coverage". Updated once a day.
+
+  --dimension brand|merchant|category   one row per brand, merchant or
+                                        category
+  --dimension total                     one row for the whole slice, with
+                                        value ALL
+  --dimension category                  lists the categories one level under
+                                        --category (level 1 without it)
+
+Columns: value (the key, or the category id), text, orders, spend (USD),
+avg_order_value (USD), networks (home networks), devices (devices seen on
+those home networks) and share_of_orders (a fraction of the slice's total
+row: 0.1707 = 17.07%). A category row also ends with its path. --json adds
+as_of and period_days.
+
+Read the figures with care:
+  - They are panel counts, not a merchant's sales.
+  - networks and devices are approximate: never add them across rows.
+  - Rows with fewer than 10 home networks, or fewer than 10 orders, are not
+    listed, and devices is - below 10.
+  - An order with two brands counts under both, so shares of brands can add
+    up to more than 100%.
 
 Pass keys and ids, not names: get them from "reference skus categories" and
 "reference skus merchants". --merchant is not taken with --dimension
-merchant.
-
-An account without the SKUs dataset reads nothing.`
+merchant. An empty list means an account without the SKUs dataset, or no
+daily update yet.`
 
 // skusInsightsCheck refuses the one combination the API refuses.
 func skusInsightsCheck(flags *pflag.FlagSet) error {
@@ -57,11 +95,21 @@ func skusInsightsTable(items []output.Record) ([]output.Record, []string) {
 	cols := append([]string(nil), skusInsightsColumns...)
 	for _, it := range items {
 		if _, ok := it["path"]; ok {
-			cols = append(cols[:2], append([]string{"path"}, cols[2:]...)...)
+			cols = append(cols, "path") // last: it is long
 			break
 		}
 	}
-	return dashNulls(items, cols), cols
+	rows := dashNulls(items, cols)
+	for _, row := range rows {
+		for _, k := range []string{"spend", "avg_order_value"} {
+			if n, ok := row[k].(json.Number); ok {
+				if f, err := n.Float64(); err == nil {
+					row[k] = strconv.FormatFloat(f, 'f', 2, 64)
+				}
+			}
+		}
+	}
+	return rows, cols
 }
 
 var skusCoverageColumns = []string{"first_day", "newest_purchase_day", "settled_day",

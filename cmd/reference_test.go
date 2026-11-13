@@ -139,6 +139,14 @@ func TestReferenceTableIsWellFormed(t *testing.T) {
 		if e.noSearch && e.paged {
 			t.Errorf("%s: noSearch drops --search, and a paged read is searched", key)
 		}
+		// A read with no search takes no parameters, unless the row says
+		// outright that it does.
+		if e.noSearch && len(e.params) > 0 && !e.paramsWithoutSearch {
+			t.Errorf("%s: noSearch with params must set paramsWithoutSearch on purpose", key)
+		}
+		if e.paramsWithoutSearch && (!e.noSearch || len(e.params) == 0) {
+			t.Errorf("%s: paramsWithoutSearch needs noSearch and at least one param", key)
+		}
 		seen := make(map[string]bool)
 		seenFlags := make(map[string]bool)
 		for _, p := range e.params {
@@ -167,6 +175,22 @@ func TestReferenceTableIsWellFormed(t *testing.T) {
 			case "search", "page", "per_page":
 				t.Errorf("%s: %q is added automatically, drop it from params", key, p.name)
 			}
+		}
+	}
+}
+
+// TestReferenceNoSearchRowsArePinned lists the reads that drop --search by
+// name: marking a searchable catalog noSearch by mistake would remove its
+// flag without any other test failing.
+func TestReferenceNoSearchRowsArePinned(t *testing.T) {
+	want := map[string]bool{
+		"profile-attributes/recency-limits": true,
+		"skus/coverage":                     true,
+		"skus/insights":                     true,
+	}
+	for key, e := range referenceEndpoints(t) {
+		if e.noSearch != want[key] {
+			t.Errorf("%s: noSearch = %v, want %v", key, e.noSearch, want[key])
 		}
 	}
 }
