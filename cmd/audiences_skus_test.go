@@ -761,6 +761,9 @@ func TestAudiencesSkusSpendUsageErrors(t *testing.T) {
 		{"spend not a number", with(brand, "--spend-min", "abc"), []string{"--spend-min", "abc"}},
 		{"spend NaN", with(brand, "--spend-max", "NaN"), []string{"--spend-max"}},
 		{"spend empty", with(brand, "--spend-max", ""), []string{"--spend-max"}},
+		{"seven decimals", with(brand, "--spend-min", "0.0000001"), []string{"--spend-min", "6 decimal places"}},
+		{"hex float", with(brand, "--spend-max", "0x1p3"), []string{"--spend-max", "0x1p3"}},
+		{"exponent", with(brand, "--item-price-max", "1e3"), []string{"--item-price-max", "1e3"}},
 		{"orders 0", with(brand, "--orders-min", "0"), []string{"--orders-min", "1"}},
 		{"orders above 1e6", with(brand, "--orders-max", "1000001"), []string{"--orders-max"}},
 		{"orders fraction", with(brand, "--orders-min", "1.5"), []string{"--orders-min"}},
@@ -809,5 +812,45 @@ func TestAudiencesSkusHelpNamesSpendFilters(t *testing.T) {
 		if !strings.Contains(long, want) {
 			t.Errorf("audiences create --help omits %q", want)
 		}
+	}
+}
+
+// The console takes plain decimal text with at most 6 decimals: those are sent, and
+// nothing else gets past the CLI (no hex, no exponent).
+func TestAudiencesSkusSpendAcceptsPlainDecimals(t *testing.T) {
+	srv, _ := stubSeq(t, reply{body: skusDove})
+	ds := firstDataset(t, dryRunBody(t, audiencesCreateCommand(), srv,
+		with(skusFlagsBase, "--brand", "dove", "--spend-min", "150000.55", "--item-price-min", "0.000001")...))
+	if got := jsonOf(ds["spend_min"]); got != "150000.55" {
+		t.Errorf("spend_min = %s", got)
+	}
+	if got := jsonOf(ds["item_price_min"]); got != "0.000001" {
+		t.Errorf("item_price_min = %s", got)
+	}
+}
+
+// The console refuses a category named twice, so each resolved id is sent once, in first-seen order:
+// an id repeated, and a name with its own id.
+func TestSkusCategorySentOnce(t *testing.T) {
+	srv, _ := stub(t, skusCategories(`{"value":3530,"text":"Dog Food","path":"Animals > Dog Food"}`))
+	for name, cats := range map[string][]string{
+		"id twice":     {"3530", "3530"},
+		"name and id":  {"dog food", "3530"},
+		"id then name": {"3530", "dog food"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			args := with(skusFlagsBase)
+			for _, c := range cats {
+				args = append(args, "--category", c)
+			}
+			body := dryRunBody(t, audiencesCreateCommand(), srv, args...)
+			if raw := jsonOf(firstDataset(t, body)["categories"]); raw != `[3530]` {
+				t.Errorf("categories = %s", raw)
+			}
+		})
+	}
+	body := dryRunBody(t, audiencesCreateCommand(), srv, with(skusFlagsBase, "--category", "7", "--category", "3530", "--category", "7")...)
+	if raw := jsonOf(firstDataset(t, body)["categories"]); raw != `[7,3530]` {
+		t.Errorf("order = %s", raw)
 	}
 }

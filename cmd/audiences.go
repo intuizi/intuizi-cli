@@ -668,12 +668,18 @@ func (r *audienceRequest) build(cmd *cobra.Command) (audienceBody, error) {
 	}
 	if len(r.categories) > 0 {
 		ids := make([]any, 0, len(r.categories))
+		seen := map[string]bool{}
 		for _, name := range r.categories {
 			id, err := resolveOrID(ctx, c, cat.path, "--category", name, "categories")
 			if err != nil {
 				return audienceBody{}, err
 			}
-			ids = append(ids, id)
+			// The console refuses a category named twice (by id, or by a
+			// name that resolves to the same id): send each once.
+			if !seen[fmt.Sprint(id)] {
+				seen[fmt.Sprint(id)] = true
+				ids = append(ids, id)
+			}
 		}
 		// WebDomain reads the same selection from a different field.
 		if cat.key == "iab_category_codes" {

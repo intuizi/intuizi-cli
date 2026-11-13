@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -90,6 +91,10 @@ var skusSpendPairs = [][2]string{
 	{"orders-min", "orders-max"},
 }
 
+// plainAmount is the amount text the console accepts: digits with up to 6
+// decimals. A leading minus passes here and is refused by the range.
+var plainAmount = regexp.MustCompile(`^-?[0-9]+(\.[0-9]{1,6})?$`)
+
 // topSpenderShares are the shares --top-spenders takes (the API's spend_top_percent).
 var topSpenderShares = []string{"50", "25", "10", "5", "1"}
 
@@ -109,6 +114,12 @@ func (r *audienceRequest) parseSkusSpend(changed func(string) bool) (map[string]
 			n, err = strconv.ParseInt(raw, 10, 64)
 			v = float64(n)
 		} else {
+			// The console takes plain decimal text with at most 6 decimals;
+			// ParseFloat alone would also take hex ("0x1p3") and exponents.
+			if !plainAmount.MatchString(raw) {
+				return nil, usageErr(fmt.Sprintf("--%s must be a plain decimal number with at most 6 decimal places, not %q",
+					f.flag, *r.spend[f.flag]))
+			}
 			v, err = strconv.ParseFloat(raw, 64)
 		}
 		if err != nil {
