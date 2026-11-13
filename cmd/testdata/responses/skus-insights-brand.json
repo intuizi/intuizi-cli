@@ -1,6 +1,0 @@
-{"status":"success","code":200,"message":"Resource fetched successfully.","data":[
- {"value":"brand-a","text":"Example Brand A","orders":1520,"spend":48210.5,"avg_order_value":31.72,
-  "networks":1204,"devices":2890,"share_of_orders":0.0412,"as_of":"2026-11-08","period_days":30},
- {"value":"brand-b","text":"Example Brand B","orders":980,"spend":20150,"avg_order_value":20.56,
-  "networks":801,"devices":null,"share_of_orders":null,"as_of":"2026-11-08","period_days":30}
-]}

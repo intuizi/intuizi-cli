@@ -44,17 +44,17 @@ type param struct {
 	// shell completes them, and any other value is refused before it is sent.
 	values []string
 
-	// min and max bound a num param when max is set; a value outside them is
-	// refused before it is sent.
+	// min and max bound a num param when either is set (min alone means "min
+	// or more"); a value outside them is refused before it is sent.
 	min, max int
 }
 
 // endpoint is one reference read. path is set only where the URL segment differs
 // from the command name. paged adds --page and --per-page; noSearch drops
-// --search, for a read that takes no parameters at all. searchHelp replaces
-// the --search help where the API matches a column other than the label.
-// noID marks rows that carry neither id nor value, so --quiet is refused
-// before the round trip rather than failing after it.
+// --search, and such a read takes no parameters unless paramsWithoutSearch is
+// set. searchHelp replaces the --search help where the API matches a column
+// other than the label. noID marks rows that carry neither id nor value, so
+// --quiet is refused before the round trip rather than failing after it.
 type endpoint struct {
 	item       string
 	path       string
@@ -82,6 +82,11 @@ type endpoint struct {
 	// table, when set, shapes the default table: it returns the rows to print
 	// and their columns. --json is never affected.
 	table func(items []output.Record) ([]output.Record, []string)
+
+	// detail, when set, prints the first row as one field per line (output.Detail)
+	// instead of a table, for a read that always returns a single record. It
+	// returns the record and the order of its fields. --json is never affected.
+	detail func(items []output.Record) (output.Record, []string)
 }
 
 // Where --search is not a plain match on the label of one page.
@@ -242,9 +247,9 @@ var referenceGroups = []referenceGroup{
 						help: "type, os, make or model"},
 				}},
 			{item: "coverage", short: "Days of online purchases a SKUs dataset covers", noSearch: true, noID: true,
-				empty: skusEmptyNote, long: skusCoverageLong, table: skusCoverageTable},
+				empty: skusEmptyNote, long: skusCoverageLong, detail: skusCoverageDetail},
 			{item: "insights", short: "Spend, orders and networks by brand, merchant or category",
-				noSearch: true, noID: true, paramsWithoutSearch: true, empty: skusEmptyNote,
+				noSearch: true, paramsWithoutSearch: true, empty: skusInsightsEmptyNote,
 				long: skusInsightsLong, check: skusInsightsCheck,
 				table: skusInsightsTable, params: []param{
 					{name: "dimension", kind: str, required: true, values: skusDimensions,
@@ -322,9 +327,9 @@ var referenceGroups = []referenceGroup{
 				{name: "category_ids", kind: nums, help: "Category ids to cascade from"},
 				{name: "key", kind: str, help: "The key to cascade from"},
 			}},
-			// The only read with no query parameters at all, search included,
-			// and the only one whose rows - {start_limit, end_limit} - have
-			// nothing --quiet could print.
+			// A read with no query parameters at all, search included, whose
+			// rows - {start_limit, end_limit} - have nothing --quiet could
+			// print.
 			{item: "recency-limits", short: "The delivered quarter window dates must fall inside", noSearch: true, noID: true},
 		},
 	},
@@ -366,7 +371,8 @@ its id column instead.
     intuizi reference web domains --category-codes IAB2 --json
 
 Each read accepts --search, a case-insensitive contains match, except
-profile-attributes recency-limits, which takes no flags of its own. Most reads
+profile-attributes recency-limits, skus coverage and skus insights, which take
+no search. Most reads
 match the item label. The demographics genders, marital-statuses and incomes
 match the value code instead (--search F, not female), apps bundle-ids matches
 the app name, and poi locations matches the name or address. skus brands

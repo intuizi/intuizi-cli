@@ -1,5 +1,0 @@
-{"status":"success","code":200,"message":"Resource fetched successfully.","data":[
- {"value":"3530","text":"Dry Dog Food","path":"Animals & Pet Supplies > Pet Supplies > Dog Supplies > Dry Dog Food",
-  "orders":410,"spend":9800.25,"avg_order_value":23.9,"networks":350,"devices":690,"share_of_orders":0.011,
-  "as_of":"2026-11-08","period_days":7}
-]}

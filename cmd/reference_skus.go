@@ -12,13 +12,19 @@ import (
 
 var skusDimensions = []string{"brand", "merchant", "category", "total"}
 
-// What an empty answer says: both reads are empty for the same two reasons.
+// What an empty coverage answer says: an account without the SKUs dataset, or
+// before the first daily update.
 const skusEmptyNote = "an account without the SKUs dataset reads nothing, and so does any account " +
 	"before the first daily update"
 
+// An empty insights answer has one more cause: a row needs 10 home networks
+// and 10 orders to be listed, so a narrow slice can read empty on any account.
+const skusInsightsEmptyNote = skusEmptyNote + ". It also reads empty when no row passes the " +
+	"filters (rows with fewer than 10 home networks or fewer than 10 orders are never listed)"
+
 const skusCoverageLong = `Days of online purchases a SKUs dataset covers
 
-Prints one row, updated once a day:
+Prints one record, one field per line, updated once a day:
 
   first_day            the first day with purchases
   newest_purchase_day  the newest day with purchases
@@ -54,6 +60,9 @@ ending on the settled day of "reference skus coverage". Updated once a day.
   --dimension category                  lists the categories one level under
                                         --category (level 1 without it)
 
+--quiet prints the values, one per line; it is refused with --dimension
+total, whose one row is the total.
+
 Columns: value (the key, or the category id), text, orders, spend (USD),
 avg_order_value (USD), networks (home networks), devices (devices seen on
 those home networks) and share_of_orders (a fraction of the slice's total
@@ -72,17 +81,25 @@ At most 50 rows are kept per slice, so --limit tops out at 50.
 
 Pass keys and ids, not names: get them from "reference skus categories" and
 "reference skus merchants". --merchant is not taken with --dimension
-merchant. An empty list means an account without the SKUs dataset, or no
-daily update yet.`
+merchant. An empty list means an account without the SKUs dataset, no
+daily update yet, or that no row passes the filters (see the 10 networks and
+10 orders rule above).`
 
-// skusInsightsCheck refuses the one combination the API refuses.
+// skusInsightsCheck refuses what cannot be answered: --merchant with
+// --dimension merchant (the API refuses it), and --quiet with --dimension total
+// (its one row is the total, ALL, not a key to capture).
 func skusInsightsCheck(flags *pflag.FlagSet) error {
-	if !flags.Changed("merchant") || !flags.Changed("dimension") {
+	if !flags.Changed("dimension") {
 		return nil
 	}
 	d, _ := flags.GetString("dimension")
-	if strings.ToLower(strings.TrimSpace(d)) == "merchant" {
+	d = strings.ToLower(strings.TrimSpace(d))
+	if d == "merchant" && flags.Changed("merchant") {
 		return usageErr("--merchant cannot be combined with --dimension merchant")
+	}
+	if d == "total" && quietOutput {
+		return usageErr("--quiet does not apply with --dimension total: its one row is the total, " +
+			"not a key. Use --json")
 	}
 	return nil
 }
@@ -117,22 +134,20 @@ func skusInsightsTable(items []output.Record) ([]output.Record, []string) {
 var skusCoverageColumns = []string{"first_day", "newest_purchase_day", "settled_day",
 	"newest_device_day", "empty_ranges", "thin_days", "computed_at"}
 
-// skusCoverageTable turns the two lists into counts; the lists are in --json.
-func skusCoverageTable(items []output.Record) ([]output.Record, []string) {
-	rows := make([]output.Record, len(items))
-	for i, it := range items {
-		row := output.Record{}
-		for _, k := range []string{"first_day", "newest_purchase_day", "settled_day", "newest_device_day", "computed_at"} {
-			row[k] = it[k]
-		}
-		for from, to := range map[string]string{"empty_days": "empty_ranges", "thin_days": "thin_days"} {
-			if list, ok := it[from].([]any); ok {
-				row[to] = len(list)
-			}
-		}
-		rows[i] = row
+// skusCoverageDetail turns the two lists into counts and returns the record in
+// a fixed order, a null as "-"; the lists are in --json.
+func skusCoverageDetail(items []output.Record) (output.Record, []string) {
+	it := items[0]
+	row := output.Record{}
+	for _, k := range []string{"first_day", "newest_purchase_day", "settled_day", "newest_device_day", "computed_at"} {
+		row[k] = it[k]
 	}
-	return dashNulls(rows, skusCoverageColumns), skusCoverageColumns
+	for from, to := range map[string]string{"empty_days": "empty_ranges", "thin_days": "thin_days"} {
+		if list, ok := it[from].([]any); ok {
+			row[to] = len(list)
+		}
+	}
+	return dashNulls([]output.Record{row}, skusCoverageColumns)[0], skusCoverageColumns
 }
 
 // dashNulls prints a null or missing value as "-", so a row never reads as

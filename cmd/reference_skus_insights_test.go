@@ -8,6 +8,32 @@ import (
 	"testing"
 )
 
+// The bodies below are made up, with neutral names: the tests read their exact
+// values, so they are golden inputs and live here, not in testdata/responses.
+// The settled day is two days before the newest purchase day, as documented.
+const (
+	skusInsightsBrandBody = `{"status":"success","code":200,"message":"ok","data":[
+ {"value":"brand-a","text":"Example Brand A","orders":1520,"spend":48210.5,"avg_order_value":31.72,
+  "networks":1204,"devices":2890,"share_of_orders":0.0412,"as_of":"2026-11-10","period_days":30},
+ {"value":"brand-b","text":"Example Brand B","orders":980,"spend":20150,"avg_order_value":20.56,
+  "networks":801,"devices":null,"share_of_orders":null,"as_of":"2026-11-10","period_days":30}
+]}`
+
+	skusInsightsCategoryBody = `{"status":"success","code":200,"message":"ok","data":[
+ {"value":"3530","text":"Dry Dog Food","path":"Animals & Pet Supplies > Pet Supplies > Dog Supplies > Dry Dog Food",
+  "orders":410,"spend":9800.25,"avg_order_value":23.9,"networks":350,"devices":690,"share_of_orders":0.011,
+  "as_of":"2026-11-10","period_days":7}
+]}`
+
+	skusCoverageBody = `{"status":"success","code":200,"message":"ok","data":[
+ {"first_day":"2026-01-05","newest_purchase_day":"2026-11-12","settled_day":"2026-11-10",
+  "newest_device_day":null,
+  "empty_days":[["2026-03-02","2026-03-04"],["2026-07-19","2026-07-19"]],
+  "thin_days":["2026-05-11","2026-05-12","2026-09-30"],
+  "computed_at":"2026-11-13T04:10:00Z"}
+]}`
+)
+
 // runSkus runs one skus read against a fake server and returns stdout, stderr
 // and the error, for the refusals that must cost no request.
 func runSkus(t *testing.T, item, baseURL string, args ...string) (string, string, error) {
@@ -29,7 +55,7 @@ func runSkus(t *testing.T, item, baseURL string, args ...string) (string, string
 }
 
 func TestSkusInsightsQuery(t *testing.T) {
-	srv, queries := serve(t, fixture(t, "skus-insights-brand.json"))
+	srv, queries := serve(t, skusInsightsBrandBody)
 	_, _, err := runSkus(t, "insights", srv.URL,
 		"--dimension", "Brand", "--period", "90", "--category", "3530", "--limit", "50")
 	if err != nil {
@@ -42,7 +68,7 @@ func TestSkusInsightsQuery(t *testing.T) {
 }
 
 func TestSkusInsightsMerchantFilterWithOtherDimension(t *testing.T) {
-	srv, queries := serve(t, fixture(t, "skus-insights-brand.json"))
+	srv, queries := serve(t, skusInsightsBrandBody)
 	if _, _, err := runSkus(t, "insights", srv.URL, "--dimension", "category", "--merchant", "shop-a"); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +93,7 @@ func TestSkusInsightsRefusals(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, queries := serve(t, fixture(t, "skus-insights-brand.json"))
+			srv, queries := serve(t, skusInsightsBrandBody)
 			_, _, err := runSkus(t, "insights", srv.URL, tc.args...)
 			wantUsageErr(t, err, tc.want...)
 			if len(*queries) != 0 {
@@ -78,7 +104,7 @@ func TestSkusInsightsRefusals(t *testing.T) {
 }
 
 func TestSkusInsightsDimensionIsRequired(t *testing.T) {
-	srv, queries := serve(t, fixture(t, "skus-insights-brand.json"))
+	srv, queries := serve(t, skusInsightsBrandBody)
 	_, _, err := runSkus(t, "insights", srv.URL)
 	if err == nil || !strings.Contains(err.Error(), "dimension") {
 		t.Fatalf("err = %v, want a missing --dimension error", err)
@@ -89,7 +115,7 @@ func TestSkusInsightsDimensionIsRequired(t *testing.T) {
 }
 
 func TestSkusInsightsTable(t *testing.T) {
-	srv, _ := serve(t, fixture(t, "skus-insights-brand.json"))
+	srv, _ := serve(t, skusInsightsBrandBody)
 	out, _, err := runSkus(t, "insights", srv.URL, "--dimension", "brand")
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +142,7 @@ func TestSkusInsightsTable(t *testing.T) {
 }
 
 func TestSkusInsightsCategoryTableHasPath(t *testing.T) {
-	srv, _ := serve(t, fixture(t, "skus-insights-category.json"))
+	srv, _ := serve(t, skusInsightsCategoryBody)
 	out, _, err := runSkus(t, "insights", srv.URL, "--dimension", "category")
 	if err != nil {
 		t.Fatal(err)
@@ -131,12 +157,12 @@ func TestSkusInsightsCategoryTableHasPath(t *testing.T) {
 }
 
 func TestSkusJSONIsByteForByte(t *testing.T) {
-	for _, tc := range []struct{ item, file string }{
-		{"insights", "skus-insights-brand.json"},
-		{"coverage", "skus-coverage.json"},
+	for _, tc := range []struct{ item, body string }{
+		{"insights", skusInsightsBrandBody},
+		{"coverage", skusCoverageBody},
 	} {
 		t.Run(tc.item, func(t *testing.T) {
-			body := fixture(t, tc.file)
+			body := tc.body
 			srv, _ := serve(t, body)
 			jsonOutput = true
 			t.Cleanup(func() { jsonOutput = false })
@@ -164,31 +190,47 @@ func TestSkusJSONIsByteForByte(t *testing.T) {
 	}
 }
 
-func TestSkusQuietIsRefusedBeforeAnyRequest(t *testing.T) {
-	for _, tc := range []struct {
-		item string
-		args []string
-	}{
-		{"insights", []string{"--dimension", "brand"}},
-		{"coverage", nil},
-	} {
-		t.Run(tc.item, func(t *testing.T) {
-			srv, queries := serve(t, fixture(t, "skus-insights-brand.json"))
-			quietOutput = true
-			t.Cleanup(func() { quietOutput = false })
-			_, _, err := runSkus(t, tc.item, srv.URL, tc.args...)
-			wantUsageErr(t, err, "--quiet")
-			if len(*queries) != 0 {
-				t.Errorf("got requests %v", *queries)
-			}
-		})
+func TestSkusCoverageQuietIsRefusedBeforeAnyRequest(t *testing.T) {
+	srv, queries := serve(t, skusCoverageBody)
+	quietOutput = true
+	t.Cleanup(func() { quietOutput = false })
+	_, _, err := runSkus(t, "coverage", srv.URL)
+	wantUsageErr(t, err, "--quiet")
+	if len(*queries) != 0 {
+		t.Errorf("got requests %v", *queries)
 	}
 }
 
-func TestSkusInsightsQuietRefusedAndNoSearch(t *testing.T) {
+func TestSkusInsightsQuietPrintsTheValues(t *testing.T) {
+	srv, _ := serve(t, skusInsightsBrandBody)
+	quietOutput = true
+	t.Cleanup(func() { quietOutput = false })
+	out, _, err := runSkus(t, "insights", srv.URL, "--dimension", "brand")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "brand-a\nbrand-b\n" {
+		t.Errorf("--quiet printed %q, want the two brand keys, one per line", out)
+	}
+}
+
+func TestSkusInsightsQuietWithTotalIsRefusedBeforeAnyRequest(t *testing.T) {
+	for _, d := range []string{"total", " Total "} {
+		srv, queries := serve(t, skusInsightsBrandBody)
+		quietOutput = true
+		_, _, err := runSkus(t, "insights", srv.URL, "--dimension", d)
+		quietOutput = false
+		wantUsageErr(t, err, "--quiet", "--dimension total", "--json")
+		if len(*queries) != 0 {
+			t.Errorf("--dimension %q: got requests %v", d, *queries)
+		}
+	}
+}
+
+func TestSkusInsightsNoSearchAndTakesQuiet(t *testing.T) {
 	e := findEndpoint(t, "skus", "insights")
-	if !e.noID {
-		t.Error("insights rows carry no id column of their own; --quiet must be refused")
+	if e.noID {
+		t.Error("insights rows carry a value; --quiet must be allowed")
 	}
 	cmd := e.command("skus")
 	if cmd.Flags().Lookup("search") != nil || cmd.Flags().Lookup("page") != nil {
@@ -201,8 +243,8 @@ func TestSkusInsightsQuietRefusedAndNoSearch(t *testing.T) {
 	}
 }
 
-func TestSkusCoverageTable(t *testing.T) {
-	srv, queries := serve(t, fixture(t, "skus-coverage.json"))
+func TestSkusCoverageIsADetailView(t *testing.T) {
+	srv, queries := serve(t, skusCoverageBody)
 	out, _, err := runSkus(t, "coverage", srv.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -210,23 +252,26 @@ func TestSkusCoverageTable(t *testing.T) {
 	if len(*queries) != 1 || (*queries)[0] != "" {
 		t.Errorf("queries = %v, want one with no parameters", *queries)
 	}
+	want := []string{"first_day", "newest_purchase_day", "settled_day", "newest_device_day",
+		"empty_ranges", "thin_days", "computed_at"}
+	wantVal := []string{"2026-01-05", "2026-11-12", "2026-11-10", "-", "2", "3", "2026-11-13T04:10:00Z"}
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("want header and one row, got:\n%s", out)
+	if len(lines) != len(want) {
+		t.Fatalf("want one line per field, got:\n%s", out)
 	}
-	wantHeader := "first_day,newest_purchase_day,settled_day,newest_device_day,empty_ranges,thin_days,computed_at"
-	if got := strings.Join(strings.Fields(lines[0]), ","); got != wantHeader {
-		t.Errorf("header = %s, want %s", got, wantHeader)
-	}
-	row := strings.Fields(lines[1])
-	want := []string{"2026-01-05", "2026-11-12", "2026-11-08", "-", "2", "3", "2026-11-13T04:10:00Z"}
-	if strings.Join(row, ",") != strings.Join(want, ",") {
-		t.Errorf("row = %v, want %v", row, want)
+	for i, line := range lines {
+		f := strings.Fields(line)
+		if len(f) != 2 || f[0] != want[i] || f[1] != wantVal[i] {
+			t.Errorf("line %d = %v, want %s %s", i+1, f, want[i], wantVal[i])
+		}
+		if len(line) > 60 {
+			t.Errorf("line %d is %d wide", i+1, len(line))
+		}
 	}
 }
 
 func TestSkusCoverageJSONKeepsTheLists(t *testing.T) {
-	srv, _ := serve(t, fixture(t, "skus-coverage.json"))
+	srv, _ := serve(t, skusCoverageBody)
 	jsonOutput = true
 	t.Cleanup(func() { jsonOutput = false })
 	out, _, err := runSkus(t, "coverage", srv.URL)
@@ -249,14 +294,22 @@ func TestSkusCoverageTakesNoFlagsAndNoQuiet(t *testing.T) {
 
 func TestSkusEmptyReadsSayWhy(t *testing.T) {
 	srv, _ := serve(t, `{"status":"success","code":200,"message":"ok","data":[]}`)
-	for item, args := range map[string][]string{"coverage": nil, "insights": {"--dimension", "brand"}} {
-		out, errOut, err := runSkus(t, item, srv.URL, args...)
+	for _, tc := range []struct {
+		item string
+		args []string
+		want []string
+	}{
+		{"coverage", nil, []string{"no results", "SKUs dataset", "first daily update"}},
+		{"insights", []string{"--dimension", "brand"},
+			[]string{"no results", "SKUs dataset", "first daily update", "10 home networks", "10 orders", "filter"}},
+	} {
+		out, errOut, err := runSkus(t, tc.item, srv.URL, tc.args...)
 		if err != nil || out != "" {
-			t.Errorf("%s: out=%q err=%v", item, out, err)
+			t.Errorf("%s: out=%q err=%v", tc.item, out, err)
 		}
-		for _, w := range []string{"no results", "SKUs dataset", "first daily update"} {
+		for _, w := range tc.want {
 			if !strings.Contains(errOut, w) {
-				t.Errorf("%s: stderr omits %q: %q", item, w, errOut)
+				t.Errorf("%s: stderr omits %q: %q", tc.item, w, errOut)
 			}
 		}
 	}
@@ -270,24 +323,32 @@ func TestSkusCoverageEmptyAndNullFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := strings.Fields(strings.Split(strings.TrimRight(out, "\n"), "\n")[1])
-	want := "2026-02-01,2026-11-12,2026-11-10,-,0,0,2026-11-13T04:10:00Z"
-	if strings.Join(row, ",") != want {
-		t.Errorf("row = %v, want %s", row, want)
+	var got []string
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		got = append(got, strings.Join(strings.Fields(line), "="))
+	}
+	want := "first_day=2026-02-01,newest_purchase_day=2026-11-12,settled_day=2026-11-10," +
+		"newest_device_day=-,empty_ranges=0,thin_days=0,computed_at=2026-11-13T04:10:00Z"
+	if strings.Join(got, ",") != want {
+		t.Errorf("lines = %v, want %s", got, want)
 	}
 }
 
 func TestSkusHelpSaysWhatTheFiguresMean(t *testing.T) {
 	ins := findEndpoint(t, "skus", "insights").command("skus").Long
 	for _, w := range []string{"fewer than 10 home networks", "more than 100%", "0.1707 = 17.07%",
-		"USD", "ALL", "one level under", "approximate", "panel"} {
+		"USD", "ALL", "one level under", "approximate", "panel", "--quiet prints the values",
+		"no row passes the filters"} {
 		if !strings.Contains(ins, w) {
 			t.Errorf("insights help omits %q", w)
 		}
 	}
+	if strings.Contains(ins, "An empty list means an account without the SKUs dataset, or no daily update yet") {
+		t.Error("insights help blames an empty list on the dataset alone")
+	}
 	cov := findEndpoint(t, "skus", "coverage").command("skus").Long
 	for _, w := range []string{"two days before", "about three days", "no purchases", "small part",
-		"purchase-click day", "no search or paging"} {
+		"purchase-click day", "no search or paging", "one field per line"} {
 		if !strings.Contains(cov, w) {
 			t.Errorf("coverage help omits %q", w)
 		}

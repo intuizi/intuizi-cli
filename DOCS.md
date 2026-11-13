@@ -1414,13 +1414,16 @@ rather than followed.
 
 ## Reference catalogs
 
-Every id above has a lookup. All reads are GETs with no side effects, take
+Every id above has a lookup. All reads are GETs with no side effects. Most take
 `--search` for a case-insensitive contains match, and honour both output flags:
 `--quiet` for bare values one per line, `--json` for the full envelope when the
-label is needed as well as the value. The one exception is
-`profile-attributes recency-limits`: it takes no parameters, and its rows are
-`{start_limit, end_limit}` with nothing `--quiet` could print, so `--quiet` is
-refused there (exit 2) - read it with `--json`.
+label is needed as well as the value. Three reads take no `--search`:
+`profile-attributes recency-limits`, `skus coverage` and `skus insights`.
+Two reads refuse `--quiet` (exit 2), because their rows carry no value to print:
+`profile-attributes recency-limits` (rows are `{start_limit, end_limit}`) and
+`skus coverage`. Read them with `--json`. `skus insights` takes `--quiet`
+(it prints the values, one per line), except with `--dimension total`, which is
+refused because its one row is the total.
 
 Most catalogs match `--search` on the label. The demographics `genders`,
 `marital-statuses` and `incomes` match the code in the `value` column instead,
@@ -1511,8 +1514,8 @@ dataset's `--device-type`, `--device-os`, `--device-make` and
 and any other value is refused before anything is sent. `--search` is a
 contains match, and a read answers at most 500 rows, not paged.
 
-`skus coverage` prints one row for the SKUs dataset, updated once a day:
-`first_day`, `newest_purchase_day`, `settled_day`, `newest_device_day`,
+`skus coverage` prints one record for the SKUs dataset, one field per line,
+updated once a day: `first_day`, `newest_purchase_day`, `settled_day`, `newest_device_day`,
 `empty_ranges`, `thin_days` and `computed_at`.
 
 - `settled_day` is two days before `newest_purchase_day`. A purchase day
@@ -1529,7 +1532,17 @@ contains match, and a read answers at most 500 rows, not paged.
 A period with empty or thin days, or one that ends after `settled_day` or
 `newest_device_day`, holds fewer purchases or fewer devices. The read takes
 no search or paging and no flags of its own; the global flags work, except
-`--quiet`, because the row has no id.
+`--quiet`, because the record has no id.
+
+```text
+first_day            2026-01-05
+newest_purchase_day  2026-11-12
+settled_day          2026-11-10
+newest_device_day    -
+empty_ranges         2
+thin_days            3
+computed_at          2026-11-13T04:10:00Z
+```
 
 `skus insights --dimension brand|merchant|category|total` ranks what the
 dataset holds over the last `--period` days (`7`, `30` or `90`, default 30),
@@ -1547,7 +1560,8 @@ The table shows `value` (the key, or the category id), `text`, `orders`,
 `devices` (devices seen on those home networks) and `share_of_orders`, with
 `-` where there is no number. A category row also ends with its `path`.
 `share_of_orders` is a fraction of the total row of the same slice: `0.1707`
-is 17.07%. `--json` adds `as_of` and `period_days`.
+is 17.07%. `--json` adds `as_of` and `period_days`. `--quiet` prints the
+values, one per line (not with `--dimension total`).
 
 Read the figures with care:
 
@@ -1559,7 +1573,10 @@ Read the figures with care:
   up to more than 100%.
 
 Both reads are empty for an account without the SKUs dataset, and for any
-account before the first daily update.
+account before the first daily update. `insights` is also empty when no row
+passes the filters: rows with fewer than 10 home networks or fewer than 10
+orders are never listed, so a narrow `--merchant` or `--category` can read
+empty on any account.
 
 An account without the SKUs dataset reads every SKUs catalog empty.
 
@@ -1613,9 +1630,10 @@ Both are global and apply to reads, creates and deletes alike, with these
 exceptions:
 
 - `auth`, `version` and `completion` print text and ignore either flag.
-- `usage`, `cohorts preview`, `activations preview` and `reference
-  profile-attributes recency-limits` return no ids, so they refuse `--quiet`;
-  use `--json`.
+- `usage`, `cohorts preview`, `activations preview`, `reference
+  profile-attributes recency-limits` and `reference skus coverage` return no
+  ids, so they refuse `--quiet`; use `--json`. `reference skus insights`
+  prints its values under `--quiet`, but refuses it with `--dimension total`.
 - `uploads put` prints the bare upload reference, which is also what
   `--quiet` prints; `--json` prints the reservation envelope.
 - Deletes, `audiences lookalike cancel`, and `schedules activate` and

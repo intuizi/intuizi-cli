@@ -180,7 +180,7 @@ func (e endpoint) command(group string) *cobra.Command {
 			}
 		}
 
-		return runReferenceTable(cmd, path, query, e.table, e.empty)
+		return runReferenceTable(cmd, path, query, e.table, e.detail, e.empty)
 	}
 
 	return cmd
@@ -231,12 +231,15 @@ func flagName(param string) string {
 // One request, one page. The biggest catalogs run to thousands of pages against
 // a 120 requests/min budget, so callers ask for more with --page.
 func runReference(cmd *cobra.Command, path string, query url.Values) error {
-	return runReferenceTable(cmd, path, query, nil, "")
+	return runReferenceTable(cmd, path, query, nil, nil, "")
 }
 
 // runReferenceTable is runReference with an optional shaper for the default
-// table, for the reads whose rows the generic table prints badly.
-func runReferenceTable(cmd *cobra.Command, path string, query url.Values, table func([]output.Record) ([]output.Record, []string), empty string) error {
+// table, or a detail view for a single record, for the reads whose rows the
+// generic table prints badly.
+func runReferenceTable(cmd *cobra.Command, path string, query url.Values,
+	table func([]output.Record) ([]output.Record, []string),
+	detail func([]output.Record) (output.Record, []string), empty string) error {
 	c, err := client()
 	if err != nil {
 		return err
@@ -270,6 +273,15 @@ func runReferenceTable(cmd *cobra.Command, path string, query url.Values, table 
 	// truncates silently.
 	if quietOutput {
 		if err := output.IDs(cmd.OutOrStdout(), items); err != nil {
+			return err
+		}
+		output.Footer(cmd.ErrOrStderr(), pg)
+		return nil
+	}
+
+	if detail != nil {
+		rec, lead := detail(items)
+		if err := output.Detail(cmd.OutOrStdout(), rec, lead); err != nil {
 			return err
 		}
 		output.Footer(cmd.ErrOrStderr(), pg)
