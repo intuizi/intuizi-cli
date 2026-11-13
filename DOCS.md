@@ -1445,7 +1445,7 @@ not the text label (`--search F`, not `female`, for genders, and `M`, not
 - **profile-attributes** - categories, keys, values, recency-limits
 - **deidentified** - fields
 - **connectivity** - networks
-- **skus** - merchants, brands, categories, device-values
+- **skus** - merchants, brands, categories, device-values, coverage, insights
 - **cohorts** - list
 
 Several catalogs cascade: a child read takes values from the level above to
@@ -1511,6 +1511,23 @@ dataset's `--device-type`, `--device-os`, `--device-make` and
 and any other value is refused before anything is sent. `--search` is a
 contains match, and a read answers at most 500 rows, not paged.
 
+`skus coverage` prints one row for the SKUs dataset: `first_day`,
+`newest_purchase_day`, `settled_day`, `newest_device_day` (`-` while there is
+none), the number of `empty_ranges` (ranges of days without purchases) and of
+`thin_days`, and `computed_at`. The lists themselves are in `--json`, as
+`empty_days` (a list of `[from, to]` pairs) and `thin_days`. It takes no flags.
+
+`skus insights --dimension brand|merchant|category|total` reads spend, orders
+and networks, one row per brand, merchant or category (one row for `total`). The table shows `value` (the key or id), `text`, `orders`,
+`spend`, `avg_order_value`, `networks`, `devices` and `share_of_orders`, with
+`-` where there is no number; a category row also shows its `path`. `--json`
+adds `as_of` and `period_days`. Narrow it with `--period 7|30|90` (default
+30), `--category <id>` and `--merchant <key>` (not with `--dimension
+merchant`), and `--limit 1..50` (default 20). Send keys and ids, not names:
+find them with `skus categories` and `skus merchants`. Any value outside
+these is refused before anything is sent. `networks` counts home networks and
+is not added up across rows.
+
 An account without the SKUs dataset reads every SKUs catalog empty.
 
 ```bash
@@ -1520,6 +1537,9 @@ intuizi reference skus brands --categories 3530 --per-page 25
 intuizi reference skus categories --search "dog food"
 intuizi reference skus categories --parent-id 3530
 intuizi reference skus device-values --field os
+intuizi reference skus coverage
+intuizi reference skus insights --dimension brand --period 7 --limit 10
+intuizi reference skus insights --dimension category --merchant outdoor-shop
 ```
 
 `datastreams` and `datastream-visualizations` are different catalogs.
