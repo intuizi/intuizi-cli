@@ -68,6 +68,8 @@ Read the figures with care:
   - An order with two brands counts under both, so shares of brands can add
     up to more than 100%.
 
+At most 50 rows are kept per slice, so --limit tops out at 50.
+
 Pass keys and ids, not names: get them from "reference skus categories" and
 "reference skus merchants". --merchant is not taken with --dimension
 merchant. An empty list means an account without the SKUs dataset, or no
