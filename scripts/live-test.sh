@@ -301,6 +301,8 @@ if [ -n "$SKUBRAND" ]; then
   if [ -n "$SKUCAT" ] && [ -n "$SKUOS" ]; then
     step 0 "audiences create --type skus --category --device-os --dry-run" I audiences create --type skus --category "$SKUCAT" --device-os "$SKUOS" --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
   fi
+  step 0 "audiences create --type skus --top-spenders 10 --dry-run" I audiences create --type skus --brand "$SKUBRAND" --top-spenders 10 --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
+  step 2 "audiences create --type skus --top-spenders 7 is refused" I audiences create --type skus --brand "$SKUBRAND" --top-spenders 7 --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
 fi
 step 2 "audiences create --type skus --device-os \"\" is refused" I audiences create --type skus --brand dove --device-os "" --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
 step 2 "audiences create --type skus --provider is refused" I audiences create --type skus --brand dove --provider x --start-date "$START" --end-date "$END" --name "cli-live-skus $STAMP" --dry-run
