@@ -978,8 +978,8 @@ cannot be answered as sent - most often dates outside the dataset's data
 coverage - and shows its code and reason as `blocked`; `failed` explains
 itself in `status_message`. Both are final and end a wait with exit 1.
 
-`recipe_hash` is computed from the `operator` and `datasets` only, so renaming
-does not change it. An audience created from the same body carries the same
+`recipe_hash` is computed from the `datasets` and their `operator` or
+`expression` only, so renaming the audience or a group does not change it. An audience created from the same body carries the same
 `recipe_hash` on `audiences show <id> --json`, which is the proof it is the
 audience that was estimated. The request carries an Idempotency-Key like a
 create: a retry after a 429 reuses it, and when an estimate gets no response
@@ -1697,8 +1697,8 @@ keys are not checked by name: a misspelt top-level block such as
 `normalized_payload` on an audience is the canonical copy of the `name`,
 `operator` and `datasets` it was created from. The audience's `recipe_hash`
 (`.data[0].recipe_hash`, beside `normalized_payload` rather than inside it) is
-computed from the `operator` and `datasets` only, so the name does not change
-it. `normalized_payload` echoes what was sent, so a per-dataset filter, such as the brand or the
+computed from the `datasets` and their `operator` or `expression` only, so the
+name does not change it. `normalized_payload` echoes what was sent, so a per-dataset filter, such as the brand or the
 country, that is missing from it was not sent:
 
 ```bash

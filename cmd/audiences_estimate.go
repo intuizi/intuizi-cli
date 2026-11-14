@@ -246,7 +246,8 @@ exit non-zero with the reason. A wait that times out or gives up leaves the
 estimate running and names the 'intuizi audiences estimate show <id> --wait'
 that resumes it.
 
-recipe_hash is computed from the operator and datasets only, not the name.
+recipe_hash is computed from the datasets and their operator or expression
+only, not the name or a group's name.
 An audience created from the same body carries the same recipe_hash
 ('intuizi audiences show <id> --json'), which proves it is the audience that
 was estimated.
